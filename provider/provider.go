@@ -12,6 +12,8 @@ import (
 // Provider submits requests to a configured model server. Implementations may be called concurrently by
 // different agents. A response contains provider output, not lifecycle decisions.
 type Provider interface {
+	// Submit may return Usage alongside an error. Callers may record that usage,
+	// but must not consume Content or ToolCalls when err is non-nil.
 	Submit(context.Context, Request) (Response, error)
 }
 
@@ -34,6 +36,7 @@ type Message struct {
 type Response struct {
 	Content   string
 	ToolCalls []ToolCall
+	Usage     *Usage
 }
 
 type ToolCall struct {

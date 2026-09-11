@@ -20,6 +20,7 @@ type transcriptView struct {
 	inspection conversation.AgentInspection
 	viewport   viewport.Model
 	raw        bool
+	copying    bool
 	err        string
 	mainOffset int
 }
@@ -35,11 +36,12 @@ func (m *model) openTranscript(id message.ActorID) {
 		return
 	}
 	raw := m.transcript != nil && m.transcript.raw
+	copying := m.transcript != nil && m.transcript.copying
 	mainOffset := m.viewport.YOffset
 	if m.transcript != nil {
 		mainOffset = m.transcript.mainOffset
 	}
-	m.transcript = &transcriptView{inspection: in, viewport: viewport.New(max(1, m.width), max(1, m.height-4)), raw: raw, mainOffset: mainOffset}
+	m.transcript = &transcriptView{inspection: in, viewport: viewport.New(max(1, m.width), max(1, m.height-4)), raw: raw, copying: copying, mainOffset: mainOffset}
 	m.resizeAgentTranscript()
 	m.transcript.viewport.GotoBottom()
 }
@@ -172,9 +174,18 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "ctrl+c", "ctrl+d":
 		return m.quit()
+	case "f2":
+		v.copying = !v.copying
+		if v.copying {
+			return m, tea.DisableMouse
+		}
+		return m, tea.EnableMouseCellMotion
 	case "esc":
 		m.viewport.SetYOffset(v.mainOffset)
 		m.transcript = nil
+		if v.copying {
+			return m, tea.EnableMouseCellMotion
+		}
 		return m, nil
 	case "r":
 		m.openTranscript(v.inspection.ID)
@@ -235,5 +246,9 @@ func (m *model) transcriptDisplay() string {
 	if m.height < 4 {
 		return line(title)
 	}
-	return strings.Join([]string{lipgloss.NewStyle().Bold(true).Render(line(title)), line(subtitle), v.viewport.View(), line("PgUp/PgDn scroll · [/] agent · r refresh · v raw/formatted · Esc back")}, "\n")
+	help := "Scroll / PgUp/PgDn · [/] agent · r refresh · v raw · F2 copy · Esc back"
+	if v.copying {
+		help = "COPY MODE · drag to copy · F2 resume · Esc back"
+	}
+	return strings.Join([]string{lipgloss.NewStyle().Bold(true).Render(line(title)), line(subtitle), v.viewport.View(), line(help)}, "\n")
 }

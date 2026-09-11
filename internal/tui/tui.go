@@ -44,7 +44,7 @@ func Run(ctx context.Context, session Session, options Options) error {
 	listenCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := newModel(listenCtx, cancel, session, options)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	_, err := p.Run()
 	if ctx.Err() != nil {
 		return nil
@@ -96,15 +96,17 @@ type model struct {
 }
 
 var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	userStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "111"})
+	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "242", Dark: "245"})
+	userStyle  = lipgloss.NewStyle().Bold(true)
+	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"})
 )
 
 func newModel(ctx context.Context, cancel context.CancelFunc, session Session, options Options) *model {
 	input := textinput.New()
-	input.Prompt = "> "
+	input.Prompt = "› "
+	input.PromptStyle = titleStyle
+	input.PlaceholderStyle = dimStyle
 	input.Placeholder = "Send a message…"
 	input.CharLimit = 0
 	input.Focus()
@@ -115,9 +117,8 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(stateStyle)),
 		now:     time.Now, activeTools: make(map[toolKey]agent.ToolActivity),
 	}
-	m.viewport.MouseWheelEnabled = false
 	m.resize(80, 24)
-	m.add("Welcome", "Developer console: tool timeline, delegation, and agent messages.\nType while agents work. Drag to select text; use your terminal Copy shortcut.\nF2 freezes the display for copying. /help lists commands.", true)
+	m.add("Welcome", "Send a message to get started. You can keep typing while agents work.\nScroll to browse history · F2 to select and copy · /help for commands", true)
 	return m
 }
 
@@ -154,6 +155,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.observe(msg.event)
 		return m, m.listen()
+	case tea.MouseMsg:
+		if m.selecting {
+			return m, nil
+		}
+		if m.transcript != nil {
+			if m.transcript.copying {
+				return m, nil
+			}
+			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp && !msg.Shift && m.transcript.viewport.AtTop() {
+				m.earlierTranscript()
+			}
+			var cmd tea.Cmd
+			m.transcript.viewport, cmd = m.transcript.viewport.Update(msg)
+			return m, cmd
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	case tea.KeyMsg:
 		if m.transcript != nil {
 			return m.transcriptKey(msg)
@@ -163,7 +182,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		case "f2":
 			m.toggleSelection()
-			return m, nil
+			if m.selecting {
+				return m, tea.DisableMouse
+			}
+			return m, tea.EnableMouseCellMotion
 		case "enter":
 			if m.selecting {
 				return m, nil
@@ -217,7 +239,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agents and their status\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nDrag to select; copy using your terminal shortcut (Cmd+C or Ctrl+Shift+C).\nF2 freezes display updates for copying; agents keep running.\nUse PgUp/PgDn to scroll; the mouse is reserved for text selection.", true)
+			m.add("Help", "/agents  Show agents and their status\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nF2 freezes the display and releases the mouse for selection; agents keep running.\nDrag to select, then use your terminal Copy shortcut. F2 resumes scrolling.", true)
 		case "/clear":
 			m.entries = nil
 			m.renderTranscript(true)
@@ -422,9 +444,9 @@ func (m *model) quit() (tea.Model, tea.Cmd) {
 
 func (m *model) resize(width, height int) {
 	m.width, m.height = max(1, width), max(1, height)
-	m.input.Width = max(1, m.width-3)
-	m.viewport.Width = m.width
-	m.viewport.Height = max(1, m.height-7)
+	m.input.Width = max(1, m.width-5)
+	m.viewport.Width = max(1, m.width-2)
+	m.viewport.Height = max(1, m.height-6)
 	m.renderTranscript(false)
 	if m.transcript != nil {
 		m.resizeAgentTranscript()
@@ -478,11 +500,11 @@ func (m *model) renderTranscript(follow bool) {
 			style = stateStyle
 		}
 		body := m.renderBody(e)
-		heading := dimStyle.Render(e.at.Format("15:04:05")) + "  " + style.Render(e.label)
+		heading := style.Render(e.label) + "  " + dimStyle.Render(e.at.Format("15:04"))
 		if e.meta != "" {
 			heading += "  " + dimStyle.Render(e.meta)
 		}
-		heading = lipgloss.NewStyle().Width(max(1, m.viewport.Width-1)).Render(heading)
+		heading = ansi.Truncate(heading, max(1, m.viewport.Width-1), "…")
 		transcript.WriteString(heading + "\n" + body + "\n")
 	}
 	m.viewport.SetContent(strings.TrimSuffix(transcript.String(), "\n"))
@@ -537,17 +559,27 @@ func (m *model) renderView() string {
 	if m.quitting {
 		return ""
 	}
-	line := func(s string) string { return ansi.Truncate(s, m.width, "") }
+	line := func(s string) string { return ansi.Truncate(" "+s, m.width, "") }
 	if m.height < 8 {
 		return line(m.input.View())
 	}
 	return strings.Join([]string{
-		line(titleStyle.Render("strap / debug") + "  " + safeText(m.options.Model)),
-		line(dimStyle.Render(safeText(m.options.Endpoint))),
-		"", m.viewport.View(), "", line(m.input.View()),
+		line(m.header()),
+		"", lipgloss.NewStyle().PaddingLeft(min(1, m.width-1)).Render(m.viewport.View()),
+		line(dimStyle.Render(strings.Repeat("─", max(1, m.width-2)))), line(m.input.View()),
 		line(m.activityLine()),
 		line(dimStyle.Render(m.footer())),
 	}, "\n")
+}
+
+func (m *model) header() string {
+	left := titleStyle.Render("strap") + "  " + safeText(m.options.Model)
+	right := dimStyle.Render(safeText(m.options.Endpoint))
+	gap := m.width - 2 - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap >= 4 {
+		return left + strings.Repeat(" ", gap) + right
+	}
+	return left
 }
 
 // Remote text is content, not terminal control sequences.
@@ -563,7 +595,10 @@ func safeText(s string) string {
 
 func (m *model) footer() string {
 	if m.selecting {
-		return "DISPLAY FROZEN · drag to select/copy · PgUp/PgDn scroll · F2 resume"
+		return "DISPLAY FROZEN · drag to copy · PgUp/PgDn scroll · F2 resume"
 	}
-	return "Enter send · ↑/↓ history · PgUp/PgDn scroll · F2 freeze/copy · /help"
+	if !m.viewport.AtBottom() {
+		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
+	}
+	return "Enter send · Scroll history · ↑/↓ recall · F2 copy · /help"
 }

@@ -3,16 +3,14 @@
 package chatcompletions
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/provider/internal/chatwire"
 )
 
 type Config struct {
@@ -26,35 +24,21 @@ type Config struct {
 
 // Client is immutable after construction and may be shared by concurrent agents.
 type Client struct {
-	endpoint string
-	model    string
-	http     *http.Client
+	model string
+	wire  *chatwire.Client
 }
 
 var _ provider.Provider = (*Client)(nil)
 
 func New(config Config) (*Client, error) {
-	u, err := url.Parse(config.BaseURL)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, fmt.Errorf("chatcompletions: base URL must be an absolute HTTP(S) URL")
-	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("chatcompletions: base URL must not contain credentials, query, or fragment")
+	wire, err := chatwire.New(config.BaseURL, config.HTTPClient)
+	if err != nil {
+		return nil, fmt.Errorf("chatcompletions: %w", err)
 	}
 	if strings.TrimSpace(config.Model) == "" {
 		return nil, fmt.Errorf("chatcompletions: model is required")
 	}
-	u.Path = strings.TrimRight(u.Path, "/")
-	if u.Path == "" {
-		u.Path = "/v1"
-	}
-	u.Path += "/chat/completions"
-	u.RawPath = ""
-	client := config.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &Client{endpoint: u.String(), model: config.Model, http: client}, nil
+	return &Client{model: config.Model, wire: wire}, nil
 }
 
 // HTTPError preserves the status and a bounded server diagnostic. No request is
@@ -68,32 +52,18 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("chatcompletions: HTTP %d: %s", e.StatusCode, e.Body)
 }
 
-func (c *Client) Submit(ctx context.Context, request provider.Request) (provider.Response, error) {
-	wire, err := encode(c.model, request)
+func (c *Client) Submit(ctx context.Context, input provider.Request) (provider.Response, error) {
+	wire, err := chatwire.Encode(c.model, input)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("chatcompletions: encode content: %w", err)
 	}
-	data, err := json.Marshal(wire)
+	result, err := c.wire.Submit(ctx, wire)
 	if err != nil {
-		return provider.Response{}, fmt.Errorf("chatcompletions: encode request: %w", err)
+		var responseError *chatwire.HTTPError
+		if errors.As(err, &responseError) {
+			return provider.Response{}, &HTTPError{StatusCode: responseError.StatusCode, Body: responseError.Body}
+		}
+		return result, fmt.Errorf("chatcompletions: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(data))
-	if err != nil {
-		return provider.Response{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("chatcompletions: submit: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return provider.Response{}, &HTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-	}
-	var result completion
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return provider.Response{}, fmt.Errorf("chatcompletions: decode response: %w", err)
-	}
-	return decode(result)
+	return result, nil
 }

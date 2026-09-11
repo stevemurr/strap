@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	toolStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	routeStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	stateStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+	toolStyle  = dimStyle
+	routeStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "30", Dark: "116"})
+	stateStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "136", Dark: "179"})
 )
 
 type toolKey struct {

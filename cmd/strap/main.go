@@ -18,7 +18,6 @@ import (
 	"github.com/stevemurr/strap/internal/tui"
 	"github.com/stevemurr/strap/internal/workflow"
 	"github.com/stevemurr/strap/message"
-	"github.com/stevemurr/strap/provider/chatcompletions"
 	"github.com/stevemurr/strap/tool"
 )
 
@@ -29,6 +28,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	model := flags.String("model", "qwen3.6", "Model served by the local endpoint")
 	timeout := flags.Duration("timeout", 60*time.Minute, "Timeout for each model HTTP request")
 	dir := flags.String("C", ".", "Working directory for shell and file tools")
+	modelOptions := modelFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -41,9 +41,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	if *timeout <= 0 {
 		return fmt.Errorf("timeout must be positive")
 	}
-	p, err := chatcompletions.New(chatcompletions.Config{
-		BaseURL: *baseURL, Model: *model, HTTPClient: &http.Client{Timeout: *timeout},
-	})
+	p, err := modelOptions.newProvider(*baseURL, *model, &http.Client{Timeout: *timeout})
 	if err != nil {
 		return err
 	}

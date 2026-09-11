@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -131,42 +132,83 @@ func (t *composedTool) snapshot() preparedTool {
 	return copy
 }
 
-// Some tool-call servers use only top-level properties when converting model
-// output into JSON argument values. Repeat common field types there so arrays
-// and numbers survive that conversion. These are redundant type hints, derived
-// from the exact branches: oneOf still enforces every required/forbidden field
-// and constraint. Differing types receive no hint. Never merge branch rules.
+// Some tool-call servers read top-level properties without traversing oneOf.
+// Include nested property/item hints too, so steps and scopes retain their shape.
+// Hints must accept every branch; the original oneOf remains authoritative.
 func compositionSchema(branches []json.RawMessage) (json.RawMessage, error) {
-	types := map[string]map[string]bool{}
-	for _, raw := range branches {
+	hints, err := compositionHints(branches)
+	if err != nil {
+		return nil, err
+	}
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal(hints, &schema); err != nil {
+		return nil, err
+	}
+	schema["oneOf"], err = json.Marshal(branches)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(schema)
+}
+
+func compositionHints(alternatives []json.RawMessage) (json.RawMessage, error) {
+	if len(alternatives) == 0 {
+		return json.RawMessage(`{}`), nil
+	}
+	identical := true
+	for _, raw := range alternatives[1:] {
+		identical = identical && bytes.Equal(raw, alternatives[0])
+	}
+	if identical {
+		return alternatives[0], nil
+	}
+	kind := ""
+	properties := map[string][]json.RawMessage{}
+	items := []json.RawMessage{}
+	for i, raw := range alternatives {
 		var schema struct {
-			Properties map[string]struct {
-				Type string `json:"type"`
-			} `json:"properties"`
+			Type       string                     `json:"type"`
+			Properties map[string]json.RawMessage `json:"properties"`
+			Items      json.RawMessage            `json:"items"`
 		}
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			return nil, err
 		}
+		if i == 0 {
+			kind = schema.Type
+		}
+		// An unconstrained hint must stay unconstrained in nested compositions.
+		if kind == "" || schema.Type != kind {
+			return json.RawMessage(`{}`), nil
+		}
 		for name, property := range schema.Properties {
-			if types[name] == nil {
-				types[name] = map[string]bool{}
-			}
-			types[name][property.Type] = true
+			properties[name] = append(properties[name], property)
 		}
+		item := schema.Items
+		if len(item) == 0 {
+			item = json.RawMessage(`{}`)
+		}
+		items = append(items, item)
 	}
-	hints := map[string]any{}
-	for name, choices := range types {
-		// Retain mixed-type field names with an unconstrained hint so nested
-		// compositions cannot mistake an omitted hint for an absent field.
-		hints[name] = map[string]any{}
-		if len(choices) != 1 {
-			continue
-		}
-		for kind := range choices {
-			if kind != "" {
-				hints[name] = map[string]any{"type": kind}
+	hint := map[string]any{"type": kind}
+	if kind == "object" {
+		fields := map[string]json.RawMessage{}
+		for name, choices := range properties {
+			field, err := compositionHints(choices)
+			if err != nil {
+				return nil, err
 			}
+			fields[name] = field
 		}
+		// Do not merge required fields or additionalProperties across branches.
+		hint["properties"] = fields
 	}
-	return json.Marshal(map[string]any{"type": "object", "properties": hints, "oneOf": branches})
+	if kind == "array" {
+		item, err := compositionHints(items)
+		if err != nil {
+			return nil, err
+		}
+		hint["items"] = item
+	}
+	return json.Marshal(hint)
 }

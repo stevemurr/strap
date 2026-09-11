@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"strings"
 
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
@@ -29,7 +30,9 @@ type editPlanArgs struct {
 // progress operations. Nil callbacks omit that capability from the tool schema.
 func UpdatePlan(plan Handler[work.PlanUpdate], progress Handler[work.ProgressUpdate]) Tool {
 	branches := []Tool{}
+	guidance := []string{"Use exactly one operation. Send steps as a JSON array of objects and expected_revision as a JSON integer, never quoted strings. Omit unused fields; do not send null or copy whole step snapshots."}
 	if plan != nil {
+		guidance = append(guidance, `Create: {"title":"Plan title","steps":[{"title":"Step title"}]}. Omit IDs, revision, status and note; new steps start pending. Edit: {"plan_id":"<plan_id>","expected_revision":1,"steps":[{"step_id":"<step_id>","title":"Revised title"}]}. Use the revision from get_plan, not a work revision. Step edits allow only step_id, title and acceptance_criteria (an array of strings). New steps omit step_id. Omit unchanged steps, especially reserved or completed steps. order must list every step ID exactly once; to reorder newly added steps, first read their issued IDs from the update result. cancel lists step IDs.`)
 		branches = append(branches, Func[createPlanArgs]{
 			Spec: Definition[createPlanArgs]{
 				Name:        "create_plan",
@@ -58,6 +61,7 @@ func UpdatePlan(plan Handler[work.PlanUpdate], progress Handler[work.ProgressUpd
 		})
 	}
 	if progress != nil {
+		guidance = append(guidance, `Progress: {"work_id":"<work_id>","expected_revision":1,"steps":[{"step_id":"<step_id>","status":"in_progress"}]}. Use work.revision from get_work, not the plan revision or assigned_at_revision. Each successful update returns a new work revision; use that revision for the next mutation, including submit_work. Each step allows step_id, optional status and optional note; never title. Status is pending, in_progress, blocked or ready_for_review. Top-level note and blocker update the work; an empty blocker clears it. Only audits complete work.`)
 		branches = append(branches, Func[work.ProgressUpdate]{
 			Spec: Definition[work.ProgressUpdate]{
 				Name:        "update_progress",
@@ -67,7 +71,7 @@ func UpdatePlan(plan Handler[work.PlanUpdate], progress Handler[work.ProgressUpd
 			Invoke: progress,
 		})
 	}
-	return compose(provider.ToolDefinition{Name: "update_plan", Description: "Update a plan using exactly one of the available operations. Omitted fields remain unchanged. Only audits complete work."}, branches...)
+	return compose(provider.ToolDefinition{Name: "update_plan", Description: strings.Join(guidance, " ")}, branches...)
 }
 
 // UpdateWork exposes work-level notes/blockers without implementation step fields.
@@ -191,7 +195,7 @@ func GetWork(handle func(context.Context, Call, work.ID) (Result, error)) Tool {
 	return Func[args]{
 		Spec: Definition[args]{
 			Name:        "get_work",
-			Description: "Read current work, scoped steps, submission and repair findings.",
+			Description: "Read current work, scoped steps, submission and repair findings. Use work.revision as expected_revision for work mutations; assigned_at_revision is only the assignment binding. Returned steps are snapshots, not update patches.",
 			Parameters:  parameters[args](MinLength("work_id", 1)),
 		},
 		Invoke: func(ctx context.Context, c Call, a args) (Result, error) { return handle(ctx, c, a.ID) },
@@ -204,7 +208,7 @@ func GetPlan(handle func(context.Context, Call, work.PlanID) (Result, error)) To
 	return Func[args]{
 		Spec: Definition[args]{
 			Name:        "get_plan",
-			Description: "Read a plan; delegates receive their authorized subset.",
+			Description: "Read a plan; delegates receive their authorized subset. Use revision as expected_revision for structural plan edits only. Work progress uses the separate work.revision from get_work. Returned steps include read-only status; do not copy whole snapshots into structural edits.",
 			Parameters:  parameters[args](MinLength("plan_id", 1)),
 		},
 		Invoke: func(ctx context.Context, c Call, a args) (Result, error) { return handle(ctx, c, a.ID) },

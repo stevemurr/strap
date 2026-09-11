@@ -34,21 +34,24 @@ type TranscriptPage struct {
 type thread struct {
 	mu       sync.RWMutex
 	messages []provider.Message
+	revision uint64
 }
 
 func (t *thread) append(m provider.Message) {
 	owned := provider.CopyMessages([]provider.Message{m})[0]
 	t.mu.Lock()
 	t.messages = append(t.messages, owned)
+	t.revision++
 	t.mu.Unlock()
 }
 
-func (t *thread) requestMessages() []provider.Message {
+func (t *thread) requestMessages() ([]provider.Message, uint64) {
 	t.mu.RLock()
 	// Copy the outer slice under the lock; immutable payloads can be cloned outside.
 	messages := append([]provider.Message(nil), t.messages...)
+	revision := t.revision
 	t.mu.RUnlock()
-	return provider.CopyMessages(messages)
+	return provider.CopyMessages(messages), revision
 }
 
 func (t *thread) snapshot(q TranscriptQuery) (TranscriptPage, error) {

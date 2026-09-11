@@ -105,6 +105,7 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 		Outbox: sender{controller: c, actor: id}, OnConsumed: c.acknowledge,
 		OnState: func(state agent.State) { c.emit(AgentStateChanged{Agent: id, State: state}) },
 		OnTool:  func(activity agent.ToolActivity) { c.emit(ToolEvent{Agent: id, Activity: activity}) },
+		OnUsage: func(observation agent.UsageObservation) { c.emit(UsageEvent{Agent: id, Observation: observation}) },
 	})
 	if err != nil {
 		cancel()
@@ -255,11 +256,12 @@ type InspectOptions struct {
 
 type AgentInspection struct {
 	AgentInfo
+	Usage      agent.UsageSnapshot   `json:"usage"`
 	Transcript *agent.TranscriptPage `json:"transcript,omitempty"`
 }
 
-// InspectAgent returns state and an optional independent transcript snapshot.
-// The two snapshots do not form an atomic execution checkpoint.
+// InspectAgent returns state, usage, and an optional independent transcript.
+// These snapshots do not form an atomic execution checkpoint.
 func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (AgentInspection, error) {
 	c.mu.Lock()
 	owned, ok := c.agents[id]
@@ -270,7 +272,7 @@ func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (A
 	info, runner := owned.info, owned.agent
 	c.mu.Unlock()
 	info.State = runner.State()
-	inspection := AgentInspection{AgentInfo: info}
+	inspection := AgentInspection{AgentInfo: info, Usage: runner.Usage()}
 	if options.Transcript != nil {
 		page, err := runner.Transcript(*options.Transcript)
 		if err != nil {

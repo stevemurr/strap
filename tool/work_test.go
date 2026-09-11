@@ -4,10 +4,111 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stevemurr/strap/work"
 )
+
+func TestPlanCompositionExposesNestedStepShapes(t *testing.T) {
+	op := UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil },
+		func(context.Context, Call, work.ProgressUpdate) (Result, error) { return Result{}, nil })
+	var schema struct {
+		Properties map[string]struct {
+			Type  string `json:"type"`
+			Items struct {
+				Type       string                     `json:"type"`
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
+		t.Fatal(err)
+	}
+	step := schema.Properties["steps"].Items
+	if step.Type != "object" || len(step.Required) != 0 {
+		t.Fatal("step hints must expose an object without merging branch requirements")
+	}
+	for _, field := range []string{"step_id", "title", "acceptance_criteria", "status", "note"} {
+		if len(step.Properties[field]) == 0 {
+			t.Fatalf("top-level steps.items hides %s", field)
+		}
+	}
+	var criteria struct {
+		Type  string `json:"type"`
+		Items struct {
+			Type string `json:"type"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(step.Properties["acceptance_criteria"], &criteria); err != nil {
+		t.Fatal(err)
+	}
+	if criteria.Type != "array" || criteria.Items.Type != "string" {
+		t.Fatal("nested criteria array lost its element type")
+	}
+}
+
+func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
+	store := work.New()
+	owner := UpdatePlan(func(_ context.Context, c Call, u work.PlanUpdate) (Result, error) {
+		p, err := store.UpdatePlan(c.Actor, u)
+		if err != nil {
+			return Result{}, err
+		}
+		return JSON(p)
+	}, nil)
+	worker := UpdatePlan(nil, func(_ context.Context, c Call, u work.ProgressUpdate) (Result, error) {
+		w, err := store.UpdateProgress(c.Actor, u)
+		if err != nil {
+			return Result{}, err
+		}
+		return JSON(w)
+	})
+	created, err := owner.Call(context.Background(), Call{Actor: "root", Arguments: []byte(`{"title":"Plan","steps":[{"title":"Implement"}]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p work.Plan
+	if err := json.Unmarshal([]byte(created.Content.Text()), &p); err != nil {
+		t.Fatal(err)
+	}
+	w, err := store.AssignWork("root", work.AssignRequest{Assignee: "worker", Task: "Implement", Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{p.Steps[0].ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, w.Revision, p.Steps[0].ID))
+	updated, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current work.Work
+	if err := json.Unmarshal([]byte(updated.Content.Text()), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Revision != w.Revision+1 {
+		t.Fatal("progress result did not expose next revision")
+	}
+	if _, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args}); !errors.Is(err, work.ErrConflict) {
+		t.Fatalf("reusing a revision must conflict: %v", err)
+	}
+	// Progress does not consume the owner's structural plan revision.
+	edit := []byte(fmt.Sprintf(`{"plan_id":%q,"expected_revision":%d,"title":"Updated plan"}`, p.ID, p.Revision))
+	if _, err := owner.Call(context.Background(), Call{Actor: "root", Arguments: edit}); err != nil {
+		t.Fatal(err)
+	}
+	submit := SubmitWork(func(_ context.Context, c Call, r work.SubmitRequest) (Result, error) {
+		submission, err := store.SubmitWork(c.Actor, r)
+		if err != nil {
+			return Result{}, err
+		}
+		return JSON(submission)
+	})
+	args = []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"summary":"Done"}`, current.ID, current.Revision))
+	if _, err := submit.Call(context.Background(), Call{Actor: "worker", Arguments: args}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestUpdatePlanSelectorsAndStrictPatches(t *testing.T) {
 	plans, progress := 0, 0

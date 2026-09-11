@@ -13,8 +13,40 @@ go run ./cmd/strap
 ```
 
 Select your server with `-model` and `-base-url`; `-timeout` limits each model
-request. See `go run ./cmd/strap -help` for the configured defaults.
-The server must support Chat Completions and tool calling.
+request. The CLI defaults to `-backend vllm` with the `qwen3.6-coding` preset.
+The server must support Chat Completions and tool calling. For a generic compatible
+server, use `-backend chatcompletions`, which sends no generation overrides.
+See `go run ./cmd/strap -help` for all options.
+
+The Qwen preset follows the [Qwen3.6-35B-A3B precise-coding guidance](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices):
+
+| Setting | Value |
+|---|---|
+| Temperature / top-p / top-k | `0.6` / `0.95` / `20` |
+| Min-p / presence penalty / repetition penalty | `0` / `0` / `1` |
+| Maximum output tokens | `32768` |
+| Thinking | Enabled |
+
+Explicit flags override individual preset values. Use `-preset none` to leave
+unspecified settings to the server, especially when selecting another model:
+
+```sh
+go run ./cmd/strap -temperature 0.4 -max-tokens 16384
+go run ./cmd/strap -model another-model -preset none -top-p 0.9
+```
+
+Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
+`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, and `-thinking=false`.
+Zero and false are explicit values, not omissions. Presets and generation overrides
+require the vLLM backend; the generic backend rejects them instead of ignoring them.
+The same immutable provider settings apply to the root, implementors, and auditors.
+Changing `-model` does not automatically change the selected preset.
+
+The vLLM adapter targets the generation fields exposed by vLLM 0.25.0, including
+`chat_template_kwargs.enable_thinking`. Thinking requires support in the served
+model's template. Settings are sent on every request; unsupported settings and
+output/context limits remain visible server errors, with no automatic retry or
+parameter substitution. Reasoning-history preservation is not implemented.
 
 Shell and file tools run in the current directory, or the directory selected with
 `-C /path/to/project`. The CLI enables them for the root and implementors. Auditors have a separate
@@ -47,19 +79,22 @@ An animated spinner tracks the current active period, including delegated work,
 with separate elapsed times for running tools. The last active duration remains
 visible when idle. Replies appear when complete; token streaming is not implemented.
 
-Drag with the mouse to select text and use your terminal’s Copy shortcut (usually
-Cmd-C on macOS or Ctrl-Shift-C on Linux). Mouse capture is disabled. Press F2 to
-freeze the display before selecting during active work; agents and event collection
-continue, and pressing F2 again reveals the collected output. Typing is suspended
-while the display is frozen, preserving your draft. Scroll with the keyboard.
+Scroll with the mouse wheel, trackpad, or Page Up / Page Down to browse conversation
+history. New output preserves your position while you read. The footer shows your
+position in history; Ctrl-End returns to the latest output and resumes following it.
+
+Press F2 to freeze the display and release mouse capture, then drag to select text
+and use your terminal’s Copy shortcut (usually Cmd-C on macOS or Ctrl-Shift-C on
+Linux). Agents and event collection continue. Press F2 again to resume. Typing is
+suspended while frozen, preserving your draft; keyboard scrolling remains available.
 
 | Key or command | Action |
 |---|---|
 | Up / Down | Recall input history |
-| Page Up / Page Down | Scroll the transcript |
+| Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |
 | Ctrl-Home / Ctrl-End | Jump to the beginning / end |
 | F2 | Freeze / resume display updates for copying |
-| Mouse drag + terminal Copy | Select and copy visible text |
+| F2, then mouse drag + terminal Copy | Select and copy visible text |
 | `/agents` | Show agents and their lifecycle state |
 | `/inspect [id]` | Inspect agent state; defaults to root |
 | `/transcript [id]` | Browse an agent’s actual conversation; defaults to root |
@@ -72,9 +107,9 @@ while the display is frozen, preserving your draft. Scroll with the keyboard.
 
 The transcript browser reads the same history used for model requests. It starts
 with the latest 20 messages, including system instructions, received messages,
-assistant text and tool calls, and tool results. Page Up above the loaded beginning
-fetches older messages. Use `[` / `]` to switch agents, `r` to refresh the snapshot,
-`v` to toggle formatted/raw fields, and Escape to return to the main conversation.
+assistant text and tool calls, and tool results. Scrolling up or pressing Page Up
+above the loaded beginning fetches older messages. Use `[` / `]` to switch agents,
+`r` to refresh the snapshot, `v` to toggle formatted/raw fields, and Escape to return to the main conversation.
 Raw fields preserve message envelopes and represent tool arguments as strings;
 images display metadata rather than binary data. Browsing does not send messages
 or call a model. Agents and the main conversation continue running in the background.
@@ -239,15 +274,25 @@ tools. Host controls are available for every agent, including a paused root.
 The controller's `PauseAgent`, `ResumeAgent`, and `StopAgent` return
 `(AgentInfo, error)`. `AgentInfo` contains `agent_id`, `parent`, and `state`.
 `InspectAgent(id, InspectOptions)` returns `(AgentInspection, error)`, preserving
-those fields and optionally including a `TranscriptPage`. Set
+those fields, including a `UsageSnapshot`, and optionally a `TranscriptPage`. Set
 `InspectOptions.Transcript` to an `agent.TranscriptQuery` to request history;
-leave it nil for state only. Controller snapshots are independent copies of the
-actual stored messages, including image bytes. State and history are nearby
+leave it nil for state and usage only. Controller snapshots are independent copies of the
+actual stored messages, including image bytes. State, usage, and history are nearby
 snapshots, not an atomic execution checkpoint. Queued inbox messages appear only
 after the agent consumes them. Stopped agents remain inspectable during the session.
 No transcript tee, event reconstruction, or separate history store is involved.
 `Agents()` returns the current snapshots. `AgentStateChanged` publishes ordered
 state transitions to the host event stream.
+
+Token usage is reported per model call through `provider.Response.Usage`, with
+optional `InputTokens` and `OutputTokens` counts. Nil means unavailable; reported
+zero remains zero. `Agent.Usage()` and `AgentInspection.Usage` expose cumulative
+reported totals, missing-report counts, and the latest call observation, including
+after an agent exits. `conversation.UsageEvent` publishes each returned call to
+the host. Accounting includes valid usage from rejected completions. The latest
+input count measures the submitted history revision; cumulative usage does not
+measure the current context. Token estimation, compaction, and UI display are
+not implemented.
 
 | State | Meaning |
 |---|---|

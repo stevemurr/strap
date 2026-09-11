@@ -60,3 +60,11 @@ type WorkEvent struct{ Event work.Event }
 func (WorkEvent) isEvent() {}
 
 func (ToolEvent) isEvent() {}
+
+// UsageEvent reports per-call accounting to the host, never to model inboxes.
+type UsageEvent struct {
+	Agent       message.ActorID
+	Observation agent.UsageObservation
+}
+
+func (UsageEvent) isEvent() {}

@@ -20,7 +20,7 @@ func TestThreadSnapshotsOwnNestedData(t *testing.T) {
 	original.Content[1].Image.Data[0] = 9
 	original.Envelope.Content = "changed"
 	original.ToolCalls[0].Arguments[0] = '!'
-	want := thread.requestMessages()
+	want, _ := thread.requestMessages()
 	page, err := thread.snapshot(TranscriptQuery{})
 	if err != nil {
 		t.Fatal(err)
@@ -29,11 +29,11 @@ func TestThreadSnapshotsOwnNestedData(t *testing.T) {
 	page.Entries[0].Message.Content[1].Image.Data[0] = 8
 	page.Entries[0].Message.Envelope.Content = "again"
 	page.Entries[0].Message.ToolCalls[0].Arguments[0] = '!'
-	if got := thread.requestMessages(); !reflect.DeepEqual(got, want) || got[0].Content[0].Text != "checking" || got[0].Content[1].Image.Data[0] != 1 {
+	if got, _ := thread.requestMessages(); !reflect.DeepEqual(got, want) || got[0].Content[0].Text != "checking" || got[0].Content[1].Image.Data[0] != 1 {
 		t.Fatalf("snapshot aliases thread: %+v", got)
 	}
 	want[0].Content[0].Text = "provider mutation"
-	if got := thread.requestMessages(); got[0].Content[0].Text != "checking" {
+	if got, _ := thread.requestMessages(); got[0].Content[0].Text != "checking" {
 		t.Fatal("provider snapshot aliases thread")
 	}
 }
@@ -103,7 +103,7 @@ func TestThreadConcurrentInspection(t *testing.T) {
 		}
 	}()
 	wg.Wait()
-	if len(thread.requestMessages()) != 200 {
+	if messages, revision := thread.requestMessages(); len(messages) != 200 || revision != 200 {
 		t.Fatal("lost writes")
 	}
 }

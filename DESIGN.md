@@ -137,9 +137,25 @@ describes the transport/integration responsibility; it does not imply the adapte
 performs model computation or requires a reasoning feature.
 
 ```text
-Agent → provider.Provider.Submit → provider/chatcompletions → local HTTP server
+Agent → provider.Provider.Submit → provider/vllm or provider/chatcompletions
+                                → provider/internal/chatwire → local HTTP server
       ← provider.Response       ← decoded text / tool calls
 ```
+
+The CLI selects the concrete backend and resolves an application-owned generation
+preset followed by explicit flag overrides. Model aliases and agent roles never
+select presets inside an adapter. `provider.Request`, the agent loop, and the
+workflow/controller carry no sampling or vLLM fields.
+
+`provider/vllm` owns its complete, typed generation configuration and the private
+JSON fields for vLLM extensions. Its constructor validates supplied values and
+copies every pointer into an immutable snapshot. Nil omits a field; zero and false
+are sent explicitly. Clients retain no conversation or reasoning history and can
+be shared across agents. The injected HTTP client remains a shared collaborator.
+`provider/chatcompletions` keeps its existing configuration and server defaults.
+Both adapters use internal `chatwire` helpers for transport and message conversion;
+neither imports the other, and the internal helpers contain no presets or vLLM
+option policy. No second backend interface or runtime capability discovery is needed.
 
 The adapter owns wire translation and HTTP errors. It sends model history and tool
 definitions, preserves tool-call IDs through subsequent results, and translates
@@ -153,6 +169,33 @@ the model messages. Tool execution stays in the agent loop.
 The adapter uses complete responses, honors cancellation, and rejects malformed or
 truncated completions instead of dispatching incomplete tool calls. There is no
 provider registry, discovery loop, automatic retry, or change to agent lifecycle.
+
+`provider.Response.Usage` carries optional, nonnegative `int64` input and output
+counts for one call. Shared `chatwire` decoding maps `prompt_tokens` and
+`completion_tokens`; omitted, null, malformed, or negative counts are unavailable,
+independently per field. Reported zero is preserved. Optional accounting cannot
+invalidate otherwise usable output. There is no separate provider usage interface
+or mutable accounting on shared provider clients.
+
+`Submit` may return valid usage alongside an error for rejected output. Adapters
+preserve that usage while discarding invalid text/tool calls. The agent records
+usage immediately after each `Submit` returns, before checking its error or
+cancellation. A transport failure without reported usage counts as a missing report.
+
+Each agent owns synchronized totals and the latest `UsageObservation`, identified
+by its per-agent call number and submitted history revision. `Agent.Usage()` and
+`InspectAgent` return independent snapshots, including after exit. Missing-report
+counts indicate whether each accumulated total is incomplete. Calls are counted
+when they return; an in-flight call is not yet included. `OnUsage` publishes an
+independent observation through the controller's host-only `UsageEvent`, relayed
+by the workflow session. Observers cannot mutate accounting; events never enter
+model history or agent inboxes. No unbounded usage ledger is retained.
+
+Cumulative input usage includes repeated history across calls. The latest input
+measurement describes only the submitted revision, before any subsequent response,
+tool result, or inbox append. Future compaction must count or estimate the next
+assembled request; these observations do not supply that capability. UI rendering,
+context limits, token estimation, and compaction policy remain downstream.
 
 The scripted example exercises a failed audit, scoped repair, and passing audit
 without a server. The local example

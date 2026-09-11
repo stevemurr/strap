@@ -44,6 +44,9 @@ type Config struct {
 	OnState func(State)
 	// OnTool enqueues execution notifications; it must not block on a consumer.
 	OnTool func(ToolActivity)
+	// OnUsage enqueues one observation after each Submit returns, even on error.
+	// It must not block on a consumer. The observation owns its counts.
+	OnUsage func(UsageObservation)
 }
 
 type Agent struct {
@@ -51,6 +54,7 @@ type Agent struct {
 	tools       map[string]tool.Tool
 	definitions []provider.ToolDefinition
 	thread      thread
+	usage       usageTracker
 	started     atomic.Bool
 	control     lifecycle
 }
@@ -134,7 +138,9 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
-			response, err := a.config.Spec.Provider.Submit(ctx, a.request())
+			request, revision := a.request()
+			response, err := a.config.Spec.Provider.Submit(ctx, request)
+			a.recordUsage(revision, response.Usage)
 			if err != nil {
 				return err
 			}
@@ -192,14 +198,15 @@ func (a *Agent) consume(incoming message.Message) {
 	}
 }
 
-func (a *Agent) request() provider.Request {
+func (a *Agent) request() (provider.Request, uint64) {
 	definitions := append([]provider.ToolDefinition(nil), a.definitions...)
 	for i := range definitions {
 		definitions[i].Parameters = append(json.RawMessage(nil), definitions[i].Parameters...)
 	}
+	messages, revision := a.thread.requestMessages()
 	return provider.Request{
-		Agent: a.config.ID, Messages: a.thread.requestMessages(), Tools: definitions,
-	}
+		Agent: a.config.ID, Messages: messages, Tools: definitions,
+	}, revision
 }
 
 func (a *Agent) call(ctx context.Context, call provider.ToolCall) (result tool.Result, err error) {

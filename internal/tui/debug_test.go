@@ -115,8 +115,8 @@ func TestToolErrorsCancellationAndTerminalText(t *testing.T) {
 
 func TestFreezePreservesSelectionWhileEventsContinue(t *testing.T) {
 	m, s := setup(t)
-	if m.viewport.MouseWheelEnabled {
-		t.Fatal("mouse should be reserved for terminal selection")
+	if !m.viewport.MouseWheelEnabled {
+		t.Fatal("mouse scrolling should be enabled")
 	}
 	m.input.SetValue("draft")
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
