@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -62,37 +63,42 @@ type entry struct {
 	at                time.Time
 	renderWidth       int
 	rendered          string
+	tool              toolKey
+	tokens            *contextTokens
 }
 
 type model struct {
-	transcript    *transcriptView
-	ctx           context.Context
-	cancel        context.CancelFunc
-	session       Session
-	options       Options
-	input         textinput.Model
-	viewport      viewport.Model
-	entries       []entry
-	working       map[message.ActorID]bool
-	pending       map[message.MessageID]message.ActorID
-	states        map[message.ActorID]agent.State
-	history       []string
-	historyIndex  int
-	draft         string
-	width, height int
-	rootStopped   bool
-	closed        bool
-	quitting      bool
-	spinner       spinner.Model
-	now           func() time.Time
-	busySince     time.Time
-	lastElapsed   time.Duration
-	activeTools   map[toolKey]agent.ToolActivity
-	selecting     bool
-	frozenCount   int
-	frozenView    string
-	markdown      *glamour.TermRenderer
-	markdownWidth int
+	transcript     *transcriptView
+	ctx            context.Context
+	cancel         context.CancelFunc
+	session        Session
+	options        Options
+	input          textinput.Model
+	viewport       viewport.Model
+	entries        []entry
+	working        map[message.ActorID]bool
+	pending        map[message.MessageID]message.ActorID
+	states         map[message.ActorID]agent.State
+	history        []string
+	historyIndex   int
+	draft          string
+	width, height  int
+	rootStopped    bool
+	closed         bool
+	quitting       bool
+	spinner        spinner.Model
+	now            func() time.Time
+	busySince      time.Time
+	lastElapsed    time.Duration
+	activeTools    map[toolKey]agent.ToolActivity
+	selecting      bool
+	frozenEntries  []entry
+	frozenView     string
+	markdown       *glamour.TermRenderer
+	markdownWidth  int
+	completion     completionState
+	mouseSelection *mouseSelection
+	copyText       func(string) error
 }
 
 var (
@@ -116,9 +122,10 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 		working: make(map[message.ActorID]bool), pending: make(map[message.MessageID]message.ActorID), states: make(map[message.ActorID]agent.State),
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(stateStyle)),
 		now:     time.Now, activeTools: make(map[toolKey]agent.ToolActivity),
+		copyText: clipboard.WriteAll,
 	}
 	m.resize(80, 24)
-	m.add("Welcome", "Send a message to get started. You can keep typing while agents work.\nScroll to browse history · F2 to select and copy · /help for commands", true)
+	m.add("Welcome", "Send a message to get started. You can keep typing while agents work.\nScroll to browse history · Drag to select and copy · /help for commands", true)
 	return m
 }
 
@@ -135,14 +142,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quitting {
 		return m, nil
 	}
+	m.syncCompletion()
+	defer m.syncCompletion()
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case tea.WindowSizeMsg:
+		m.mouseSelection = nil
 		m.resize(msg.Width, msg.Height)
 		m.refreshSelection()
+		return m, nil
+	case countedTokens:
+		m.finishTokenCount(msg)
+		return m, nil
+	case clipboardResult:
+		if m.mouseSelection == msg.selection {
+			if msg.err != nil {
+				m.mouseSelection.status = "Copy failed: " + safeText(msg.err.Error()) + " · F2 for terminal selection"
+			} else {
+				m.mouseSelection.status = "Copied to clipboard · Esc or scroll to resume"
+			}
+		}
 		return m, nil
 	case received:
 		if msg.err != nil {
@@ -154,10 +176,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.observe(msg.event)
+		if batch, ok := msg.event.(conversation.ToolBatchEvent); ok {
+			return m, tea.Batch(m.listen(), m.countToolBatch(batch))
+		}
 		return m, m.listen()
 	case tea.MouseMsg:
 		if m.selecting {
 			return m, nil
+		}
+		if m.transcript != nil && m.transcript.copying {
+			return m, nil
+		}
+		if tea.MouseEvent(msg).IsWheel() {
+			m.mouseSelection = nil
+		} else if handled, cmd := m.selectWithMouse(msg); handled {
+			return m, cmd
 		}
 		if m.transcript != nil {
 			if m.transcript.copying {
@@ -174,8 +207,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	case tea.KeyMsg:
+		if m.mouseSelection != nil {
+			if msg.String() == "ctrl+c" && m.mouseSelection.text() != "" {
+				return m, m.copySelection()
+			}
+			m.mouseSelection = nil
+			if msg.String() == "esc" {
+				return m, nil
+			}
+		}
 		if m.transcript != nil {
 			return m.transcriptKey(msg)
+		}
+		if !m.selecting && m.completionKey(msg.String()) {
+			return m, nil
 		}
 		switch msg.String() {
 		case "ctrl+c", "ctrl+d":
@@ -239,7 +284,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agents and their status\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nF2 freezes the display and releases the mouse for selection; agents keep running.\nDrag to select, then use your terminal Copy shortcut. F2 resumes scrolling.", true)
+			m.add("Help", "/agents  Show agents and their status\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling.", true)
 		case "/clear":
 			m.entries = nil
 			m.renderTranscript(true)
@@ -446,7 +491,7 @@ func (m *model) resize(width, height int) {
 	m.width, m.height = max(1, width), max(1, height)
 	m.input.Width = max(1, m.width-5)
 	m.viewport.Width = max(1, m.width-2)
-	m.viewport.Height = max(1, m.height-6)
+	m.viewport.Height = max(1, m.height-6-m.completionHeight())
 	m.renderTranscript(false)
 	if m.transcript != nil {
 		m.resizeAgentTranscript()
@@ -462,7 +507,7 @@ func (m *model) renderTranscript(follow bool) {
 	var transcript strings.Builder
 	entries := m.entries
 	if m.selecting {
-		entries = entries[:min(m.frozenCount, len(entries))]
+		entries = m.frozenEntries
 	}
 	for i := 0; i < len(entries); i++ {
 		e := &entries[i]
@@ -474,8 +519,8 @@ func (m *model) renderTranscript(follow bool) {
 			if i > 0 {
 				transcript.WriteString("\n")
 			}
-			row := "├─ " + toolSummary(entries[i:end])
-			transcript.WriteString(toolStyle.Render(ansi.Truncate(row, max(1, m.viewport.Width-1), "…")))
+			row := toolRows(entries[i:end], max(1, m.viewport.Width-1))
+			transcript.WriteString(toolStyle.Render(row))
 			transcript.WriteString("\n")
 			i = end - 1
 			continue
@@ -546,6 +591,9 @@ func (m *model) View() string {
 	if m.quitting {
 		return ""
 	}
+	if m.mouseSelection != nil {
+		return m.mouseSelection.view(m.width)
+	}
 	if m.transcript != nil {
 		return m.transcriptDisplay()
 	}
@@ -563,13 +611,19 @@ func (m *model) renderView() string {
 	if m.height < 8 {
 		return line(m.input.View())
 	}
-	return strings.Join([]string{
+	lines := []string{
 		line(m.header()),
 		"", lipgloss.NewStyle().PaddingLeft(min(1, m.width-1)).Render(m.viewport.View()),
+	}
+	for _, suggestion := range m.completionView() {
+		lines = append(lines, line(suggestion))
+	}
+	lines = append(lines,
 		line(dimStyle.Render(strings.Repeat("─", max(1, m.width-2)))), line(m.input.View()),
 		line(m.activityLine()),
 		line(dimStyle.Render(m.footer())),
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
 }
 
 func (m *model) header() string {
@@ -597,8 +651,11 @@ func (m *model) footer() string {
 	if m.selecting {
 		return "DISPLAY FROZEN · drag to copy · PgUp/PgDn scroll · F2 resume"
 	}
+	if m.completionHeight() > 0 {
+		return "↑/↓ select · Tab complete · Enter confirm · Esc dismiss"
+	}
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter send · Scroll history · ↑/↓ recall · F2 copy · /help"
+	return "Enter send · Scroll history · Drag copy · F2 freeze · /help"
 }

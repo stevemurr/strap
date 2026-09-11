@@ -194,8 +194,31 @@ model history or agent inboxes. No unbounded usage ledger is retained.
 Cumulative input usage includes repeated history across calls. The latest input
 measurement describes only the submitted revision, before any subsequent response,
 tool result, or inbox append. Future compaction must count or estimate the next
-assembled request; these observations do not supply that capability. UI rendering,
-context limits, token estimation, and compaction policy remain downstream.
+assembled request; these observations do not supply that capability. Context
+limits, token estimation, and compaction policy remain downstream.
+
+`provider.TokenCounter` is an optional, separate capability:
+`CountTokens(context.Context, Request) (int64, error)`. The vLLM adapter implements
+it with an explicit `/tokenize` request, sharing message/tool translation and HTTP
+transport with generation. It sends the same model and chat template settings,
+including the generation prompt, but no sampling options or output budget. Counts
+come from the server, must be nonnegative, and describe only the supplied request.
+The adapter neither estimates missing counts nor retains mutable accounting.
+Counting failures preserve HTTP diagnostics and cancellation. Generic Chat
+Completions providers need not implement this capability. The agent loop does not
+automatically count requests or alter its usage totals; compaction and context
+budget decisions remain caller policy.
+
+After appending every result in a tool batch, `OnToolBatch` publishes its call IDs
+and history revision through `conversation.ToolBatchEvent`. The TUI invokes
+`CountAgentTokens` asynchronously for that boundary, using a ten-second timeout.
+The controller selects the owning agent; its append-only thread supplies an
+independent snapshot through the recorded revision, together with its original
+tool definitions. Provider I/O holds neither controller nor history locks, and
+headless consumers do not trigger counting automatically. Counts never enter
+model history or usage accounting. Tool rows display the latest completed batch
+per agent, preserving earlier row counts, scroll position, and frozen copies;
+unavailable measurements stay visibly unavailable.
 
 The scripted example exercises a failed audit, scoped repair, and passing audit
 without a server. The local example

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/stevemurr/strap/provider"
@@ -14,7 +15,9 @@ import (
 )
 
 type Config struct {
-	// BaseURL accepts a server root or API prefix. A root defaults to /v1.
+	// BaseURL accepts a server root or API prefix. A root defaults to /v1
+	// for generation. Counting removes a trailing /v1 and appends /tokenize,
+	// preserving any preceding reverse-proxy path.
 	BaseURL    string
 	Model      string
 	HTTPClient *http.Client
@@ -24,12 +27,14 @@ type Config struct {
 // Client snapshots generation settings at construction and is safe to share
 // across agents. The injected HTTPClient remains a shared collaborator.
 type Client struct {
-	model      string
-	wire       *chatwire.Client
-	generation generationFields
+	model            string
+	wire             *chatwire.Client
+	generation       generationFields
+	tokenizeEndpoint string
 }
 
 var _ provider.Provider = (*Client)(nil)
+var _ provider.TokenCounter = (*Client)(nil)
 
 func New(config Config) (*Client, error) {
 	wire, err := chatwire.New(config.BaseURL, config.HTTPClient)
@@ -43,7 +48,11 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vllm: %w", err)
 	}
-	return &Client{model: config.Model, wire: wire, generation: generation}, nil
+	// chatwire.New already validated the URL. Tokenization lives outside /v1.
+	u, _ := url.Parse(config.BaseURL)
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1") + "/tokenize"
+	u.RawPath = ""
+	return &Client{model: config.Model, wire: wire, generation: generation, tokenizeEndpoint: u.String()}, nil
 }
 
 // HTTPError preserves rejected options and other bounded server diagnostics.

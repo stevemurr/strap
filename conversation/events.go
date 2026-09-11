@@ -61,6 +61,15 @@ func (WorkEvent) isEvent() {}
 
 func (ToolEvent) isEvent() {}
 
+// ToolBatchEvent marks a complete batch's immutable context boundary. Hosts may
+// request a token count asynchronously without delaying the agent loop.
+type ToolBatchEvent struct {
+	Agent message.ActorID
+	Batch agent.ToolBatch
+}
+
+func (ToolBatchEvent) isEvent() {}
+
 // UsageEvent reports per-call accounting to the host, never to model inboxes.
 type UsageEvent struct {
 	Agent       message.ActorID

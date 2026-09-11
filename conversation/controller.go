@@ -103,9 +103,10 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	runner, err := agent.New(agent.Config{
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
 		Outbox: sender{controller: c, actor: id}, OnConsumed: c.acknowledge,
-		OnState: func(state agent.State) { c.emit(AgentStateChanged{Agent: id, State: state}) },
-		OnTool:  func(activity agent.ToolActivity) { c.emit(ToolEvent{Agent: id, Activity: activity}) },
-		OnUsage: func(observation agent.UsageObservation) { c.emit(UsageEvent{Agent: id, Observation: observation}) },
+		OnState:     func(state agent.State) { c.emit(AgentStateChanged{Agent: id, State: state}) },
+		OnTool:      func(activity agent.ToolActivity) { c.emit(ToolEvent{Agent: id, Activity: activity}) },
+		OnToolBatch: func(batch agent.ToolBatch) { c.emit(ToolBatchEvent{Agent: id, Batch: batch}) },
+		OnUsage:     func(observation agent.UsageObservation) { c.emit(UsageEvent{Agent: id, Observation: observation}) },
 	})
 	if err != nil {
 		cancel()
@@ -281,6 +282,18 @@ func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (A
 		inspection.Transcript = &page
 	}
 	return inspection, nil
+}
+
+// CountAgentTokens counts the exact history boundary in a ToolBatchEvent. No
+// coordination lock is held during network I/O; ctx controls the host request.
+func (c *Controller) CountAgentTokens(ctx context.Context, id message.ActorID, revision uint64) (int64, error) {
+	c.mu.Lock()
+	owned, ok := c.agents[id]
+	c.mu.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("unknown agent: %s", id)
+	}
+	return owned.agent.CountTokens(ctx, revision)
 }
 
 func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {

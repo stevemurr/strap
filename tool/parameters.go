@@ -275,7 +275,7 @@ func (p *parameterNode) lookup(path string) (*parameterNode, error) {
 		return p, nil
 	}
 	node := p
-	for _, part := range strings.Split(path, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		name := strings.TrimSuffix(part, "[]")
 		if node.kind != "object" || node.fields[name] == nil {
 			return nil, fmt.Errorf("unknown parameter path %q", path)

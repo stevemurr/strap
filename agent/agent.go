@@ -44,6 +44,9 @@ type Config struct {
 	OnState func(State)
 	// OnTool enqueues execution notifications; it must not block on a consumer.
 	OnTool func(ToolActivity)
+	// OnToolBatch enqueues a complete tool batch's history boundary. It must
+	// not block on a consumer; counting is a separate host operation.
+	OnToolBatch func(ToolBatch)
 	// OnUsage enqueues one observation after each Submit returns, even on error.
 	// It must not block on a consumer. The observation owns its counts.
 	OnUsage func(UsageObservation)
@@ -166,6 +169,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				}
 				break
 			}
+			var toolRevision uint64
 			for _, call := range response.ToolCalls {
 				if err := a.checkpoint(ctx); err != nil {
 					return err
@@ -177,9 +181,16 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				if err != nil {
 					result = tool.Text("Tool error: " + err.Error())
 				}
-				a.thread.append(provider.Message{
+				toolRevision = a.thread.append(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,
 				})
+			}
+			if a.config.OnToolBatch != nil {
+				calls := make([]string, len(response.ToolCalls))
+				for i, call := range response.ToolCalls {
+					calls[i] = call.ID
+				}
+				a.config.OnToolBatch(ToolBatch{Calls: calls, ContextRevision: toolRevision})
 			}
 		}
 	}

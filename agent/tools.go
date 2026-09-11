@@ -18,6 +18,13 @@ type ToolActivity struct {
 	Err        error
 }
 
+// ToolBatch identifies the history after all results from one model response
+// have been appended. A complete batch is a valid boundary for tokenization.
+type ToolBatch struct {
+	Calls           []string
+	ContextRevision uint64
+}
+
 func (a *Agent) reportTool(activity ToolActivity) {
 	if a.config.OnTool == nil {
 		return

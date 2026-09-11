@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/message"
@@ -49,7 +50,10 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 	name := toolName(activity.Call.Name)
 	if activity.FinishedAt.IsZero() {
 		m.activeTools[key] = activity
-		m.addDetail("Tool", string(event.Agent), name, false)
+		m.entries = append(m.entries, entry{label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key})
+		if !m.selecting {
+			m.renderTranscript(false)
+		}
 		return
 	}
 	delete(m.activeTools, key)
@@ -128,10 +132,11 @@ func (m *model) toggleSelection() {
 	if m.selecting {
 		m.selecting = false
 		m.frozenView = ""
+		m.frozenEntries = nil
 		m.renderTranscript(false)
 	} else {
 		m.selecting = true
-		m.frozenCount = len(m.entries)
+		m.frozenEntries = append([]entry(nil), m.entries...)
 		m.frozenView = m.renderView()
 	}
 }
@@ -142,13 +147,14 @@ func (m *model) refreshSelection() {
 	}
 }
 
-// toolSummary groups only an uninterrupted run of tool entries. The original
-// entries remain immutable, including while the display is frozen for copying.
-func toolSummary(entries []entry) string {
+// toolRows groups an uninterrupted run of tools by agent. Context measurements
+// are snapshots, so each group shows the latest batch rather than summing them.
+func toolRows(entries []entry, width int) string {
 	type group struct {
 		agent  string
 		names  []string
 		counts map[string]int
+		tokens *contextTokens
 	}
 	var groups []group
 	agents := make(map[string]int)
@@ -164,8 +170,15 @@ func toolSummary(entries []entry) string {
 			g.names = append(g.names, e.body)
 		}
 		g.counts[e.body]++
+		if e.tokens != nil {
+			g.tokens = e.tokens
+		}
 	}
 	var labels []string
+	counted := false
+	for _, g := range groups {
+		counted = counted || g.tokens != nil
+	}
 	for _, g := range groups {
 		var calls []string
 		for _, name := range g.names {
@@ -175,7 +188,21 @@ func toolSummary(entries []entry) string {
 			}
 			calls = append(calls, label)
 		}
-		labels = append(labels, strings.Join(strings.Fields(g.agent), " ")+" · "+strings.Join(calls, ", "))
+		label := strings.Join(strings.Fields(g.agent), " ") + " · " + strings.Join(calls, ", ")
+		if counted {
+			suffix := ""
+			if g.tokens != nil {
+				suffix = " · " + g.tokens.label()
+			}
+			// Reserve room for the count when tool names are long. Separate
+			// agents get their own line so one agent cannot hide another's count.
+			label = ansi.Truncate("├─ "+label, max(1, width-lipgloss.Width(suffix)), "…") + suffix
+			label = ansi.Truncate(label, width, "…")
+		}
+		labels = append(labels, label)
 	}
-	return strings.Join(labels, "; ")
+	if counted {
+		return strings.Join(labels, "\n")
+	}
+	return ansi.Truncate("├─ "+strings.Join(labels, "; "), width, "…")
 }

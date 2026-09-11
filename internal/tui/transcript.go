@@ -246,7 +246,7 @@ func (m *model) transcriptDisplay() string {
 	if m.height < 4 {
 		return line(title)
 	}
-	help := "Scroll / PgUp/PgDn · [/] agent · r refresh · v raw · F2 copy · Esc back"
+	help := "Scroll / PgUp/PgDn · [/] agent · r refresh · v raw · Drag copy · Esc back"
 	if v.copying {
 		help = "COPY MODE · drag to copy · F2 resume · Esc back"
 	}

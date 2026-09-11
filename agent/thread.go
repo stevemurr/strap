@@ -37,12 +37,27 @@ type thread struct {
 	revision uint64
 }
 
-func (t *thread) append(m provider.Message) {
+func (t *thread) append(m provider.Message) uint64 {
 	owned := provider.CopyMessages([]provider.Message{m})[0]
 	t.mu.Lock()
 	t.messages = append(t.messages, owned)
 	t.revision++
+	revision := t.revision
 	t.mu.Unlock()
+	return revision
+}
+
+// messagesAt reads an exact historical request boundary, even if execution has
+// advanced since the host received its event. Revisions are append positions.
+func (t *thread) messagesAt(revision uint64) ([]provider.Message, error) {
+	t.mu.RLock()
+	if revision == 0 || revision > t.revision {
+		t.mu.RUnlock()
+		return nil, fmt.Errorf("invalid context revision %d", revision)
+	}
+	messages := append([]provider.Message(nil), t.messages[:revision]...)
+	t.mu.RUnlock()
+	return provider.CopyMessages(messages), nil
 }
 
 func (t *thread) requestMessages() ([]provider.Message, uint64) {

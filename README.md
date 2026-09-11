@@ -79,21 +79,43 @@ An animated spinner tracks the current active period, including delegated work,
 with separate elapsed times for running tools. The last active duration remains
 visible when idle. Replies appear when complete; token streaming is not implemented.
 
+After a tool batch finishes, its tool line shows the agent's context size, for
+example `agent-1 · Read file ×2 · 12,345 context tokens`. The TUI counts that exact
+history snapshot through the provider, including system instructions, tool
+definitions, messages, and the completed tool results. Grouped tool lines show
+the latest completed batch's count, not a sum or the size of tool output alone.
+Counting runs in the background with a ten-second timeout. Unsupported providers
+and counting failures show `context tokens unavailable`; agents keep running.
+
 Scroll with the mouse wheel, trackpad, or Page Up / Page Down to browse conversation
 history. New output preserves your position while you read. The footer shows your
 position in history; Ctrl-End returns to the latest output and resumes following it.
 
-Press F2 to freeze the display and release mouse capture, then drag to select text
-and use your terminal’s Copy shortcut (usually Cmd-C on macOS or Ctrl-Shift-C on
-Linux). Agents and event collection continue. Press F2 again to resume. Typing is
-suspended while frozen, preserving your draft; keyboard scrolling remains available.
+Drag with the mouse to select visible text; releasing the mouse copies it to the
+system clipboard. Selection holds the visible screen steady while agents and
+event collection continue. Escape, scrolling, or typing returns to the live view.
+Ctrl-C copies again while text is selected; otherwise it exits as usual. The same
+selection behavior works in the transcript browser.
+
+For native terminal selection, press F2 to freeze the display and release mouse
+capture, then drag and use your terminal’s Copy shortcut (usually Cmd-C on macOS
+or Ctrl-Shift-C on Linux). This is also a fallback when the system clipboard is
+unavailable. Press F2 again to resume. Typing is suspended in F2 mode, preserving
+your draft; keyboard scrolling remains available.
+
+Type `/` to browse slash commands, or keep typing to filter them. Use Up / Down
+to select and Tab to complete. Enter on a partial command fills it in; Enter on
+a complete command runs it. Escape dismisses suggestions. Commands that accept
+an agent ID leave space to type the argument after completion.
 
 | Key or command | Action |
 |---|---|
-| Up / Down | Recall input history |
+| Up / Down | Select a slash suggestion, or recall input history |
+| Tab / Escape | Complete / dismiss slash suggestions |
 | Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |
 | Ctrl-Home / Ctrl-End | Jump to the beginning / end |
 | F2 | Freeze / resume display updates for copying |
+| Mouse drag, then release | Select and copy visible text to the clipboard |
 | F2, then mouse drag + terminal Copy | Select and copy visible text |
 | `/agents` | Show agents and their lifecycle state |
 | `/inspect [id]` | Inspect agent state; defaults to root |
@@ -291,8 +313,40 @@ reported totals, missing-report counts, and the latest call observation, includi
 after an agent exits. `conversation.UsageEvent` publishes each returned call to
 the host. Accounting includes valid usage from rejected completions. The latest
 input count measures the submitted history revision; cumulative usage does not
-measure the current context. Token estimation, compaction, and UI display are
+measure the current context. The TUI's tool-line context counts are separate
+measurements. Token estimation, compaction, and cumulative usage display are
 not implemented.
+
+To count an assembled request before generation, use the optional
+`provider.TokenCounter` capability. The vLLM client implements it:
+
+```go
+count, err := client.CountTokens(ctx, request) // client is *vllm.Client
+if err != nil {
+    return err
+}
+fmt.Printf("Request input: %d tokens\n", count)
+```
+
+Counting calls vLLM's [`POST /tokenize`](https://github.com/vllm-project/vllm/blob/v0.25.0/vllm/entrypoints/serve/tokenize/protocol.py)
+with the same model, translated messages (including images and tool results),
+tool definitions, and thinking settings used for generation. The server applies
+its chat template and tokenizer, including the generation prompt. The returned
+count excludes future output and is not accumulated usage. Count again when the
+request changes. Invalid counts and unavailable endpoints return errors, with no
+local estimate or automatic retry.
+
+A base URL ending in `/v1` uses the sibling `/tokenize` endpoint; preceding proxy
+paths are preserved (`/proxy/v1` becomes `/proxy/tokenize`). Counting is explicit:
+`Submit` does not call it automatically, and the generic Chat Completions adapter
+does not implement `TokenCounter`. Callers holding a `provider.Provider` can check
+support with a type assertion to `provider.TokenCounter`.
+
+`conversation.ToolBatchEvent` identifies an agent's completed tool-call IDs and
+history revision. `CountAgentTokens(ctx, agentID, revision)` counts that exact
+revision with the agent's own provider and tool definitions, including after the
+agent advances or stops. The TUI calls this asynchronously once per displayed
+batch. Counting never updates generation usage totals.
 
 | State | Meaning |
 |---|---|

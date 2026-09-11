@@ -9,13 +9,17 @@ import (
 	"github.com/stevemurr/strap/provider"
 )
 
-// Request is shared only by concrete provider adapters. Internal actor/envelope
+// Chat is shared only by concrete provider adapters. Internal actor/envelope
 // metadata is never copied into it. Function arguments are protocol strings.
-type Request struct {
+type Chat struct {
 	Model    string           `json:"model"`
 	Messages []requestMessage `json:"messages"`
 	Tools    []functionTool   `json:"tools,omitempty"`
-	Stream   bool             `json:"stream"`
+}
+
+type Request struct {
+	Chat
+	Stream bool `json:"stream"`
 }
 
 type chatMessage struct {
@@ -71,7 +75,7 @@ type contentPart struct {
 }
 
 func Encode(model string, input provider.Request) (Request, error) {
-	result := Request{Model: model, Messages: make([]requestMessage, 0, len(input.Messages))}
+	result := Request{Chat: Chat{Model: model, Messages: make([]requestMessage, 0, len(input.Messages))}}
 	var images []requestMessage
 	flush := func() { result.Messages = append(result.Messages, images...); images = nil }
 	for _, m := range input.Messages {
