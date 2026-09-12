@@ -14,7 +14,7 @@ import (
 
 // Inspection is a bounded model-facing projection. The controller snapshot and
 // canonical thread remain unchanged. Envelope attribution is already in Content.
-func inspectTool(c *conversation.Controller) tool.Tool {
+func inspectTool(c agentControl) tool.Tool {
 	return tool.InspectAgent(func(ctx context.Context, _ tool.Call, args tool.InspectAgentArgs) (tool.Result, error) {
 		if err := ctx.Err(); err != nil {
 			return tool.Result{}, err

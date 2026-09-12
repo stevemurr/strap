@@ -16,6 +16,12 @@ import (
 // is supplied by the host or bound tool runtime, never inferred from request data.
 // Cancellation is checked before ledger entry; it is not a rollback guarantee.
 func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work.PlanUpdate) (work.Plan, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Plan{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Plan{}, err
 	}
@@ -26,6 +32,12 @@ func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work
 }
 
 func (s *Session) UpdateProgress(ctx context.Context, actor identity.ActorID, u work.ProgressUpdate) (work.Work, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Work{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Work{}, err
 	}
@@ -33,6 +45,12 @@ func (s *Session) UpdateProgress(ctx context.Context, actor identity.ActorID, u 
 }
 
 func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Work{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Work{}, err
 	}
@@ -40,6 +58,12 @@ func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work
 }
 
 func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.Submission, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Submission{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Submission{}, err
 	}
@@ -47,6 +71,12 @@ func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work
 }
 
 func (s *Session) SubmitAudit(ctx context.Context, actor identity.ActorID, r work.AuditRequest) (work.Audit, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Audit{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Audit{}, err
 	}
@@ -157,6 +187,12 @@ func (s *Session) provision(parent, requested identity.ActorID, kind work.Kind) 
 // ReassignWork validates the current binding before provisioning a replacement.
 // If the ledger rejects the mutation, a newly created agent is stopped.
 func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r work.ReassignRequest) (work.Work, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Work{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Work{}, err
 	}
@@ -195,6 +231,12 @@ func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r wo
 // AssignWork provisions the configured role and registers its work for dispatch.
 // It returns ledger state, not a delivery or completion acknowledgment.
 func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, a work.AssignmentRequest) (work.Work, error) {
+	run, done, admitErr := s.begin(ctx)
+	if admitErr != nil {
+		return work.Work{}, admitErr
+	}
+	defer done()
+	ctx = run
 	if err := ctx.Err(); err != nil {
 		return work.Work{}, err
 	}
@@ -234,4 +276,14 @@ func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, a work
 		return work.Work{}, err
 	}
 	return w, nil
+}
+
+func (s *Session) begin(ctx context.Context) (context.Context, func(), error) {
+	if s.admission != nil {
+		return s.admission.Begin(ctx)
+	}
+	if s.closing.Load() {
+		return nil, nil, conversation.ErrClosed
+	}
+	return ctx, func() {}, ctx.Err()
 }

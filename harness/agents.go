@@ -10,7 +10,15 @@ import (
 
 // Management is selected by the application for its root spec. Tool contracts
 // remain independent of the controller and expose only application callbacks.
-func managementTools(c *conversation.Controller) []tool.Tool {
+type agentControl interface {
+	StopAgent(message.ActorID) (conversation.AgentInfo, error)
+	PauseAgent(message.ActorID) (conversation.AgentInfo, error)
+	ResumeAgent(message.ActorID) (conversation.AgentInfo, error)
+	InspectAgent(message.ActorID, conversation.InspectOptions) (conversation.AgentInspection, error)
+	Agents() []conversation.AgentInfo
+}
+
+func managementTools(c agentControl) []tool.Tool {
 	snapshot := func(operation func(message.ActorID) (conversation.AgentInfo, error)) func(context.Context, tool.Call, message.ActorID) (tool.Result, error) {
 		return func(ctx context.Context, _ tool.Call, id message.ActorID) (tool.Result, error) {
 			if err := ctx.Err(); err != nil {

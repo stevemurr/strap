@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/internal/resource"
 	"github.com/stevemurr/strap/internal/transport"
 	"github.com/stevemurr/strap/internal/workflow"
@@ -63,11 +65,16 @@ type Dependencies struct {
 }
 
 type Session struct {
-	config     Config
-	controller *conversation.Controller
-	workflow   *workflow.Session
-	resources  *resource.Group
-	closeGate  chan struct{}
+	config          Config
+	controller      *conversation.Controller
+	workflow        *workflow.Session
+	resources       *resource.Group
+	mu              sync.Mutex
+	state           State
+	attempt         *closeAttempt
+	admission       *admission.Gate
+	cancelExecution context.CancelFunc
+	stopOwner       func() bool
 }
 
 // StartupError retains cleanup ownership if rollback could not complete.
@@ -82,7 +89,8 @@ func (e *StartupError) Unwrap() error                   { return e.cause }
 func (e *StartupError) Close(ctx context.Context) error { return e.cleanup.Close(ctx) }
 
 func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err error) {
-	s := &Session{config: cloneConfig(cfg), resources: resource.New(), closeGate: make(chan struct{}, 1)}
+	execution, cancelExecution := context.WithCancel(context.WithoutCancel(ctx))
+	s := &Session{config: cloneConfig(cfg), resources: resource.New(), state: Open, cancelExecution: cancelExecution, admission: admission.New(execution)}
 	defer func() {
 		if err == nil {
 			return
@@ -152,67 +160,82 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		s.resources.Add("web", web)
 		local = append(local, web.Tools()...)
 	}
-	c := conversation.New(ctx)
+	c := conversation.New(execution)
 	s.controller = c
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
-	s.workflow = workflow.New(ctx, c,
+	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)})
-	_, err = c.CreateAgent(message.User, agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), messaging, managementTools(c), deps.Root.Tools)})
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithAdmission(s.admission))
+	_, err = c.CreateAgent(message.User, agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), messaging, managementTools(s), deps.Root.Tools)})
 	if err != nil {
 		return nil, err
 	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.stopOwner = context.AfterFunc(ctx, func() { s.startClose() })
+	s.mu.Unlock()
 	return s, nil
-}
-
-// Close joins execution before closing its owned resources. Event finalization
-// and independent observation are introduced by the next lifecycle/storage stages.
-func (s *Session) Close(ctx context.Context) error {
-	select {
-	case s.closeGate <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	defer func() { <-s.closeGate }()
-	if s.workflow != nil {
-		if err := s.workflow.Close(ctx); err != nil {
-			return err
-		}
-	} else if s.controller != nil {
-		if err := s.controller.Close(ctx); err != nil {
-			return err
-		}
-	}
-	return s.resources.Close(ctx)
 }
 
 func (s *Session) Config() Config         { return cloneConfig(s.config) }
 func (s *Session) Root() identity.ActorID { return s.controller.Root() }
 func (s *Session) Send(to identity.ActorID, text string) (message.Receipt, error) {
+	_, done, err := s.admission.Begin(context.Background())
+	if err != nil {
+		return message.Receipt{}, err
+	}
+	defer done()
 	return s.controller.Send(to, text)
 }
 func (s *Session) Agents() []conversation.AgentInfo { return s.controller.Agents() }
 func (s *Session) CreateAgent(parent identity.ActorID, spec agent.Spec) (conversation.Creation, error) {
+	_, done, err := s.admission.Begin(context.Background())
+	if err != nil {
+		return conversation.Creation{}, err
+	}
+	defer done()
 	return s.controller.CreateAgent(parent, spec)
 }
 func (s *Session) InspectAgent(id identity.ActorID, opts conversation.InspectOptions) (conversation.AgentInspection, error) {
 	return s.controller.InspectAgent(id, opts)
 }
 func (s *Session) PauseAgent(id identity.ActorID) (conversation.AgentInfo, error) {
+	_, done, err := s.admission.Begin(context.Background())
+	if err != nil {
+		return conversation.AgentInfo{}, err
+	}
+	defer done()
 	return s.controller.PauseAgent(id)
 }
 func (s *Session) ResumeAgent(id identity.ActorID) (conversation.AgentInfo, error) {
+	_, done, err := s.admission.Begin(context.Background())
+	if err != nil {
+		return conversation.AgentInfo{}, err
+	}
+	defer done()
 	return s.controller.ResumeAgent(id)
 }
 func (s *Session) StopAgent(id identity.ActorID) (conversation.AgentInfo, error) {
+	_, done, err := s.admission.Begin(context.Background())
+	if err != nil {
+		return conversation.AgentInfo{}, err
+	}
+	defer done()
 	return s.controller.StopAgent(id)
 }
 func (s *Session) Receipt(id message.MessageID) (message.Receipt, bool) {
 	return s.controller.Receipt(id)
 }
 func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, revision uint64) (int64, error) {
-	return s.controller.CountAgentTokens(ctx, id, revision)
+	run, done, err := s.admission.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+	return s.controller.CountAgentTokens(run, id, revision)
 }
 
 // NextEvent is the transitional single-reader adapter used by the TUI until

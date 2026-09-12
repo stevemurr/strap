@@ -4,14 +4,15 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/inbox"
+	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -26,6 +27,9 @@ type binding struct {
 // Session is the application's single consumer of controller events. Host reads
 // consume a separate relay, so work dispatch proceeds even with no UI reader.
 type Session struct {
+	closing   atomic.Bool
+	admission *admission.Gate
+	stopOwner func() bool
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
@@ -37,9 +41,17 @@ type Session struct {
 	done                 chan struct{}
 }
 
-func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec) *Session {
-	ctx, cancel := context.WithCancel(ctx)
+type Option func(*Session)
+
+func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admission = g } }
+
+func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec, options ...Option) *Session {
+	owner := ctx
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, events: inbox.New[conversation.Event](), done: make(chan struct{})}
+	for _, option := range options {
+		option(s)
+	}
 	s.implementor.Tools = append(s.implementor.Tools, s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, tool.UpdatePlan(nil, s.updateProgress))
 	s.implementor.Tools = append(s.implementor.Tools, tool.SubmitWork(func(ctx context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
@@ -52,6 +64,7 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 		v, e := s.SubmitAudit(ctx, c.Actor, r)
 		return result(v, e)
 	}))
+	s.stopOwner = context.AfterFunc(owner, func() { _ = s.Close(context.Background()) })
 	go s.run()
 	return s
 }
@@ -104,14 +117,24 @@ func (s *Session) RootTools() []tool.Tool {
 func (s *Session) NextEvent(ctx context.Context) (conversation.Event, error) {
 	return s.events.Receive(ctx)
 }
+
+// BeginClosing stops new application mutations and dispatch while readers drain.
+func (s *Session) BeginClosing() {
+	s.closing.Store(true)
+	if s.admission != nil {
+		s.admission.Seal()
+	}
+}
 func (s *Session) Close(ctx context.Context) error {
-	err := s.Controller.Close(ctx)
-	s.cancel()
+	s.BeginClosing()
+	if err := s.Controller.Close(ctx); err != nil {
+		return err
+	}
 	select {
 	case <-s.done:
-		return err
+		return nil
 	case <-ctx.Done():
-		return errors.Join(err, ctx.Err())
+		return ctx.Err()
 	}
 }
 func (s *Session) current(b binding) bool {
@@ -128,6 +151,11 @@ func (s *Session) failure(b binding, detail string) {
 	}
 }
 func (s *Session) run() {
+	defer func() {
+		if s.stopOwner != nil {
+			s.stopOwner()
+		}
+	}()
 	defer close(s.done)
 	defer s.events.Close()
 	incoming := make(chan conversation.Event)
@@ -159,6 +187,9 @@ func (s *Session) run() {
 			if !published[e.ID] {
 				_ = s.events.Send(conversation.WorkEvent{Event: e.Clone()})
 				published[e.ID] = true
+			}
+			if s.closing.Load() {
+				continue
 			}
 			w := e.Work
 			if !revoked[e.ID] && (e.Kind == work.WorkCancelled || e.Kind == work.WorkReassigned) {
@@ -236,6 +267,8 @@ func (s *Session) run() {
 			drain()
 		case e, ok := <-incoming:
 			if !ok {
+				s.closing.Store(true)
+				drain()
 				return
 			}
 			_ = s.events.Send(e)

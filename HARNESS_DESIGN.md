@@ -534,7 +534,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    `Session.NextEvent` is a transitional single-reader adapter for the existing TUI;
    independent subscriptions replace it in stage 4. The controller/store remain
    private, and external-package tests exercise construction and audited work.
-3. **Lifecycle finalization.** Add the admission gate, separate cancellation and
+3. **Lifecycle finalization — implemented.** Add the admission gate, separate cancellation and
    draining, and stable closing outcome. Check send/assignment racing close,
    timeout followed by another close, parent cancellation, cleanup failure,
    pending receipts, nested workflow compensation, resource I/O racing cleanup,
@@ -594,7 +594,10 @@ milestones and do not block the Go session, memory store, or JSONL diagnostics.
 
 ## Foundation scope
 
-The first two slices establish shared typed workflow operations, their tool
-adapters, and public `harness.Session` assembly with owned resources and transport.
-Lifecycle finalization, bounded event retention, recording, and HTTP remain
-subsequent slices. The next slice is coordinated shutdown and command admission.
+The first three slices establish shared typed workflow operations, their tool
+adapters, public `harness.Session` assembly with owned resources and transport,
+and coordinated shutdown. `Close(ctx)` starts independent finalization and only
+bounds the caller's wait. Commands reject admission while closing; inspections
+and the final event tail remain available. Cleanup failure leaves `State()` at
+`Closing`, and the next close retries only unfinished resources.
+Bounded event retention, recording, and HTTP remain subsequent slices.
