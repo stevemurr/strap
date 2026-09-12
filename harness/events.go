@@ -57,3 +57,24 @@ func (s *Session) Dispose(ctx context.Context) error {
 	}
 	return errors.Join(closeErr, s.log.Dispose(ctx))
 }
+
+// Log appends structured host diagnostics to the canonical event sequence.
+// It does not send model input. Payloads may contain sensitive task data; durable
+// capture is explicitly selected through EventConfig.JSONLPath.
+func (s *Session) Log(ctx context.Context, entry conversation.DiagnosticEvent) error {
+	_, done, err := s.admission.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	switch entry.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return errors.New("invalid diagnostic level")
+	}
+	d, err := conversation.EncodeEvent(entry)
+	if err != nil {
+		return err
+	}
+	return s.log.Publish(d)
+}

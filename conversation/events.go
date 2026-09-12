@@ -88,3 +88,12 @@ type UsageEvent struct {
 }
 
 func (UsageEvent) isEvent() {}
+
+// DiagnosticEvent is host logging, separate from messages addressed to models.
+type DiagnosticEvent struct {
+	Level   string            `json:"level"`
+	Message string            `json:"message"`
+	Fields  map[string]string `json:"fields,omitempty"`
+}
+
+func (DiagnosticEvent) isEvent() {}

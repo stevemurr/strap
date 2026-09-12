@@ -389,6 +389,10 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 func (m *model) observe(event conversation.Event) {
 	defer m.refreshActivity()
 	switch e := event.(type) {
+	case conversation.DiagnosticEvent:
+		if e.Level == "error" || e.Level == "warn" {
+			m.add("Diagnostic", e.Message, false)
+		}
 	case conversation.CommentaryEvent:
 		label := "Message"
 		if e.Agent == m.session.Root() {

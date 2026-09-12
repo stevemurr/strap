@@ -269,6 +269,12 @@ finite `session.Events(ctx, query)` pages, as described in
 cancels execution, drains final events, then closes owned resources. Its context
 limits the caller's wait, not cleanup. A cleanup error preserves `Closing` state;
 call `Close` again to retry unfinished resources. Inspection remains available.
+For durable diagnostics, set `cfg.Events.JSONLPath` or pass `-record trace.jsonl`
+to the CLI. Recording exclusively creates a new file and includes tool arguments,
+results, errors, and exact edit-failure snapshots. Traces contain task/file data.
+`eventlog.OpenJSONL(ctx, path)` inspects sealed or interrupted traces without
+resuming execution. Successful session closure syncs a JSONL trace.
+
 Call `Dispose(ctx)` when finished reading to release event storage. `Capture()`
 reports omissions and capture failures separately from execution state. Memory
 retention is bounded; an expired cursor is an explicit error. Lifecycle state

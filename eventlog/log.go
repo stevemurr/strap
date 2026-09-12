@@ -14,6 +14,7 @@ import (
 // Log owns the single publisher and shared wakeup generation. Queue limits bound
 // admitted payloads, including the write in progress; observers have no queues.
 type Log struct {
+	failureSink         func(error)
 	store               Store
 	limits              Limits
 	mu                  sync.Mutex
@@ -40,7 +41,12 @@ type Status struct {
 	Disposed     bool   `json:"disposed"`
 }
 
-func New(store Store, limits Limits) (*Log, error) {
+type Option func(*Log)
+
+// WithFailureSink runs once on the publisher after capture fails. The sink must
+// return promptly and must not wait for this log to finish or dispose.
+func WithFailureSink(sink func(error)) Option { return func(l *Log) { l.failureSink = sink } }
+func New(store Store, limits Limits, options ...Option) (*Log, error) {
 	if store == nil {
 		return nil, errors.New("event store is required")
 	}
@@ -50,6 +56,9 @@ func New(store Store, limits Limits) (*Log, error) {
 	w, cw := context.WithCancel(context.Background())
 	r, cr := context.WithCancel(context.Background())
 	l := &Log{store: store, limits: limits, wake: make(chan struct{}), done: make(chan struct{}), writeCtx: w, cancelWrite: cw, reads: admission.New(r), cancelReads: cr, disposeGate: make(chan struct{}, 1)}
+	for _, option := range options {
+		option(l)
+	}
 	go l.run()
 	return l, nil
 }
@@ -96,6 +105,14 @@ func (l *Log) Publish(d Data) error {
 }
 func (l *Log) run() {
 	defer close(l.done)
+	defer func() {
+		l.mu.Lock()
+		err := l.err
+		l.mu.Unlock()
+		if err != nil && l.failureSink != nil {
+			l.failureSink(err)
+		}
+	}()
 	defer l.cancelWrite()
 	for {
 		l.mu.Lock()

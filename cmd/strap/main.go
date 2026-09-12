@@ -28,6 +28,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	wkPath := flags.String("wkrender", "", "Path to wkrender (default PATH or ~/.harness/bin/wkrender)")
 	abPath := flags.String("agent-browser", "", "Path to agent-browser 0.37.1 (default PATH or Strap's isolated installation)")
 	browserPath := flags.String("browser-executable", "", "Chrome executable for open_url (default installed Chrome on macOS or agent-browser discovery)")
+	recordPath := flags.String("record", "", "Record session events and tool diagnostics to a new JSONL file")
 	modelOptions := modelFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -43,6 +44,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	}
 	cfg := harness.DefaultConfig()
 	cfg.Dir = *dir
+	cfg.Events.JSONLPath = *recordPath
 	cfg.Model = modelOptions.config(*baseURL, *model)
 	cfg.Model.Timeout = *timeout
 	cfg.Web = nil

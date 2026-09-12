@@ -58,13 +58,14 @@ type Config struct {
 }
 
 type Agent struct {
-	config      Config
-	tools       map[string]tool.Tool
-	definitions []provider.ToolDefinition
-	thread      thread
-	usage       usageTracker
-	started     atomic.Bool
-	control     lifecycle
+	nextInvocation uint64
+	config         Config
+	tools          map[string]tool.Tool
+	definitions    []provider.ToolDefinition
+	thread         thread
+	usage          usageTracker
+	started        atomic.Bool
+	control        lifecycle
 }
 
 func New(config Config) (*Agent, error) {
@@ -230,13 +231,15 @@ func (a *Agent) request() (provider.Request, uint64) {
 
 func (a *Agent) call(ctx context.Context, call provider.ToolCall) (result tool.Result, err error) {
 	started := time.Now()
-	a.reportTool(ToolActivity{Call: call, StartedAt: started})
+	a.nextInvocation++
+	invocation := fmt.Sprintf("%s/tool-%d", a.config.ID, a.nextInvocation)
+	a.reportTool(ToolActivity{InvocationID: invocation, Call: call, StartedAt: started})
 	defer func() {
 		observedErr := err
 		if observedErr == nil {
 			observedErr = ctx.Err()
 		}
-		a.reportTool(ToolActivity{Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr})
+		a.reportTool(ToolActivity{InvocationID: invocation, Diagnostic: tool.DiagnosticFrom(observedErr), Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr})
 	}()
 	t, ok := a.tools[call.Name]
 	if !ok {

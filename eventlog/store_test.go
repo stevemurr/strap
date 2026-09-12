@@ -345,3 +345,39 @@ func TestByteRetentionAndCaptureOmissionMetadata(t *testing.T) {
 		t.Fatal(p, err)
 	}
 }
+
+func TestJSONLContract(t *testing.T) {
+	storeContract(t, func() eventlog.Store {
+		s, err := eventlog.NewJSONL(t.TempDir()+"/trace.jsonl", "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	})
+}
+
+func TestCaptureFailureUsesIndependentSinkOnce(t *testing.T) {
+	s := &slowStore{Store: memory(t, 10, 4096), entered: make(chan struct{}), release: make(chan struct{}), fail: true}
+	close(s.release)
+	reported := make(chan error, 2)
+	l, err := eventlog.New(s, eventlog.Limits{Entries: 10, Bytes: 4096}, eventlog.WithFailureSink(func(err error) { reported <- err }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = l.Publish(data(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err = l.Finish(ctx, eventlog.Outcome{}); !errors.Is(err, eventlog.ErrCapture) {
+		t.Fatal(err)
+	}
+	if err = <-reported; !errors.Is(err, eventlog.ErrCapture) {
+		t.Fatal(err)
+	}
+	_ = l.Finish(ctx, eventlog.Outcome{})
+	if len(reported) != 0 {
+		t.Fatal("sink repeated")
+	}
+	if err = l.Dispose(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

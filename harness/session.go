@@ -51,6 +51,7 @@ func DefaultConfig() Config {
 }
 
 type EventConfig struct {
+	JSONLPath string // Empty uses memory; nonempty exclusively creates a durable trace file.
 	Retention eventlog.Limits
 	Queue     eventlog.Limits
 }
@@ -69,6 +70,7 @@ type OwnedResource struct {
 // also registered in Resources. Resource ownership transfers when New is called,
 // including when construction fails and returns a cleanup handle.
 type Dependencies struct {
+	CaptureFailure             func(error)       // Optional independent diagnostic sink; must return promptly.
 	Provider                   provider.Provider // Shared fallback for all roles, useful for eval fakes.
 	Root, Implementor, Auditor AgentDependencies
 	EventStore                 func(sessionID string) (eventlog.Store, error) // Factory transfers storage ownership; called once.
@@ -138,6 +140,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	s.id = hex.EncodeToString(id[:])
+	if s.config.Events.JSONLPath != "" && deps.EventStore != nil {
+		return nil, errors.New("configure JSONLPath or EventStore, not both")
+	}
 	if s.config.Events.Retention == (eventlog.Limits{}) {
 		s.config.Events.Retention = DefaultConfig().Events.Retention
 	}
@@ -158,12 +163,16 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		}
 	}
 	if store == nil {
-		store, err = eventlog.NewMemory(s.id, s.config.Events.Retention)
+		if s.config.Events.JSONLPath != "" {
+			store, err = eventlog.NewJSONL(s.config.Events.JSONLPath, s.id)
+		} else {
+			store, err = eventlog.NewMemory(s.id, s.config.Events.Retention)
+		}
 		if err != nil {
 			return nil, err
 		}
 	}
-	s.log, err = eventlog.New(store, s.config.Events.Queue)
+	s.log, err = eventlog.New(store, s.config.Events.Queue, eventlog.WithFailureSink(deps.CaptureFailure))
 	if err != nil {
 		return nil, err
 	}

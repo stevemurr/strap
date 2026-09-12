@@ -3,6 +3,7 @@ package tool
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -176,7 +177,7 @@ func (f *Files) write(ctx context.Context, _ Call, args writeArgs) (Result, erro
 	return JSON(WriteFileResult{Path: args.Path, BytesWritten: len(args.Content)})
 }
 
-func (f *Files) edit(ctx context.Context, _ Call, args editArgs) (Result, error) {
+func (f *Files) edit(ctx context.Context, _ Call, args editArgs) (result Result, err error) {
 	if err := f.lock(ctx); err != nil {
 		return Result{}, err
 	}
@@ -189,6 +190,11 @@ func (f *Files) edit(ctx context.Context, _ Call, args editArgs) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
+	defer func() {
+		if err != nil {
+			err = &DiagnosticError{Cause: err, Detail: Diagnostic{Kind: "file_edit", Edit: &EditDiagnostic{RequestedPath: args.Path, ResolvedPath: path, Before: text, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(text))), Old: args.Old, New: args.New}}}
+		}
+	}()
 	first := strings.Index(text, args.Old)
 	if first < 0 {
 		return Result{}, errors.New("old text was not found")

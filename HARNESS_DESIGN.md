@@ -549,7 +549,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    across read/append races. Verify synthesized workflow/startup events and add
    lifecycle revisions to state snapshots/events; test stale events and snapshots
    racing controls without confusing history revisions with state revisions.
-5. **Persistent diagnostics.** Implement JSONL against the event-store contract,
+5. **Persistent diagnostics — implemented.** Implement JSONL against the event-store contract,
    with tool invocation correlation and edit-failure snapshots. Check successful
    and failed calls, wrapped errors, exact searched text despite a subsequent edit,
    original model-visible errors, exclusive file creation, bounded paging, write/
@@ -610,4 +610,16 @@ inspection; `Close` retains it. Capture failure is a stable close error, but
 execution can still reach `Closed` after its resources have been released.
 The TUI uses a subscription and can refresh snapshots after observation failure.
 Agent state snapshots/events carry a lifecycle revision independent of history.
-Persistent recording, automatic telemetry, and HTTP remain subsequent slices.
+The fifth slice adds exclusive JSONL recording (`EventConfig.JSONLPath` or CLI
+`-record`), read-only inspection of interrupted traces, typed host logs via
+`Session.Log`, and an independent `Dependencies.CaptureFailure` sink. The sink
+must return promptly and must not wait for session finalization. Tool records
+carry runtime invocation IDs, arguments (including malformed JSON), result
+content, error text, timestamps, and host-only edit diagnostics. File edit failures
+preserve the exact searched text, resolved/requested paths, old/new strings, and
+SHA-256 from the operation itself; model-visible errors remain unchanged.
+JSONL reads scan with bounded buffers and no growing offset index. Successful
+seal syncs the file; append/flush alone do not establish durability. Reopening
+verifies record structure and ordering, not historical success of an fsync call.
+Full model request/response and external artifact capture remain outside current
+coverage. Automatic telemetry and HTTP remain subsequent slices.
