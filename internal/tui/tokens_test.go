@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,41 +27,24 @@ func batchEvent(id message.ActorID, revision uint64, calls ...string) conversati
 	return conversation.ToolBatchEvent{Agent: id, Batch: agent.ToolBatch{ContextRevision: revision, Calls: calls}}
 }
 
-func TestToolCountRunsOutsideUpdateAndKeepsInputUsable(t *testing.T) {
+func TestToolCountsAreObservedWithoutProviderCalls(t *testing.T) {
 	m, s := setup(t)
 	m.entries = nil
 	calls := 0
-	m.session = &countingSession{s, func(ctx context.Context, id message.ActorID, revision uint64) (int64, error) {
-		calls++
-		if id != "root" || revision != 5 {
-			t.Fatalf("wrong count target: %s %d", id, revision)
-		}
-		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) > 10*time.Second {
-			t.Fatal("count is not time bounded")
-		}
-		return 12345, nil
-	}}
+	m.session = &countingSession{s, func(context.Context, message.ActorID, uint64) (int64, error) { calls++; return 12345, nil }}
 	addTool(m, "root", "read_file")
 	addTool(m, "root", "shell")
-	_, cmd := m.Update(received{event: batchEvent("root", 5, "read_file", "shell")})
+	m.Update(received{event: batchEvent("root", 5, "read_file", "shell")})
 	if calls != 0 || !strings.Contains(m.View(), "counting context") {
-		t.Fatal("count blocked Update or pending state missing")
+		t.Fatal("batch did not register passive measurement")
 	}
 	enter(m, "still typing")
 	if len(s.sent) != 1 {
-		t.Fatal("count blocked input")
+		t.Fatal("input blocked")
 	}
-	commands, ok := cmd().(tea.BatchMsg)
-	if !ok || len(commands) != 2 {
-		t.Fatal("count stopped event listening")
-	}
-	m.Update(commands[1]())
-	if calls != 1 || !strings.Contains(m.View(), "12,345 context tokens") {
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 5, Count: 12345}})
+	if calls != 0 || !strings.Contains(m.View(), "12,345 context tokens") {
 		t.Fatal(m.View())
-	}
-	if again := m.countToolBatch(batchEvent("root", 5, "read_file", "shell")); again != nil {
-		t.Fatal("duplicate batch recounted")
 	}
 }
 
@@ -152,37 +134,9 @@ func TestToolCountZeroAndFailureAreDistinct(t *testing.T) {
 	}
 	m, _ := setup(t)
 	addTool(m, "root", "shell")
-	cmd := m.countToolBatch(batchEvent("root", 4, "shell"))
-	m.Update(cmd()) // A session without counting support remains usable.
+	m.countToolBatch(batchEvent("root", 4, "shell"))
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Error: "counting unavailable"}})
 	if !strings.Contains(m.View(), "context tokens unavailable") {
 		t.Fatal(m.View())
-	}
-}
-
-func TestQuitCancelsTokenCount(t *testing.T) {
-	m, s := setup(t)
-	started := make(chan struct{})
-	m.session = &countingSession{s, func(ctx context.Context, _ message.ActorID, _ uint64) (int64, error) {
-		close(started)
-		<-ctx.Done()
-		return 0, ctx.Err()
-	}}
-	addTool(m, "root", "shell")
-	cmd := m.countToolBatch(batchEvent("root", 4, "shell"))
-	done := make(chan tea.Msg, 1)
-	go func() { done <- cmd() }()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("count did not start")
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	select {
-	case result := <-done:
-		if !errors.Is(result.(countedTokens).err, context.Canceled) {
-			t.Fatal(result)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("token count leaked after quit")
 	}
 }

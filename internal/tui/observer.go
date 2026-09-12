@@ -48,3 +48,10 @@ func (s *observedSession) CountAgentTokens(ctx context.Context, id message.Actor
 	}
 	return 0, errors.New("token counting unavailable")
 }
+
+func (s *observedSession) AutomaticContextTokens() bool {
+	if source, ok := s.Session.(interface{ AutomaticContextTokens() bool }); ok {
+		return source.AutomaticContextTokens()
+	}
+	return false
+}

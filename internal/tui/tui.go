@@ -389,6 +389,12 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 func (m *model) observe(event conversation.Event) {
 	defer m.refreshActivity()
 	switch e := event.(type) {
+	case conversation.ContextTokensEvent:
+		var err error
+		if e.Error != "" {
+			err = errors.New(e.Error)
+		}
+		m.finishTokenCount(countedTokens{agent: e.Agent, revision: e.Revision, count: e.Count, err: err})
 	case conversation.DiagnosticEvent:
 		if e.Level == "error" || e.Level == "warn" {
 			m.add("Diagnostic", e.Message, false)

@@ -312,9 +312,8 @@ func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
 		return AgentInfo{}, err
 	}
 	owned := c.agents[id]
-	_, err := owned.agent.Pause()
+	state, err := owned.agent.PauseSnapshot()
 	info := owned.info
-	state := owned.agent.StateSnapshot()
 	info.State, info.StateRevision = state.State, state.Revision
 	return info, err
 }
@@ -326,9 +325,8 @@ func (c *Controller) ResumeAgent(id message.ActorID) (AgentInfo, error) {
 		return AgentInfo{}, err
 	}
 	owned := c.agents[id]
-	_, err := owned.agent.Resume()
+	state, err := owned.agent.ResumeSnapshot()
 	info := owned.info
-	state := owned.agent.StateSnapshot()
 	info.State, info.StateRevision = state.State, state.Revision
 	return info, err
 }
@@ -340,10 +338,9 @@ func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	if !ok {
 		return AgentInfo{}, fmt.Errorf("unknown agent: %s", id)
 	}
-	owned.agent.RequestStop()
+	state := owned.agent.RequestStopSnapshot()
 	owned.cancel()
 	info := owned.info
-	state := owned.agent.StateSnapshot()
 	info.State, info.StateRevision = state.State, state.Revision
 	return info, nil
 }

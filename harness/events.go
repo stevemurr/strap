@@ -18,6 +18,9 @@ func (s *Session) publish(e conversation.Event) {
 		return
 	}
 	_ = s.log.Publish(d)
+	if batch, ok := e.(conversation.ToolBatchEvent); ok && s.telemetry != nil {
+		s.telemetry.schedule(batch)
+	}
 }
 func (s *Session) Events(ctx context.Context, q eventlog.Query) (eventlog.Page, error) {
 	return s.log.Read(ctx, q)

@@ -36,6 +36,7 @@ type AgentConfig struct {
 }
 
 type Config struct {
+	Telemetry                  TelemetryConfig
 	Events                     EventConfig
 	Dir                        string
 	Model                      ModelConfig
@@ -46,7 +47,7 @@ type Config struct {
 
 // DefaultConfig returns independent CLI-compatible defaults without acquiring resources.
 func DefaultConfig() Config {
-	return Config{Events: EventConfig{Retention: eventlog.Limits{Entries: 4096, Bytes: 16 << 20}, Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	return Config{Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Retention: eventlog.Limits{Entries: 4096, Bytes: 16 << 20}, Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}}
 }
 
@@ -78,6 +79,8 @@ type Dependencies struct {
 }
 
 type Session struct {
+	effective       EffectiveConfig
+	telemetry       *telemetry
 	id              string
 	log             *eventlog.Log
 	legacyOnce      sync.Once
@@ -140,6 +143,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	s.id = hex.EncodeToString(id[:])
+	if err = s.config.Telemetry.defaults(); err != nil {
+		return nil, err
+	}
 	if s.config.Events.JSONLPath != "" && deps.EventStore != nil {
 		return nil, errors.New("configure JSONLPath or EventStore, not both")
 	}
@@ -228,18 +234,22 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	c := conversation.New(execution)
 	s.controller = c
+	s.telemetry = newTelemetry(s)
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
 		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish))
-	_, err = c.CreateAgent(message.User, agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), messaging, managementTools(s), deps.Root.Tools)})
+	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), messaging, managementTools(s), deps.Root.Tools)}
+	_, err = c.CreateAgent(message.User, rootSpec)
 	if err != nil {
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	implSpec, auditSpec := s.workflow.Specs()
+	s.effective = EffectiveConfig{Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil)}
 	s.mu.Lock()
 	s.stopOwner = context.AfterFunc(ctx, func() { s.startClose() })
 	s.mu.Unlock()
@@ -303,9 +313,6 @@ func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, rev
 	defer done()
 	return s.controller.CountAgentTokens(run, id, revision)
 }
-
-// NextEvent is the transitional single-reader adapter used by the TUI until
-// independent subscriptions replace the relay in the event-storage stage.
 
 func localTools(dir string) ([]tool.Tool, error) {
 	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir})

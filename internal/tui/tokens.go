@@ -2,9 +2,7 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strconv"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stevemurr/strap/conversation"
@@ -49,6 +47,9 @@ type tokenSession interface {
 }
 
 func (m *model) countToolBatch(event conversation.ToolBatchEvent) tea.Cmd {
+	if policy, ok := m.session.(interface{ AutomaticContextTokens() bool }); ok && !policy.AutomaticContextTokens() {
+		return nil
+	}
 	if len(event.Batch.Calls) == 0 || event.Batch.ContextRevision == 0 {
 		return nil
 	}
@@ -65,20 +66,7 @@ func (m *model) countToolBatch(event conversation.ToolBatchEvent) tea.Cmd {
 		if !m.selecting {
 			m.renderTranscript(false)
 		}
-		session, ok := m.session.(tokenSession)
-		return func() tea.Msg {
-			result := countedTokens{agent: event.Agent, revision: event.Batch.ContextRevision}
-			if !ok {
-				result.err = fmt.Errorf("session does not support token counting")
-				return result
-			}
-			// Display telemetry must not inherit a potentially hour-long model
-			// deadline. Bubble Tea runs this command away from the input loop.
-			ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-			defer cancel()
-			result.count, result.err = session.CountAgentTokens(ctx, event.Agent, event.Batch.ContextRevision)
-			return result
-		}
+		return nil
 	}
 	return nil // The corresponding tool was cleared from the display.
 }

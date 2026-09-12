@@ -97,3 +97,13 @@ type DiagnosticEvent struct {
 }
 
 func (DiagnosticEvent) isEvent() {}
+
+// ContextTokensEvent reports an automatic measurement of an exact history revision.
+type ContextTokensEvent struct {
+	Agent    message.ActorID `json:"agent"`
+	Revision uint64          `json:"revision"`
+	Count    int64           `json:"count"`
+	Error    string          `json:"error,omitempty"`
+}
+
+func (ContextTokensEvent) isEvent() {}

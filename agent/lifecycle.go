@@ -65,12 +65,12 @@ func (a *Agent) setStateLocked(state State) {
 }
 
 // Pause requests a boundary pause without canceling a model/tool operation.
-func (a *Agent) Pause() (State, error) {
+func (a *Agent) PauseSnapshot() (StateSnapshot, error) {
 	a.control.mu.Lock()
 	defer a.control.mu.Unlock()
 	state := a.control.state
 	if state.Terminal() || state == StopRequested {
-		return state, errors.New("agent is stopping or stopped")
+		return StateSnapshot{state, a.control.revision}, errors.New("agent is stopping or stopped")
 	}
 	if state != Paused && state != PauseRequested {
 		a.setStateLocked(PauseRequested)
@@ -78,27 +78,29 @@ func (a *Agent) Pause() (State, error) {
 	if a.control.waitCancel != nil {
 		a.control.waitCancel()
 	}
-	return a.control.state, nil
+	return StateSnapshot{a.control.state, a.control.revision}, nil
 }
+func (a *Agent) Pause() (State, error) { s, err := a.PauseSnapshot(); return s.State, err }
 
 // Resume releases a pause or retracts a pending pause. The loop reports its next
 // active state when it reaches the boundary; it never restarts a stopped agent.
-func (a *Agent) Resume() (State, error) {
+func (a *Agent) ResumeSnapshot() (StateSnapshot, error) {
 	a.control.mu.Lock()
 	defer a.control.mu.Unlock()
 	state := a.control.state
 	if state.Terminal() || state == StopRequested {
-		return state, errors.New("agent is stopping or stopped")
+		return StateSnapshot{state, a.control.revision}, errors.New("agent is stopping or stopped")
 	}
 	if state == Paused || state == PauseRequested {
 		a.setStateLocked(Running)
 	}
-	return a.control.state, nil
+	return StateSnapshot{a.control.state, a.control.revision}, nil
 }
+func (a *Agent) Resume() (State, error) { s, err := a.ResumeSnapshot(); return s.State, err }
 
 // RequestStop closes admission to further loop operations. The owner also
 // cancels Run's context so an in-flight provider or tool can terminate.
-func (a *Agent) RequestStop() State {
+func (a *Agent) RequestStopSnapshot() StateSnapshot {
 	a.control.mu.Lock()
 	defer a.control.mu.Unlock()
 	if !a.control.state.Terminal() {
@@ -107,8 +109,9 @@ func (a *Agent) RequestStop() State {
 	if a.control.waitCancel != nil {
 		a.control.waitCancel()
 	}
-	return a.control.state
+	return StateSnapshot{a.control.state, a.control.revision}
 }
+func (a *Agent) RequestStop() State { return a.RequestStopSnapshot().State }
 
 func (a *Agent) checkpoint(ctx context.Context) error {
 	for {

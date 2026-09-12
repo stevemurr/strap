@@ -555,7 +555,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    original model-visible errors, exclusive file creation, bounded paging, write/
    sync failure, read-only inspection of an interrupted trace, and durable sealing.
    Capture coverage, health, and retained range must remain distinguishable.
-6. **Headless eval readiness.** Centralize automatic telemetry policy, expose
+6. **Headless eval readiness — implemented.** Centralize automatic telemetry policy, expose
    completeness and effective-config inspection, and document trial completion.
    Check attachment does not change configured provider/tool calls, and use an
    external-package Go test to prove no internal imports are needed. Compare
@@ -622,4 +622,11 @@ JSONL reads scan with bounded buffers and no growing offset index. Successful
 seal syncs the file; append/flush alone do not establish durability. Reopening
 verifies record structure and ordering, not historical success of an fsync call.
 Full model request/response and external artifact capture remain outside current
-coverage. Automatic telemetry and HTTP remain subsequent slices.
+coverage. The sixth slice moves automatic context counting into a session-owned worker
+pool with configurable timeout, bounded concurrency/queue, and per-agent history
+revision deduplication. The TUI observes measurement records; `/agents` remains
+an explicit on-demand measurement request. `Configuration()` resolves built-in
+provider presets and records role prompts/tool order, while injected providers
+are marked opaque. `Inspect()` reports state, configuration, capture health and
+coverage without claiming a global atomic snapshot. External-package tests prove
+that observer attachment does not change provider traffic. HTTP remains next.

@@ -269,6 +269,19 @@ finite `session.Events(ctx, query)` pages, as described in
 cancels execution, drains final events, then closes owned resources. Its context
 limits the caller's wait, not cleanup. A cleanup error preserves `Closing` state;
 call `Close` again to retry unfinished resources. Inspection remains available.
+Automatic token counting belongs to the session (`cfg.Telemetry`), so attaching
+or detaching a view does not change provider traffic. Set `ContextTokens = false`
+to disable it. `Configuration()` shows resolved role configuration and marks
+injected providers as opaque. `Inspect()` includes capture coverage and health.
+
+For evals, choose a completion rule explicitly: a root reply, idle agent, consumed
+receipt, accepted work, and closed session are different facts. Grade the domain
+result, call `Close` to finalize evidence, inspect capture errors/omissions and
+retained cursor bounds, then `Dispose` after reading. Current capture includes
+domain events and tool diagnostics; it does not include full model requests,
+responses, or external artifacts. Compare causal events rather than assuming
+identical total ordering across concurrent runs.
+
 For durable diagnostics, set `cfg.Events.JSONLPath` or pass `-record trace.jsonl`
 to the CLI. Recording exclusively creates a new file and includes tool arguments,
 results, errors, and exact edit-failure snapshots. Traces contain task/file data.

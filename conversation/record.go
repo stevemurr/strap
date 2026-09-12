@@ -21,6 +21,9 @@ func EncodeEvent(e Event) (eventlog.Data, error) {
 	var actor message.ActorID
 	var payload any = e
 	switch v := e.(type) {
+	case ContextTokensEvent:
+		kind = "context_tokens"
+		actor = v.Agent
 	case DiagnosticEvent:
 		kind = "diagnostic"
 	case MessageEvent:
@@ -73,6 +76,8 @@ func decode[T Event](data []byte) (Event, error) {
 // directly. Domain event payloads are independent from the stored bytes.
 func DecodeEvent(e eventlog.Event) (Event, error) {
 	switch e.Kind {
+	case "context_tokens":
+		return decode[ContextTokensEvent](e.Payload)
 	case "diagnostic":
 		return decode[DiagnosticEvent](e.Payload)
 	case "message":

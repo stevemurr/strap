@@ -173,3 +173,12 @@ func TestCanceledRunReturnsCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLifecycleRevisionRejectsStaleEvents(t *testing.T) {
+	m, _ := setup(t)
+	m.observe(conversation.AgentStateChanged{Agent: "root", State: agent.Paused, Revision: 8})
+	m.observe(conversation.AgentStateChanged{Agent: "root", State: agent.Running, Revision: 7})
+	if m.states["root"] != agent.Paused || m.revisions["root"] != 8 {
+		t.Fatal(m.states, m.revisions)
+	}
+}

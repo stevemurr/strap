@@ -48,6 +48,9 @@ func (s *Session) startClose() *closeAttempt {
 		if s.workflow != nil {
 			s.workflow.BeginClosing()
 		}
+		if s.telemetry != nil {
+			s.telemetry.stop()
+		}
 		s.cancelExecution()
 	}
 	a := &closeAttempt{done: make(chan struct{})}
@@ -61,6 +64,9 @@ func (s *Session) finalize(a *closeAttempt) {
 		err = s.workflow.Close(context.Background())
 	} else if err == nil && s.controller != nil {
 		err = s.controller.Close(context.Background())
+	}
+	if s.telemetry != nil {
+		s.telemetry.wg.Wait()
 	}
 	if err == nil {
 		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)

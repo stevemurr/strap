@@ -322,3 +322,6 @@ func (s *Session) run() {
 		}
 	}
 }
+
+// Specs returns immutable role configuration for trusted assembly inspection.
+func (s *Session) Specs() (agent.Spec, agent.Spec) { return s.implementor.Clone(), s.auditor.Clone() }
