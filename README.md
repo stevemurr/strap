@@ -687,6 +687,10 @@ sandbox against concurrent filesystem changes, and shell access remains unrestri
 
 ## Current scope
 
+The next design revision, [streaming and recoverable session views](STREAMING_DESIGN.md),
+is audited but not implemented. It specifies one retained session log, subscriptions
+that replay then follow, and views reconstructed from that log.
+
 The public session API and adapter-independent architecture are tracked in
 [the audited harness design](HARNESS_DESIGN.md). Shared typed workflow operations
 back both the model tools and the public `harness.Session` API. Session assembly, coordinated shutdown, bounded event storage, JSONL diagnostics,

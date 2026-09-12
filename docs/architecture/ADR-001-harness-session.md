@@ -1,5 +1,9 @@
 # ADR-001: A session owns the harness independently of adapters
 
+The proposed observation/recovery successor is
+[ADR-002](ADR-002-recoverable-session-log.md). Its implementation is pending;
+the foundation described here remains the current runtime behavior.
+
 ## Context
 
 Strap already separates agent execution, message routing, the work ledger, model
