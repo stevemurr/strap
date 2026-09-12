@@ -59,14 +59,16 @@ type OutputStarted struct {
 func (OutputStarted) isAgentEvent() {}
 
 type OutputDelta struct {
-	Output identity.OutputID `json:"output"`
-	Offset uint64            `json:"offset"`
-	Text   string            `json:"text"`
+	Channel provider.OutputChannel `json:"channel"`
+	Output  identity.OutputID      `json:"output"`
+	Offset  uint64                 `json:"offset"`
+	Text    string                 `json:"text"`
 }
 
 func (OutputDelta) isAgentEvent() {}
 
 type OutputFinished struct {
+	ReasoningBytes  uint64
 	Output          identity.OutputID
 	Status          OutputStatus
 	Bytes           uint64

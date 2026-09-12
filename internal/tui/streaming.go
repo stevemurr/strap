@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/provider"
 )
 
 func (m *model) outputEntry(id identity.OutputID) *entry {
@@ -28,6 +29,9 @@ func (m *model) observeOutput(fact agent.Event) {
 		id := e.Output
 		m.entries[len(m.entries)-1].output = &id
 	case agent.OutputDelta:
+		if e.Channel == provider.ChannelReasoning {
+			return
+		} // Rendered separately from answer content.
 		row := m.outputEntry(e.Output)
 		if row == nil {
 			return

@@ -16,7 +16,7 @@ import (
 func readStream(r io.Reader, observer provider.Observer) (provider.Response, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
-	var text strings.Builder
+	var text, reasoning strings.Builder
 	calls := map[int]*functionCall{}
 	var usage json.RawMessage
 	role, finish := "", ""
@@ -33,9 +33,11 @@ func readStream(r io.Reader, observer provider.Observer) (provider.Response, err
 				Index  int     `json:"index"`
 				Finish *string `json:"finish_reason"`
 				Delta  struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-					Calls   []struct {
+					Reasoning        *string `json:"reasoning"`
+					ReasoningContent *string `json:"reasoning_content"`
+					Role             string  `json:"role"`
+					Content          string  `json:"content"`
+					Calls            []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Type     string `json:"type"`
@@ -70,18 +72,17 @@ func readStream(r io.Reader, observer provider.Observer) (provider.Response, err
 			return false, errors.New("choice after finish")
 		}
 		if c.Delta.Role != "" {
+			if c.Delta.Role != "assistant" {
+				return false, errors.New("expected assistant role")
+			}
 			if role != "" && role != c.Delta.Role {
 				return false, errors.New("conflicting role")
 			}
 			role = c.Delta.Role
 		}
-		if c.Delta.Content != "" {
-			if observer != nil {
-				if err := observer.OnDelta(provider.Delta{Text: c.Delta.Content}); err != nil {
-					return false, err
-				}
-			}
-			text.WriteString(c.Delta.Content)
+		reason, err := reasoningText(c.Delta.Reasoning, c.Delta.ReasoningContent)
+		if err != nil {
+			return false, err
 		}
 		for _, d := range c.Delta.Calls {
 			if d.Index < 0 || d.Index >= 128 {
@@ -109,6 +110,22 @@ func readStream(r io.Reader, observer provider.Observer) (provider.Response, err
 			}
 			call.Function.Name += d.Function.Name
 			call.Function.Arguments += d.Function.Arguments
+		}
+		if reason != "" {
+			if observer != nil {
+				if err := observer.OnDelta(provider.Delta{Channel: provider.ChannelReasoning, Text: reason}); err != nil {
+					return false, err
+				}
+			}
+			reasoning.WriteString(reason)
+		}
+		if c.Delta.Content != "" {
+			if observer != nil {
+				if err := observer.OnDelta(provider.Delta{Channel: provider.ChannelContent, Text: c.Delta.Content}); err != nil {
+					return false, err
+				}
+			}
+			text.WriteString(c.Delta.Content)
 		}
 		if c.Finish != nil {
 			finish = *c.Finish
@@ -147,6 +164,8 @@ func readStream(r io.Reader, observer provider.Observer) (provider.Response, err
 		}{Message: chatMessage{Role: role}, FinishReason: finish})
 		value := text.String()
 		assembled.Choices[0].Message.Content = &value
+		reason := reasoning.String()
+		assembled.Choices[0].Message.Reasoning = &reason
 		for i := 0; i < len(calls); i++ {
 			call := calls[i]
 			if call == nil {

@@ -9,6 +9,7 @@ import (
 )
 
 type OutputFinished struct {
+	ReasoningBytes  uint64             `json:"reasoning_bytes"`
 	Output          identity.OutputID  `json:"output"`
 	Status          agent.OutputStatus `json:"status"`
 	Bytes           uint64             `json:"bytes"`

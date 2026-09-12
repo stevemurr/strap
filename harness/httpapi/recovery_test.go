@@ -18,12 +18,15 @@ import (
 type streaming struct{ release chan struct{} }
 
 func (p streaming) Submit(ctx context.Context, _ provider.Request, o provider.Observer) (provider.Response, error) {
+	if err := o.OnDelta(provider.Delta{Channel: provider.ChannelReasoning, Text: "working 🌍"}); err != nil {
+		return provider.Response{}, err
+	}
 	if err := o.OnDelta(provider.Delta{Text: "partial 🌍"}); err != nil {
 		return provider.Response{}, err
 	}
 	select {
 	case <-p.release:
-		return provider.Response{Content: "partial 🌍 done"}, nil
+		return provider.Response{Content: "partial 🌍 done", Reasoning: "working 🌍"}, nil
 	case <-ctx.Done():
 		return provider.Response{}, ctx.Err()
 	}
@@ -66,7 +69,14 @@ func TestHTTPReconnectRecoversActiveOutputAndMatchesSDK(t *testing.T) {
 			t.Fatal(err)
 		}
 		cursor = r.Event.Sequence
-		if r.Event.Kind == "output_delta" {
+		if r.Event.Kind == "output_delta" && string(r.Event.Payload) != "" {
+			var delta agent.OutputDelta
+			if err := json.Unmarshal(r.Event.Payload, &delta); err != nil {
+				t.Fatal(err)
+			}
+			if delta.Channel != provider.ChannelContent {
+				continue
+			}
 			break
 		}
 	}
@@ -97,6 +107,23 @@ func TestHTTPReconnectRecoversActiveOutputAndMatchesSDK(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &text)
 	if text.Text != "partial 🌍" || !text.End {
 		t.Fatal(text)
+	}
+	reasonURL := fmt.Sprintf("%s/text?channel=reasoning&through=%d&max_bytes=128", endpoint, remote.Output.Through.Sequence)
+	w = request(t, service, "GET", reasonURL, nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var reasoning harness.TextPage
+	if err := json.Unmarshal(w.Body.Bytes(), &reasoning); err != nil {
+		t.Fatal(err)
+	}
+	if reasoning.Text != "working 🌍" || reasoning.Channel != provider.ChannelReasoning || !reasoning.End {
+		t.Fatal(reasoning)
+	}
+	// Explicit invalid channels must fail rather than fall back to answer content.
+	w = request(t, service, "GET", fmt.Sprintf("%s/text?channel=invalid&through=%d", endpoint, remote.Output.Through.Sequence), nil)
+	if w.Code != 400 {
+		t.Fatal(w.Code, w.Body.String())
 	}
 	close(release)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

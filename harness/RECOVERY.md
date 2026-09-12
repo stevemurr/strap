@@ -53,6 +53,35 @@ existing actor visibility rules and cannot dispatch anything. No inspection call
 resumes execution. The TUI uses the shared reducer, appends streaming text to one
 output row, and reconciles replies/commentary and optimistic input by stable IDs.
 
+## Reasoning and answer channels
+
+`provider.Delta.Channel` distinguishes `content` from `reasoning`. Existing Go
+providers may omit the channel to mean content; the harness always records the
+normalized explicit value. Unknown channels fail. The adapter recognizes
+`reasoning` and `reasoning_content`: null/missing fields are absent, identical
+values in both fields are emitted once, and conflicting values fail decoding.
+
+Both channels share an OutputID and lifecycle with independent UTF-8 offsets,
+prefix validation and terminal byte totals. `Bytes` / `TextBytes` remain answer
+content counts; `ReasoningBytes` counts recorded reasoning. `ReadOutputText`
+accepts `Channel` (default content) and returns a page identifying that channel at
+the fixed `Through` cursor. Neither a page end nor arrival of content establishes
+that reasoning has finished. Channels may interleave until output termination.
+
+One bounded coalescing buffer flushes on channel changes, size or the timer. The
+log preserves accepted observation order, not an inferred generation order.
+Complete JSON responses and unobserved final suffixes use reasoning-then-content
+order; both final prefixes validate before either suffix is published. The
+adapter still assembles complete response strings, including reasoning, so its
+peak response memory is not bounded by the coalescing buffer.
+
+Reasoning is required retained observation data, including accepted partial text
+on failure/cancellation. It is never copied to `provider.Message`, routed answer
+or commentary content, or subsequent model requests, and it does not advance
+history revisions. Provider-reported generation usage remains authoritative.
+A reasoning-only response cannot commit successful assistant history. Recording
+failure uses the same failed-log and execution-cancellation contract as content.
+
 ## Storage and lifecycle
 
 Default memory storage retains the entire session. `Events.Retention`, retained
@@ -68,8 +97,8 @@ uses bounded string/binary buffers, and frames bodies into chunks of at most
 64 KiB (smaller for smaller configured queues). Commands and storage reads admit
 at most 256 concurrent operations; HTTP defaults to 256 requests, including open
 streams, and permits a host-configured limit. Excess admission returns an explicit
-busy error. Agent text coalesces at 16 KiB or
-40 ms. Failure of a timer-driven flush cancels provider I/O even without another
+busy error. Agent text shares a 16 KiB coalescing buffer across channels, flushing on
+channel changes or every 40 ms. Failure of a timer-driven flush cancels provider I/O even without another
 callback; flush/join completes before history commitment.
 
 `Close` stops execution, joins producers and telemetry, closes execution resources,
@@ -82,7 +111,11 @@ archives are finite failed input; they cannot silently start running again.
 
 ## API migration
 
-This implementation writes schema **2**. Schema-1 archives have narrower coverage
+This implementation writes schema **3**. Readers also accept schema 2, normalizing
+its output deltas to content-only without rewriting stored records or hashes.
+Schema 2 does not establish whether the provider generated reasoning; it did not
+retain that channel. Schema-3 deltas require an explicit valid channel. Older
+readers reject schema 3. Schema-1 archives have narrower coverage
 and are rejected by the new archive reader/reducer rather than being presented as
 fully recoverable sessions. Provider implementations now implement
 `Submit(context.Context, provider.Request, provider.Observer)`. Nil observation

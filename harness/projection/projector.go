@@ -14,6 +14,7 @@ import (
 	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/work"
 	"hash"
 	"sort"
@@ -25,6 +26,7 @@ import (
 var ErrNotFound = errors.New("projection entity not found")
 
 type OutputView struct {
+	ReasoningBytes  uint64             `json:"reasoning_bytes"`
 	ID              identity.OutputID  `json:"id"`
 	Status          agent.OutputStatus `json:"status"`
 	ContextRevision uint64             `json:"context_revision"`
@@ -99,7 +101,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 	if e.Sequence != p.cursor.Sequence+1 {
 		return errors.New("projection sequence gap")
 	}
-	if e.Schema != eventlog.SchemaVersion {
+	if !eventlog.SupportedSchema(e.Schema) {
 		return errors.New("unsupported session record schema")
 	}
 	if p.closed {
@@ -191,11 +193,26 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
 			return err
 		}
+		channel, err := eventcodec.OutputChannel(e.Schema, v.Channel)
+		if err != nil {
+			return err
+		}
 		o, ok := p.outputs[v.Output]
-		if !ok || o.Status != agent.OutputActive || v.Offset != o.TextBytes || v.Text == "" || !utf8.ValidString(v.Text) || v.Output.Agent != actor {
+		size := o.TextBytes
+		if channel == provider.ChannelReasoning {
+			size = o.ReasoningBytes
+		}
+		if !ok || o.Status != agent.OutputActive || v.Offset != size || v.Text == "" || !utf8.ValidString(v.Text) || v.Output.Agent != actor {
 			return errors.New("invalid output delta")
 		}
-		commit = func() { o.TextBytes += uint64(len(v.Text)); p.outputs[v.Output] = o }
+		commit = func() {
+			if channel == provider.ChannelReasoning {
+				o.ReasoningBytes += uint64(len(v.Text))
+			} else {
+				o.TextBytes += uint64(len(v.Text))
+			}
+			p.outputs[v.Output] = o
+		}
 	case "history_appended":
 		var v agent.HistoryAppended
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
@@ -234,7 +251,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			return err
 		}
 		o, ok := p.outputs[v.Output]
-		if !ok || v.Output.Agent != actor || o.Status != agent.OutputActive || v.Bytes != o.TextBytes || v.FinishedAt.IsZero() {
+		if !ok || v.Output.Agent != actor || o.Status != agent.OutputActive || v.Bytes != o.TextBytes || v.ReasoningBytes != o.ReasoningBytes || v.FinishedAt.IsZero() {
 			return errors.New("invalid output finish")
 		}
 		if v.Status == agent.OutputComplete {

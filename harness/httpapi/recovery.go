@@ -5,6 +5,7 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/work"
 	"net/http"
 	"strconv"
@@ -78,7 +79,7 @@ func serveRecovery(w http.ResponseWriter, r *http.Request, s *harness.Session, p
 			respond(w, nil, err)
 			return true
 		}
-		v, err := s.ReadOutputText(r.Context(), harness.OutputTextQuery{Output: id, Through: eventlog.Cursor{Session: s.ID(), Sequence: through}, Offset: offset, MaxBytes: budget})
+		v, err := s.ReadOutputText(r.Context(), harness.OutputTextQuery{Channel: provider.OutputChannel(r.URL.Query().Get("channel")), Output: id, Through: eventlog.Cursor{Session: s.ID(), Sequence: through}, Offset: offset, MaxBytes: budget})
 		respond(w, v, err)
 		return true
 	}

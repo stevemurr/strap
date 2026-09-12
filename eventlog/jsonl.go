@@ -89,7 +89,7 @@ func OpenJSONL(ctx context.Context, path string) (*JSONL, error) {
 		if err = json.Unmarshal(line, &e); err != nil {
 			return nil, fmt.Errorf("invalid event record: %w", err)
 		}
-		if e.Schema != SchemaVersion || e.Sequence != s.latest+1 || e.Session == "" || s.session != "" && e.Session != s.session || s.outcome != nil {
+		if !SupportedSchema(e.Schema) || e.Sequence != s.latest+1 || e.Session == "" || s.session != "" && e.Session != s.session || s.outcome != nil {
 			return nil, errors.New("invalid trace schema, sequence, identity, or terminal order")
 		}
 		if err = e.Data.Validate(); err != nil {

@@ -33,7 +33,9 @@ type Message struct {
 	ToolCallID string           `json:"tool_call_id"`
 }
 
+// Reasoning is observation data and must never enter Message or future requests.
 type Response struct {
+	Reasoning string     `json:"reasoning"`
 	Content   string     `json:"content"`
 	ToolCalls []ToolCall `json:"tool_calls"`
 	Usage     *Usage     `json:"usage"`
@@ -72,9 +74,27 @@ func CopyCalls(in []ToolCall) []ToolCall {
 	return out
 }
 
-// Delta is an append-only, valid UTF-8 text prefix. Callbacks are serial.
+type OutputChannel string
+
+const (
+	ChannelContent   OutputChannel = "content"
+	ChannelReasoning OutputChannel = "reasoning"
+)
+
+func (c OutputChannel) Valid() bool { return c == ChannelContent || c == ChannelReasoning }
+
+// NormalizeChannel preserves source compatibility for content-only providers.
+func NormalizeChannel(c OutputChannel) OutputChannel {
+	if c == "" {
+		return ChannelContent
+	}
+	return c
+}
+
+// Delta is an append-only, valid UTF-8 prefix within a channel. Callbacks are serial.
 type Delta struct {
-	Text string `json:"text"`
+	Channel OutputChannel `json:"channel"`
+	Text    string        `json:"text"`
 }
 type Observer interface{ OnDelta(Delta) error }
 type ObserverFunc func(Delta) error

@@ -26,10 +26,12 @@ type Request struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    *string        `json:"content"`
-	ToolCalls  []functionCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Reasoning        *string        `json:"reasoning"`
+	ReasoningContent *string        `json:"reasoning_content"`
+	Role             string         `json:"role"`
+	Content          *string        `json:"content"`
+	ToolCalls        []functionCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
 
 type functionTool struct {
@@ -143,7 +145,11 @@ func decode(input completion) (provider.Response, error) {
 	if choice.Message.Role != "assistant" {
 		return provider.Response{Usage: usage}, fmt.Errorf("expected an assistant message")
 	}
-	result := provider.Response{Usage: usage}
+	reasoning, err := reasoningText(choice.Message.Reasoning, choice.Message.ReasoningContent)
+	if err != nil {
+		return provider.Response{Usage: usage}, err
+	}
+	result := provider.Response{Usage: usage, Reasoning: reasoning}
 	if choice.Message.Content != nil {
 		result.Content = *choice.Message.Content
 	}
@@ -192,4 +198,44 @@ func decodeUsage(raw json.RawMessage) *provider.Usage {
 		return nil
 	}
 	return u
+}
+
+func reasoningText(primary, alternate *string) (string, error) {
+	if primary != nil && alternate != nil && *primary != *alternate {
+		return "", fmt.Errorf("conflicting reasoning fields")
+	}
+	if primary != nil {
+		return *primary, nil
+	}
+	if alternate != nil {
+		return *alternate, nil
+	}
+	return "", nil
+}
+
+// Observe complete JSON text before termination validation, so length-limited
+// responses retain their structurally valid output without accepting tool calls.
+func observeCompletion(input completion, observer provider.Observer) error {
+	if len(input.Choices) != 1 || input.Choices[0].Message.Role != "assistant" {
+		return fmt.Errorf("expected one assistant choice")
+	}
+	m := input.Choices[0].Message
+	reasoning, err := reasoningText(m.Reasoning, m.ReasoningContent)
+	if err != nil {
+		return err
+	}
+	text := ""
+	if m.Content != nil {
+		text = *m.Content
+	}
+	if observer != nil {
+		for _, d := range []provider.Delta{{Channel: provider.ChannelReasoning, Text: reasoning}, {Channel: provider.ChannelContent, Text: text}} {
+			if d.Text != "" {
+				if err := observer.OnDelta(d); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }

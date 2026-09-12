@@ -92,7 +92,7 @@ func decode[T conversation.Event](data []byte) (conversation.Event, error) {
 // DecodeEvent returns nil for log control records, which callers may inspect
 // directly. Domain event payloads are independent from the stored bytes.
 func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
-	if e.Schema != eventlog.SchemaVersion {
+	if !eventlog.SupportedSchema(e.Schema) {
 		return nil, fmt.Errorf("unsupported event schema %d", e.Schema)
 	}
 	if _, ok := record.Frame(e.Payload); ok {

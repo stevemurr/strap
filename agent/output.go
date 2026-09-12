@@ -17,25 +17,30 @@ import (
 
 const outputChunkBytes = 16 << 10
 
+type channelProgress struct {
+	accepted      uint64
+	observed      hash.Hash
+	observedBytes uint64
+}
+
 // outputBuffer owns at most one chunk of pending text. The timer flushes even
 // when the provider has stopped invoking callbacks. Publication uses drain life.
 type outputBuffer struct {
-	mu                sync.Mutex
-	agent             *Agent
-	id                identity.OutputID
-	execution         context.Context
-	cancel            context.CancelFunc
-	pending           string
-	accepted          uint64
-	observed          hash.Hash
-	observedBytes     uint64
-	publicationFailed bool
-	err               error
-	stop, done        chan struct{}
+	mu                 sync.Mutex
+	agent              *Agent
+	id                 identity.OutputID
+	execution          context.Context
+	cancel             context.CancelFunc
+	pending            string
+	channel            provider.OutputChannel
+	content, reasoning channelProgress
+	publicationFailed  bool
+	err                error
+	stop, done         chan struct{}
 }
 
 func newOutputBuffer(a *Agent, ctx context.Context, cancel context.CancelFunc, id identity.OutputID) *outputBuffer {
-	b := &outputBuffer{observed: sha256.New(), agent: a, id: id, execution: ctx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{})}
+	b := &outputBuffer{agent: a, id: id, execution: ctx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{}), content: channelProgress{observed: sha256.New()}, reasoning: channelProgress{observed: sha256.New()}}
 	go func() {
 		defer close(b.done)
 		ticker := time.NewTicker(40 * time.Millisecond)
@@ -53,33 +58,56 @@ func newOutputBuffer(a *Agent, ctx context.Context, cancel context.CancelFunc, i
 	}()
 	return b
 }
+func (b *outputBuffer) progress(c provider.OutputChannel) *channelProgress {
+	if c == provider.ChannelReasoning {
+		return &b.reasoning
+	}
+	return &b.content
+}
 func (b *outputBuffer) flush() {
 	if b.err != nil || b.pending == "" {
 		return
 	}
-	if err := b.agent.report(OutputDelta{Output: b.id, Offset: b.accepted, Text: b.pending}); err != nil {
+	progress := b.progress(b.channel)
+	if err := b.agent.report(OutputDelta{Output: b.id, Channel: b.channel, Offset: progress.accepted, Text: b.pending}); err != nil {
 		b.err = err
 		b.publicationFailed = true
 		b.cancel()
 		return
 	}
-	b.accepted += uint64(len(b.pending))
+	progress.accepted += uint64(len(b.pending))
 	b.pending = ""
 }
 func (b *outputBuffer) OnDelta(d provider.Delta) error {
-	if err := b.execution.Err(); err != nil {
-		return err
-	}
-	if !utf8.ValidString(d.Text) {
-		return errors.New("provider delta is not valid UTF-8")
-	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
 		return b.err
 	}
-	b.observed.Write([]byte(d.Text))
-	b.observedBytes += uint64(len(d.Text))
+	reject := func(err error) error { b.err = err; b.cancel(); return err }
+	if err := b.execution.Err(); err != nil {
+		return reject(err)
+	}
+	d.Channel = provider.NormalizeChannel(d.Channel)
+	if !d.Channel.Valid() {
+		return reject(errors.New("invalid output channel"))
+	}
+	if !utf8.ValidString(d.Text) {
+		return reject(errors.New("provider delta is not valid UTF-8"))
+	}
+	if d.Text == "" {
+		return nil
+	}
+	if b.channel != d.Channel {
+		b.flush()
+		if b.err != nil {
+			return b.err
+		}
+		b.channel = d.Channel
+	}
+	progress := b.progress(d.Channel)
+	progress.observed.Write([]byte(d.Text))
+	progress.observedBytes += uint64(len(d.Text))
 	text := d.Text
 	for len(text) > 0 {
 		n := min(len(text), outputChunkBytes-len(b.pending))
@@ -104,21 +132,33 @@ func (b *outputBuffer) OnDelta(d provider.Delta) error {
 	}
 	return nil
 }
-func (b *outputBuffer) finish(final string, success bool) (uint64, error) {
+func (b *outputBuffer) finish(final provider.Response, success bool) (uint64, uint64, error) {
 	if success {
+		// Validate both prefixes before publishing either missing suffix.
 		b.mu.Lock()
-		prefix := b.observed.Sum(nil)
-		observedBytes := b.observedBytes
+		channels := []struct {
+			channel  provider.OutputChannel
+			text     string
+			progress *channelProgress
+		}{
+			{provider.ChannelReasoning, final.Reasoning, &b.reasoning},
+			{provider.ChannelContent, final.Content, &b.content},
+		}
+		valid := b.err == nil
+		for _, v := range channels {
+			if !utf8.ValidString(v.text) || uint64(len(v.text)) < v.progress.observedBytes || !prefixMatches(v.text, v.progress.observedBytes, v.progress.observed.Sum(nil)) {
+				b.err = errors.Join(b.err, errors.New("final response conflicts with streamed "+string(v.channel)))
+				valid = false
+			}
+		}
 		b.mu.Unlock()
-		if !utf8.ValidString(final) || uint64(len(final)) < observedBytes || !prefixMatches(final, observedBytes, prefix) {
-			b.mu.Lock()
-			b.err = errors.New("final response conflicts with streamed text")
-			b.mu.Unlock()
-		} else if suffix := final[observedBytes:]; suffix != "" {
-			if err := b.OnDelta(provider.Delta{Text: suffix}); err != nil {
-				b.mu.Lock()
-				b.err = errors.Join(b.err, err)
-				b.mu.Unlock()
+		if valid {
+			for _, v := range channels {
+				if suffix := v.text[v.progress.observedBytes:]; suffix != "" {
+					if err := b.OnDelta(provider.Delta{Channel: v.channel, Text: suffix}); err != nil {
+						break
+					}
+				}
 			}
 		}
 	}
@@ -126,14 +166,14 @@ func (b *outputBuffer) finish(final string, success bool) (uint64, error) {
 	<-b.done
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// A provider failure must not discard accepted callbacks still pending flush.
+	// Accepted callbacks remain recoverable even when completion validation fails.
 	prior := b.err
 	b.err = nil
 	if !b.publicationFailed {
 		b.flush()
 	}
 	b.err = errors.Join(prior, b.err)
-	return b.accepted, b.err
+	return b.content.accepted, b.reasoning.accepted, b.err
 }
 func (a *Agent) generate(ctx context.Context, request provider.Request, revision uint64) (provider.Response, identity.OutputID, error) {
 	a.nextOutput++
@@ -145,7 +185,7 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 	defer cancel()
 	b := newOutputBuffer(a, run, cancel, id)
 	response, err := a.config.Spec.Provider.Submit(run, request, b)
-	bytes, flushErr := b.finish(response.Content, err == nil)
+	bytes, reasoningBytes, flushErr := b.finish(response, err == nil)
 	err = errors.Join(err, flushErr, a.recordUsage(revision, response.Usage), a.reportError())
 	var position *uint64
 	status := OutputFailed
@@ -174,7 +214,7 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 	if err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		status = OutputCanceled
 	}
-	finishErr := a.report(OutputFinished{Output: id, Status: status, Bytes: bytes, HistoryPosition: position, Err: err, FinishedAt: time.Now().UTC()})
+	finishErr := a.report(OutputFinished{Output: id, Status: status, Bytes: bytes, ReasoningBytes: reasoningBytes, HistoryPosition: position, Err: err, FinishedAt: time.Now().UTC()})
 	return response, id, errors.Join(err, finishErr)
 }
 

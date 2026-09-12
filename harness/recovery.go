@@ -14,6 +14,7 @@ import (
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/provider"
 	"unicode/utf8"
 )
 
@@ -24,17 +25,19 @@ type OutputInspection struct {
 	Source eventlog.Head         `json:"source"`
 }
 type OutputTextQuery struct {
+	Channel  provider.OutputChannel
 	Output   identity.OutputID
 	Through  eventlog.Cursor
 	Offset   uint64
 	MaxBytes int
 }
 type TextPage struct {
-	Through eventlog.Cursor `json:"through"`
-	Offset  uint64          `json:"offset"`
-	Text    string          `json:"text"`
-	Next    uint64          `json:"next"`
-	End     bool            `json:"end"`
+	Channel provider.OutputChannel `json:"channel"`
+	Through eventlog.Cursor        `json:"through"`
+	Offset  uint64                 `json:"offset"`
+	Text    string                 `json:"text"`
+	Next    uint64                 `json:"next"`
+	End     bool                   `json:"end"`
 }
 type ContentQuery struct {
 	ID       identity.ContentID
@@ -92,7 +95,11 @@ func (s *Session) InspectOutput(ctx context.Context, id identity.OutputID) (Outp
 	return OutputInspection{Output: o, Source: head}, err
 }
 func (s *Session) ReadOutputText(ctx context.Context, q OutputTextQuery) (TextPage, error) {
-	page := TextPage{Through: q.Through, Offset: q.Offset, Next: q.Offset}
+	q.Channel = provider.NormalizeChannel(q.Channel)
+	page := TextPage{Channel: q.Channel, Through: q.Through, Offset: q.Offset, Next: q.Offset}
+	if !q.Channel.Valid() {
+		return page, fmt.Errorf("%w: channel", ErrReadQuery)
+	}
 	if q.MaxBytes < 1 || q.MaxBytes > 1<<20 {
 		return page, fmt.Errorf("%w: max_bytes must be between 1 and 1048576", ErrReadQuery)
 	}
@@ -132,11 +139,19 @@ func (s *Session) ReadOutputText(ctx context.Context, q OutputTextQuery) (TextPa
 				continue
 			}
 			var d struct {
-				Offset uint64 `json:"offset"`
-				Text   string `json:"text"`
+				Channel provider.OutputChannel `json:"channel"`
+				Offset  uint64                 `json:"offset"`
+				Text    string                 `json:"text"`
 			}
 			if err := json.Unmarshal(e.Payload, &d); err != nil {
 				return page, err
+			}
+			channel, err := eventcodec.OutputChannel(e.Schema, d.Channel)
+			if err != nil {
+				return page, err
+			}
+			if channel != q.Channel {
+				continue
 			}
 			if d.Offset != total || !utf8.ValidString(d.Text) {
 				return page, errors.New("invalid output text sequence")

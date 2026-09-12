@@ -81,6 +81,9 @@ func (c *Client) Submit(ctx context.Context, wire any, observer provider.Observe
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return provider.Response{}, fmt.Errorf("decode response: %w", err)
 	}
+	if err := observeCompletion(result, observer); err != nil {
+		return provider.Response{Usage: decodeUsage(result.Usage)}, err
+	}
 	return decode(result)
 }
 

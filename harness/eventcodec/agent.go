@@ -10,6 +10,7 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/provider"
 )
 
 func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
@@ -21,6 +22,11 @@ func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
 		kind = "output_started"
 		output = &e.Output
 	case agent.OutputDelta:
+		e.Channel = provider.NormalizeChannel(e.Channel)
+		if !e.Channel.Valid() {
+			return eventlog.Data{}, nil, errors.New("invalid output channel")
+		}
+		payload = e
 		kind = "output_delta"
 		output = &e.Output
 	case agent.HistoryAppended:
@@ -29,7 +35,7 @@ func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
 	case agent.OutputFinished:
 		kind = "output_finished"
 		output = &e.Output
-		p := record.OutputFinished{Output: e.Output, Status: e.Status, Bytes: e.Bytes, HistoryPosition: e.HistoryPosition, FinishedAt: e.FinishedAt}
+		p := record.OutputFinished{Output: e.Output, Status: e.Status, Bytes: e.Bytes, ReasoningBytes: e.ReasoningBytes, HistoryPosition: e.HistoryPosition, FinishedAt: e.FinishedAt}
 		if e.Err != nil {
 			code := "generation_failed"
 			if errors.Is(e.Err, context.DeadlineExceeded) {
@@ -64,6 +70,11 @@ func decodeAgent(e eventlog.Event) (conversation.Event, error) {
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
 			return nil, err
 		}
+		channel, err := OutputChannel(e.Schema, v.Channel)
+		if err != nil {
+			return nil, err
+		}
+		v.Channel = channel
 		fact = v
 	case "history_appended":
 		var v agent.HistoryAppended
@@ -76,11 +87,28 @@ func decodeAgent(e eventlog.Event) (conversation.Event, error) {
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
 			return nil, err
 		}
-		f := agent.OutputFinished{Output: v.Output, Status: v.Status, Bytes: v.Bytes, HistoryPosition: v.HistoryPosition, FinishedAt: v.FinishedAt}
+		f := agent.OutputFinished{Output: v.Output, Status: v.Status, Bytes: v.Bytes, ReasoningBytes: v.ReasoningBytes, HistoryPosition: v.HistoryPosition, FinishedAt: v.FinishedAt}
 		if v.Error != nil {
 			f.Err = errors.New(v.Error.Message)
 		}
 		fact = f
 	}
 	return conversation.AgentEvent{Agent: identity.ActorID(e.Agent), Event: fact}, nil
+}
+
+// OutputChannel interprets legacy content records without modifying stored bytes.
+func OutputChannel(schema int, c provider.OutputChannel) (provider.OutputChannel, error) {
+	if !eventlog.SupportedSchema(schema) {
+		return "", fmt.Errorf("unsupported event schema %d", schema)
+	}
+	if schema == 2 {
+		if c != "" && c != provider.ChannelContent {
+			return "", errors.New("reasoning in content-only schema")
+		}
+		return provider.ChannelContent, nil
+	}
+	if !c.Valid() {
+		return "", errors.New("invalid output channel")
+	}
+	return c, nil
 }

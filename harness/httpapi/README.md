@@ -53,7 +53,7 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /audits/{audit}?actor=...` | Audit snapshot |
 | `GET /events?after=N&limit=N&max_bytes=N` | Finite retained page, accepted head, exclusive cursor and seal outcome |
 | `GET /outputs/{agent}/{call}` | Output metadata, applied cursor and source health |
-| `GET /outputs/{agent}/{call}/text?through=N&offset=N&max_bytes=N` | UTF-8 text page at a fixed session prefix; `through` is required |
+| `GET /outputs/{agent}/{call}/text?channel=content|reasoning&through=N&offset=N&max_bytes=N` | UTF-8 text page at a fixed session prefix; `through` is required |
 | `GET /contents/{id}?offset=N&max_bytes=N` | Immutable content byte page; JSON data uses base64 |
 | `GET /events/stream?after=N` | Independent NDJSON subscription |
 | `POST /logs` | `{ "level": "info", "message": "...", "fields": {"key":"value"} }` |
@@ -92,9 +92,13 @@ Capture failure drains the readable prefix, reports an error, and cancels execut
 Output/content reads require the same named-session read authorization as events.
 They default to 64 KiB pages and allow at most 1 MiB.
 
-Schema 2 adds `output_started`, `output_delta`, `output_finished`,
-`history_appended`, and `content_chunk`. Text offsets and terminal byte counts use
-UTF-8 bytes. Full payload framing, correlation, cancellation, archive compatibility,
+Schema 3 retains `output_started`, `output_delta`, `output_finished`,
+`history_appended`, and `content_chunk`. Each output delta explicitly identifies
+`channel: "content"` or `channel: "reasoning"`, with independent UTF-8 byte offsets.
+Output inspection and finish records include `reasoning_bytes`; existing
+`text_bytes` / `bytes` fields still count answer content. Text reads default to
+`content` and accept `channel=reasoning`; an unknown channel returns 400.
+Reasoning is retained for inspection and never added to model conversation history. Full payload framing, correlation, cancellation, archive compatibility,
 and Go subscription examples are specified in [the recovery contract](../RECOVERY.md).
 
 Run `go test -race ./harness/httpapi` for the direct/HTTP audit-repair parity,
