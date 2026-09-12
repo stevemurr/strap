@@ -1,12 +1,45 @@
 package tui
 
 import (
+	"errors"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/provider"
+	"strings"
 	"testing"
 )
+
+func TestReasoningDisplayKeepsUserChoiceAndFailedPartialText(t *testing.T) {
+	m, _ := setup(t)
+	m.entries = nil
+	id := identity.OutputID{Agent: "root", Call: 1}
+	observe := func(e agent.Event) { m.Update(received{event: conversation.AgentEvent{Agent: "root", Event: e}}) }
+	observe(agent.OutputStarted{Output: id})
+	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Text: "private reasoning"})
+	if !strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.entries[0].body != "" {
+		t.Fatal(m.View())
+	}
+	// Explicit collapse then expansion prevents the first content chunk collapsing it.
+	m.Update(tea.KeyMsg{Type: tea.KeyF3})
+	if strings.Contains(ansi.Strip(m.View()), "private reasoning") {
+		t.Fatal(m.View())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyF3})
+	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelContent, Text: "partial answer"})
+	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Offset: 17, Text: " continues"})
+	observe(agent.OutputFinished{Output: id, Status: agent.OutputFailed, Err: errors.New("length limit")})
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "private reasoning continues") || !strings.Contains(view, "partial answer") || !strings.Contains(view, "failed") || len(m.entries) != 1 {
+		t.Fatal(view)
+	}
+	if m.entries[0].body != "partial answer" {
+		t.Fatal("reasoning mixed into answer")
+	}
+}
 
 func TestStreamUpdatesOneRowAndReplyReconciles(t *testing.T) {
 	m, _ := setup(t)

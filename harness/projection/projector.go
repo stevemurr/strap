@@ -531,7 +531,10 @@ func (p *Projector) Output(id identity.OutputID) (OutputView, error) {
 	if !ok {
 		return OutputView{}, ErrNotFound
 	}
-	o.Through = p.cursor
+	return copyOutput(o, p.cursor), nil
+}
+func copyOutput(o OutputView, cursor eventlog.Cursor) OutputView {
+	o.Through = cursor
 	if o.HistoryPosition != nil {
 		v := *o.HistoryPosition
 		o.HistoryPosition = &v
@@ -540,7 +543,37 @@ func (p *Projector) Output(id identity.OutputID) (OutputView, error) {
 		v := *o.Error
 		o.Error = &v
 	}
-	return o, nil
+	return o
+}
+
+// Outputs returns a finite page in call order, including active and failed calls.
+// Before is exclusive; zero selects the latest page. Each view shares one cursor.
+func (p *Projector) Outputs(actor identity.ActorID, before uint64, limit int) ([]OutputView, bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if limit < 1 || limit > 1000 {
+		return nil, false, errors.New("invalid output limit")
+	}
+	if _, ok := p.agents[actor]; !ok {
+		return nil, false, ErrNotFound
+	}
+	end := p.calls[actor]
+	if before > 0 && before-1 < end {
+		end = before - 1
+	}
+	start := uint64(1)
+	if end >= uint64(limit) {
+		start = end - uint64(limit) + 1
+	}
+	result := make([]OutputView, 0, limit)
+	for n := start; n <= end; n++ {
+		o, ok := p.outputs[identity.OutputID{Agent: actor, Call: n}]
+		if !ok {
+			return nil, false, errors.New("missing output call")
+		}
+		result = append(result, copyOutput(o, p.cursor))
+	}
+	return result, start > 1, nil
 }
 func (p *Projector) Content(id identity.ContentID) (eventlog.ContentRef, error) {
 	p.mu.RLock()

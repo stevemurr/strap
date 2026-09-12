@@ -27,16 +27,32 @@ func (m *model) observeOutput(fact agent.Event) {
 		}
 		m.addDetail(label, fmt.Sprintf("%s · generating", e.Output.Agent), "", false)
 		id := e.Output
-		m.entries[len(m.entries)-1].output = &id
+		row := &m.entries[len(m.entries)-1]
+		row.output = &id
+		row.reasoningExpanded = true
+		if m.reasoningExpanded != nil {
+			row.reasoningExpanded = *m.reasoningExpanded
+		}
 	case agent.OutputDelta:
-		if e.Channel == provider.ChannelReasoning {
-			return
-		} // Rendered separately from answer content.
 		row := m.outputEntry(e.Output)
 		if row == nil {
 			return
 		}
-		row.body += safeText(e.Text)
+		if e.Channel == provider.ChannelReasoning {
+			row.reasoning += safeText(e.Text)
+			if !row.contentStarted {
+				row.meta = fmt.Sprintf("%s · thinking", e.Output.Agent)
+			}
+		} else {
+			if !row.contentStarted {
+				row.contentStarted = true
+				if m.reasoningExpanded == nil {
+					row.reasoningExpanded = false
+				}
+			}
+			row.body += safeText(e.Text)
+			row.meta = fmt.Sprintf("%s · responding", e.Output.Agent)
+		}
 		row.renderWidth = 0
 	case agent.OutputFinished:
 		row := m.outputEntry(e.Output)
@@ -52,4 +68,25 @@ func (m *model) observeOutput(fact agent.Event) {
 	if !m.selecting {
 		m.renderTranscript(false)
 	}
+}
+
+// F3 changes view state only. Further chunks and completion cannot undo it.
+func (m *model) toggleReasoning() {
+	expanded := true
+	if m.reasoningExpanded != nil {
+		expanded = !*m.reasoningExpanded
+	} else {
+		for i := len(m.entries) - 1; i >= 0; i-- {
+			if m.entries[i].reasoning != "" {
+				expanded = !m.entries[i].reasoningExpanded
+				break
+			}
+		}
+	}
+	m.reasoningExpanded = &expanded
+	for i := range m.entries {
+		m.entries[i].reasoningExpanded = expanded
+		m.entries[i].renderWidth = 0
+	}
+	m.renderTranscript(false)
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
@@ -22,6 +23,7 @@ import (
 func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	reasonVisible := make(chan struct{})
 	next := make(chan struct{})
 	finish := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +36,14 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: "+`{"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"Early reasoning"}}]}`+"\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-reasonVisible:
+		case <-ctx.Done():
+			return
+		}
+
 		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Early text\"}}]}\n\n")
 		w.(http.Flusher).Flush()
 		select {
@@ -68,7 +78,7 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	if _, err := session.Send(session.Root(), "respond"); err != nil {
 		t.Fatal(err)
 	}
-	firstVisible, secondVisible := false, false
+	reasoningVisible, firstVisible, secondVisible := false, false, false
 	for {
 		msg := m.listen()().(received)
 		if msg.err != nil {
@@ -76,6 +86,10 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 		}
 		m.Update(msg)
 		view := ansi.Strip(m.View())
+		if !reasoningVisible && strings.Contains(view, "Early reasoning") {
+			reasoningVisible = true
+			close(reasonVisible)
+		}
 		if !firstVisible && strings.Contains(view, "Early text") {
 			firstVisible = true
 			close(next)
@@ -88,8 +102,29 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 			t.Fatal("streaming overwrote draft input")
 		}
 		if e, ok := msg.event.(conversation.MessageEvent); ok && e.Message.Kind == message.Reply && e.Message.To == message.User {
-			if !firstVisible || !secondVisible || strings.Count(view, "Early text arrives") != 1 {
+			if !reasoningVisible || !firstVisible || !secondVisible || strings.Count(view, "Early text arrives") != 1 {
 				t.Fatalf("expected one incrementally rendered reply:\n%s", view)
+			}
+			if strings.Contains(view, "Early reasoning") {
+				t.Fatal("reasoning did not auto-collapse")
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyF3})
+			if !strings.Contains(ansi.Strip(m.View()), "Early reasoning") {
+				t.Fatal("cannot expand reasoning")
+			}
+			// Clearing display rows must not destroy reasoning inspection.
+			enter(m, "/clear")
+			m.openTranscript(session.Root())
+			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+			if cmd == nil {
+				t.Fatal("reasoning inspection did not load")
+			}
+			m.Update(cmd())
+			if !strings.Contains(ansi.Strip(m.View()), "Early reasoning") || m.transcript.err != "" {
+				t.Fatal(m.View())
+			}
+			if strings.Contains(ansi.Strip(m.View()), "Early text arrives") {
+				t.Fatal("reasoning inspection mixed answer history")
 			}
 			return
 		}

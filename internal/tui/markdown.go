@@ -32,6 +32,16 @@ func (m *model) renderBody(e *entry) string {
 			}
 		}
 	}
+	if e.reasoning != "" {
+		heading := "▸ Reasoning · F3 expand"
+		if e.reasoningExpanded {
+			heading = "▾ Reasoning · F3 collapse\n" + e.reasoning
+		}
+		if body != "" {
+			heading += "\n\n"
+		}
+		body = dimStyle.Render(heading) + body
+	}
 	// Wide tables and code lines must also fit after a terminal resize.
 	wrapped := ansi.Hardwrap(lipgloss.NewStyle().Width(width).Render(body), width, true)
 	var lines []string

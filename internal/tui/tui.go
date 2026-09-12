@@ -62,6 +62,9 @@ type received struct {
 }
 
 type entry struct {
+	reasoning         string
+	reasoningExpanded bool
+	contentStarted    bool
 	output            *identity.OutputID
 	message           identity.MessageID
 	label, meta, body string
@@ -74,39 +77,40 @@ type entry struct {
 }
 
 type model struct {
-	transcript     *transcriptView
-	ctx            context.Context
-	cancel         context.CancelFunc
-	session        Session
-	options        Options
-	input          textarea.Model
-	viewport       viewport.Model
-	entries        []entry
-	working        map[message.ActorID]bool
-	pending        map[message.MessageID]message.ActorID
-	revisions      map[message.ActorID]uint64
-	states         map[message.ActorID]agent.State
-	history        []string
-	historyIndex   int
-	draft          string
-	width, height  int
-	rootStopped    bool
-	closed         bool
-	quitting       bool
-	spinner        spinner.Model
-	now            func() time.Time
-	busySince      time.Time
-	lastElapsed    time.Duration
-	activeTools    map[toolKey]agent.ToolActivity
-	selecting      bool
-	frozenEntries  []entry
-	frozenView     string
-	markdown       *glamour.TermRenderer
-	markdownWidth  int
-	completion     completionState
-	mouseSelection *mouseSelection
-	copyText       func(string) error
-	nextTableID    uint64
+	reasoningExpanded *bool // Explicit user preference overrides automatic collapse.
+	transcript        *transcriptView
+	ctx               context.Context
+	cancel            context.CancelFunc
+	session           Session
+	options           Options
+	input             textarea.Model
+	viewport          viewport.Model
+	entries           []entry
+	working           map[message.ActorID]bool
+	pending           map[message.MessageID]message.ActorID
+	revisions         map[message.ActorID]uint64
+	states            map[message.ActorID]agent.State
+	history           []string
+	historyIndex      int
+	draft             string
+	width, height     int
+	rootStopped       bool
+	closed            bool
+	quitting          bool
+	spinner           spinner.Model
+	now               func() time.Time
+	busySince         time.Time
+	lastElapsed       time.Duration
+	activeTools       map[toolKey]agent.ToolActivity
+	selecting         bool
+	frozenEntries     []entry
+	frozenView        string
+	markdown          *glamour.TermRenderer
+	markdownWidth     int
+	completion        completionState
+	mouseSelection    *mouseSelection
+	copyText          func(string) error
+	nextTableID       uint64
 }
 
 var (
@@ -155,6 +159,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mouseSelection = nil
 		m.resize(msg.Width, msg.Height)
 		m.refreshSelection()
+		return m, nil
+	case reasoningLoaded:
+		m.finishReasoning(msg)
 		return m, nil
 	case agentTableCount:
 		m.finishAgentTableCount(msg)
@@ -211,7 +218,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp && !msg.Shift && m.transcript.viewport.AtTop() {
-				m.earlierTranscript()
+				if m.transcript.reasoning {
+					if m.transcript.reasoningEarlier && len(m.transcript.reasoningOutputs) > 0 {
+						return m, m.loadReasoning(m.transcript.reasoningOutputs[0].Output.ID.Call)
+					}
+				} else {
+					m.earlierTranscript()
+				}
 			}
 			var cmd tea.Cmd
 			m.transcript.viewport, cmd = m.transcript.viewport.Update(msg)
@@ -239,6 +252,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "ctrl+d":
 			return m.quit()
+		case "f3":
+			if !m.selecting {
+				m.toggleReasoning()
+			}
+			return m, nil
 		case "f2":
 			m.toggleSelection()
 			if m.selecting {
@@ -322,7 +340,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling.", true)
+			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. F3 expands or collapses reasoning; /transcript then t inspects recorded reasoning.", true)
 		case "/clear":
 			m.entries = nil
 			m.renderTranscript(true)
@@ -751,5 +769,5 @@ func (m *model) footer() string {
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter send · Alt+Enter / Ctrl+J newline · /help"
+	return "Enter send · F3 reasoning · Alt+Enter newline · /help"
 }

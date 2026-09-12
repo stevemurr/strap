@@ -17,12 +17,16 @@ import (
 // This view holds only independent snapshots. The main viewport, draft, and event
 // reader keep their existing ownership while the user browses another thread.
 type transcriptView struct {
-	inspection conversation.AgentInspection
-	viewport   viewport.Model
-	raw        bool
-	copying    bool
-	err        string
-	mainOffset int
+	reasoning        bool
+	reasoningLoading bool
+	reasoningEarlier bool
+	reasoningOutputs []reasoningOutput
+	inspection       conversation.AgentInspection
+	viewport         viewport.Model
+	raw              bool
+	copying          bool
+	err              string
+	mainOffset       int
 }
 
 func (m *model) openTranscript(id message.ActorID) {
@@ -56,6 +60,10 @@ func (m *model) resizeAgentTranscript() {
 func (m *model) renderAgentTranscript() {
 	v := m.transcript
 	var b strings.Builder
+	if v.reasoning {
+		m.setAgentTranscriptContent(reasoningBody(v))
+		return
+	}
 	if v.inspection.Transcript == nil {
 		v.viewport.SetContent("No transcript returned.")
 		return
@@ -138,8 +146,13 @@ func (m *model) renderAgentTranscript() {
 	if len(v.inspection.Transcript.Entries) == 0 {
 		b.WriteString("No messages in this page.\n")
 	}
+	m.setAgentTranscriptContent(b.String())
+}
+
+func (m *model) setAgentTranscriptContent(text string) {
+	v := m.transcript
 	width := max(1, v.viewport.Width-1)
-	lines := strings.Split(ansi.Hardwrap(safeText(b.String()), width, true), "\n")
+	lines := strings.Split(ansi.Hardwrap(safeText(text), width, true), "\n")
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, width, "")
 	}
@@ -179,6 +192,7 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if v.copying {
 			return m, tea.DisableMouse
 		}
+		m.renderAgentTranscript()
 		return m, tea.EnableMouseCellMotion
 	case "esc":
 		m.viewport.SetYOffset(v.mainOffset)
@@ -187,7 +201,17 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.EnableMouseCellMotion
 		}
 		return m, nil
+	case "t":
+		v.reasoning = !v.reasoning
+		if v.reasoning {
+			return m, m.loadReasoning(0)
+		}
+		m.renderAgentTranscript()
+		v.viewport.GotoBottom()
 	case "r":
+		if v.reasoning {
+			return m, m.loadReasoning(0)
+		}
 		m.openTranscript(v.inspection.ID)
 	case "v":
 		v.raw = !v.raw
@@ -206,7 +230,13 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "pgup", "up":
 		if v.viewport.AtTop() {
-			m.earlierTranscript()
+			if v.reasoning {
+				if v.reasoningEarlier && len(v.reasoningOutputs) > 0 {
+					return m, m.loadReasoning(v.reasoningOutputs[0].Output.ID.Call)
+				}
+			} else {
+				m.earlierTranscript()
+			}
 		}
 		var cmd tea.Cmd
 		v.viewport, cmd = v.viewport.Update(key)
@@ -239,6 +269,13 @@ func (m *model) transcriptDisplay() string {
 			subtitle += " · scroll above the top for older messages"
 		}
 	}
+	if v.reasoning {
+		title = fmt.Sprintf("Reasoning inspection · %s", v.inspection.ID)
+		subtitle = "Snapshot · excluded from model context · r refresh"
+		if v.reasoningEarlier {
+			subtitle += " · scroll above the top for older calls"
+		}
+	}
 	if v.err != "" {
 		subtitle = "Error: " + v.err
 	}
@@ -246,7 +283,7 @@ func (m *model) transcriptDisplay() string {
 	if m.height < 4 {
 		return line(title)
 	}
-	help := "Scroll / PgUp/PgDn · [/] agent · r refresh · v raw · Drag copy · Esc back"
+	help := "Scroll / PgUp/PgDn · [/] agent · r refresh · t reasoning/history · v raw · Drag copy · Esc back"
 	if v.copying {
 		help = "COPY MODE · drag to copy · F2 resume · Esc back"
 	}

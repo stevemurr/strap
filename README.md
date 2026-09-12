@@ -87,6 +87,13 @@ their first action and meaningful findings between batches. These host-only
 updates do not enter agent inboxes or mark work complete; the original text stays
 in the generating agent's assistant history without an additional message.
 Replies and progress text stream into a single row as the model generates them.
+Reasoning streams in a separate section while the model thinks. It automatically
+collapses when answer text begins; F3 expands or collapses reasoning across the
+view and keeps your choice for later output. Reasoning is recorded for inspection
+and recovery, but never enters subsequent model requests. In `/transcript [id]`,
+press `t` to switch between model history and reasoning inspection, `r` to refresh,
+and scroll above the top for older calls. Inspection includes active and failed
+calls and remains available after `/clear`.
 Failed partial output remains visible. A reattached view can replay the entire
 session and recover active output; see [streaming and recovery](harness/RECOVERY.md).
 
