@@ -5,6 +5,10 @@ state `094885f`. This is the proposed successor to the observation contracts in
 [HARNESS_DESIGN.md](HARNESS_DESIGN.md), recorded in
 [ADR-002](docs/architecture/ADR-002-recoverable-session-log.md).
 
+The next level of detail is defined in
+[Types and interfaces](docs/architecture/STREAMING_CONTRACTS.md), covering storage,
+required publication, subscriptions, runtime reporting, and projection reads.
+
 ## Decision
 
 One recoverable session log, one subscription contract, and projections built

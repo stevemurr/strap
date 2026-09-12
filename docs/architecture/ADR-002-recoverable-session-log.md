@@ -47,3 +47,5 @@ detach; hosts explicitly close/dispose sessions. Replay has no execution effects
 
 See [the revised design and audit](../../STREAMING_DESIGN.md) for contracts,
 failure behavior, migration requirements, and acceptance tests.
+Concrete proposed package boundaries and Go shapes are recorded in
+[Types and interfaces](STREAMING_CONTRACTS.md).
