@@ -65,7 +65,7 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 			if err := flags.Parse(tc.args); err != nil {
 				t.Fatal(err)
 			}
-			p, err := o.newProvider(server.URL, "arbitrary-server-alias", server.Client())
+			p, err := o.config(server.URL, "arbitrary-server-alias").NewProvider(server.Client())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,10 +97,12 @@ func TestCLIRejectsInvalidOrUnsupportedModelOptions(t *testing.T) {
 		o := modelFlags(flags)
 		err := flags.Parse(args)
 		if err == nil {
-			_, err = o.newProvider("http://127.0.0.1:1", "local", nil)
+			_, err = o.config("http://127.0.0.1:1", "local").NewProvider(nil)
 		}
 		if err == nil {
 			t.Errorf("accepted %v", args)
 		}
 	}
 }
+
+func valuePtr[T any](v T) *T { return &v }

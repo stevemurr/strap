@@ -4,7 +4,6 @@ import (
 	"context"
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/message"
 )
@@ -35,23 +34,16 @@ func tokenDigits(count int64) string {
 	return digits
 }
 
-type countedTokens struct {
-	agent    message.ActorID
-	revision uint64
-	count    int64
-	err      error
-}
-
 type tokenSession interface {
 	CountAgentTokens(context.Context, message.ActorID, uint64) (int64, error)
 }
 
-func (m *model) countToolBatch(event conversation.ToolBatchEvent) tea.Cmd {
+func (m *model) observeToolBatch(event conversation.ToolBatchEvent) {
 	if policy, ok := m.session.(interface{ AutomaticContextTokens() bool }); ok && !policy.AutomaticContextTokens() {
-		return nil
+		return
 	}
 	if len(event.Batch.Calls) == 0 || event.Batch.ContextRevision == 0 {
-		return nil
+		return
 	}
 	key := toolKey{agent: event.Agent, call: event.Batch.Calls[len(event.Batch.Calls)-1]}
 	for i := len(m.entries) - 1; i >= 0; i-- {
@@ -60,24 +52,23 @@ func (m *model) countToolBatch(event conversation.ToolBatchEvent) tea.Cmd {
 			continue
 		}
 		if e.tokens != nil {
-			return nil
-		} // A duplicate batch event must not recount.
+			return
+		} // A duplicate batch event must not reset the measurement.
 		e.tokens = &contextTokens{revision: event.Batch.ContextRevision, pending: true}
 		if !m.selecting {
 			m.renderTranscript(false)
 		}
-		return nil
+		return
 	}
-	return nil // The corresponding tool was cleared from the display.
 }
 
-func (m *model) finishTokenCount(result countedTokens) {
+func (m *model) observeContextTokens(event conversation.ContextTokensEvent) {
 	for i := range m.entries {
 		e := &m.entries[i]
-		if e.tool.agent != result.agent || e.tokens == nil || e.tokens.revision != result.revision {
+		if e.tool.agent != event.Agent || e.tokens == nil || e.tokens.revision != event.Revision {
 			continue
 		}
-		e.tokens = &contextTokens{revision: result.revision, count: result.count, failed: result.err != nil || result.count < 0}
+		e.tokens = &contextTokens{revision: event.Revision, count: event.Count, failed: event.Error != "" || event.Count < 0}
 		if !m.selecting {
 			m.renderTranscript(false)
 		}

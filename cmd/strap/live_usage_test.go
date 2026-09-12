@@ -203,7 +203,7 @@ func liveUsageProvider(t *testing.T, url, model string, options modelOptions) (p
 	base.Proxy = nil // The explicitly supplied endpoint is a direct local connection.
 	t.Cleanup(base.CloseIdleConnections)
 	wire := &liveUsageTransport{base: base}
-	p, err := options.newProvider(url, model, &http.Client{Transport: wire, Timeout: time.Minute})
+	p, err := options.config(url, model).NewProvider(&http.Client{Transport: wire, Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,11 +2,9 @@ package main
 
 import (
 	"flag"
-	"net/http"
 	"strconv"
 
 	"github.com/stevemurr/strap/harness"
-	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/provider/vllm"
 )
 
@@ -59,8 +57,3 @@ func modelFlags(flags *flag.FlagSet) *modelOptions {
 func (o *modelOptions) config(baseURL, model string) harness.ModelConfig {
 	return harness.ModelConfig{Backend: o.backend, Preset: o.preset, BaseURL: baseURL, Model: model, Generation: o.overrides}
 }
-
-func (o *modelOptions) newProvider(baseURL, model string, client *http.Client) (provider.Provider, error) {
-	return o.config(baseURL, model).NewProvider(client)
-}
-func valuePtr[T any](v T) *T { return &v }

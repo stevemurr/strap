@@ -24,8 +24,8 @@ type binding struct {
 	recipient, owner identity.ActorID
 }
 
-// Session is the application's single consumer of controller events. Host reads
-// consume a separate relay, so work dispatch proceeds even with no UI reader.
+// Session is the application's single consumer of controller events. It publishes
+// to the configured callback or a separate host relay, without waiting for a UI reader.
 type Session struct {
 	publish   func(conversation.Event)
 	closing   atomic.Bool
@@ -52,12 +52,12 @@ func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admis
 func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec, options ...Option) *Session {
 	owner := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, events: inbox.New[conversation.Event](), done: make(chan struct{})}
+	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	for _, option := range options {
 		option(s)
 	}
-	if s.publish != nil {
-		s.events = nil
+	if s.publish == nil {
+		s.events = inbox.New[conversation.Event]()
 	}
 	s.implementor.Tools = append(s.implementor.Tools, s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, tool.UpdatePlan(nil, s.updateProgress))

@@ -14,7 +14,6 @@ import (
 type EmbeddedFields struct {
 	Value string `json:"value"`
 }
-type invalidEmbedded string
 
 func TestParameterConstructionRejectsInvalidConstraints(t *testing.T) {
 	for _, rule := range []Constraint{{}, MinLength("title", -1), MinItems("title", 1), Minimum("count", -129), Enum("count", "a"), Enum("title"), Enum("title", string([]byte{255})), UniqueItems("title"), AtLeastOne("title", "value"), AtLeastOne(""), AtLeastOne("", "missing"), MinLength("title[]", 1)} {

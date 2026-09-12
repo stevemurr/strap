@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -52,14 +51,14 @@ func TestToolCountsStayWithAgentAndRevisionWhenResultsArriveOutOfOrder(t *testin
 	m, _ := setup(t)
 	m.entries = nil
 	addTool(m, "worker", "read_file")
-	m.countToolBatch(batchEvent("worker", 4, "read_file"))
+	m.Update(received{event: batchEvent("worker", 4, "read_file")})
 	addTool(m, "worker", "shell")
-	m.countToolBatch(batchEvent("worker", 6, "shell"))
+	m.Update(received{event: batchEvent("worker", 6, "shell")})
 	addTool(m, "root", "shell")
-	m.countToolBatch(batchEvent("root", 4, "shell"))
-	m.Update(countedTokens{agent: "worker", revision: 6, count: 2400})
-	m.Update(countedTokens{agent: "root", revision: 4, count: 600})
-	m.Update(countedTokens{agent: "worker", revision: 4, count: 1000})
+	m.Update(received{event: batchEvent("root", 4, "shell")})
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "worker", Revision: 6, Count: 2400}})
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Count: 600}})
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "worker", Revision: 4, Count: 1000}})
 	got := ansi.Strip(m.View())
 	for _, want := range []string{"worker · Read file, Shell · 2,400 context tokens", "root · Shell · 600 context tokens"} {
 		if !strings.Contains(got, want) {
@@ -71,8 +70,8 @@ func TestToolCountsStayWithAgentAndRevisionWhenResultsArriveOutOfOrder(t *testin
 	}
 	m.add("Strap", "message separates batches", false)
 	addTool(m, "worker", "shell")
-	m.countToolBatch(batchEvent("worker", 9, "shell"))
-	m.Update(countedTokens{agent: "worker", revision: 9, count: 9000})
+	m.Update(received{event: batchEvent("worker", 9, "shell")})
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "worker", Revision: 9, Count: 9000}})
 	if got := m.View(); !strings.Contains(got, "2,400") || !strings.Contains(got, "9,000") {
 		t.Fatal("historical row changed", got)
 	}
@@ -83,10 +82,10 @@ func TestTokenCountsRespectFreezeResizeAndClear(t *testing.T) {
 	m.entries = nil
 	addTool(m, "root", "a_very_long_tool_name_that_would_hide_the_count")
 	event := batchEvent("root", 4, "a_very_long_tool_name_that_would_hide_the_count")
-	m.countToolBatch(event)
+	m.Update(received{event: event})
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
 	frozen := m.View()
-	m.Update(countedTokens{agent: "root", revision: 4, count: 12345})
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Count: 12345}})
 	if m.View() != frozen {
 		t.Fatal("count changed frozen display")
 	}
@@ -107,8 +106,9 @@ func TestTokenCountsRespectFreezeResizeAndClear(t *testing.T) {
 		}
 	}
 	enter(m, "/clear")
-	m.Update(countedTokens{agent: "root", revision: 4, count: 777})
-	if len(m.entries) != 0 || m.countToolBatch(event) != nil {
+	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Count: 777}})
+	m.Update(received{event: event})
+	if len(m.entries) != 0 {
 		t.Fatal("late telemetry resurrected cleared tools")
 	}
 }
@@ -116,25 +116,25 @@ func TestTokenCountsRespectFreezeResizeAndClear(t *testing.T) {
 func TestToolCountZeroAndFailureAreDistinct(t *testing.T) {
 	for _, tc := range []struct {
 		count int64
-		err   error
+		err   string
 		want  string
 	}{
-		{0, nil, "0 context tokens"},
-		{0, errors.New("offline"), "context tokens unavailable"},
-		{-1, nil, "context tokens unavailable"},
+		{0, "", "0 context tokens"},
+		{0, "offline", "context tokens unavailable"},
+		{-1, "", "context tokens unavailable"},
 	} {
 		m, _ := setup(t)
 		m.entries = nil
 		addTool(m, "root", "shell")
-		m.countToolBatch(batchEvent("root", 4, "shell"))
-		m.Update(countedTokens{agent: "root", revision: 4, count: tc.count, err: tc.err})
+		m.Update(received{event: batchEvent("root", 4, "shell")})
+		m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Count: tc.count, Error: tc.err}})
 		if !strings.Contains(m.View(), tc.want) {
 			t.Fatal(m.View())
 		}
 	}
 	m, _ := setup(t)
 	addTool(m, "root", "shell")
-	m.countToolBatch(batchEvent("root", 4, "shell"))
+	m.Update(received{event: batchEvent("root", 4, "shell")})
 	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Error: "counting unavailable"}})
 	if !strings.Contains(m.View(), "context tokens unavailable") {
 		t.Fatal(m.View())
