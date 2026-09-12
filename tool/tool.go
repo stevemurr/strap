@@ -50,6 +50,18 @@ type Func[A any] struct {
 
 func (f Func[A]) Definition() provider.ToolDefinition { return f.Spec.ProviderDefinition() }
 
+// builtin declares a statically-declared tool from its model-facing name,
+// description, handler and argument constraints. An invalid constraint panics at
+// initialization, exactly as parameters does. It returns Func[A] rather than Tool
+// because Compose type-asserts its branches to preparedTool. A Compose branch
+// passes an empty description; compose emits one only when non-empty.
+func builtin[A any](name, description string, invoke Handler[A], constraints ...Constraint) Func[A] {
+	return Func[A]{
+		Spec:   Definition[A]{Name: name, Description: description, Parameters: parameters[A](constraints...)},
+		Invoke: invoke,
+	}
+}
+
 // Validate is called by the agent at registration, before advertising the tool.
 func (f Func[A]) Validate() error {
 	if f.Spec.Name == "" {

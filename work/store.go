@@ -67,12 +67,7 @@ func (s *Store) PendingEvents(limit int) []Event {
 func (s *Store) AcknowledgeEvent(id EventID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.events {
-		if s.events[i].ID == id {
-			s.events = slices.Delete(s.events, i, i+1)
-			return nil
-		}
-	}
+	s.events = slices.DeleteFunc(s.events, func(event Event) bool { return event.ID == id })
 	return nil
 }
 func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, error) {

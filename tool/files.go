@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -37,12 +38,8 @@ func NewFiles(config FilesConfig) (*Files, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.MaxFileBytes == 0 {
-		config.MaxFileBytes = 1024 * 1024
-	}
-	if config.OutputLimit == 0 {
-		config.OutputLimit = 64 * 1024
-	}
+	config.MaxFileBytes = cmp.Or(config.MaxFileBytes, 1024*1024)
+	config.OutputLimit = cmp.Or(config.OutputLimit, 64*1024)
 	if config.MaxFileBytes < 1 || config.OutputLimit < 1 {
 		return nil, errors.New("file limits must be positive")
 	}
@@ -92,39 +89,15 @@ func (f *Files) Tools() []Tool { return slices.Clone(f.tools) }
 
 func (f *Files) buildTools() []Tool {
 	return []Tool{
-		Func[readArgs]{
-			Spec: Definition[readArgs]{
-
-				Name: "read_file",
-
-				Description: fmt.Sprintf("Read a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Returns numbered lines, starting at offset (1-based, default 1), up to limit (default 200, maximum 2000). Files are limited to %d bytes and output to %d bytes. Symlinks resolve to their targets.", f.config.Dir, f.config.MaxFileBytes, f.config.OutputLimit),
-
-				Parameters: parameters[readArgs](MinLength("path", 1), Minimum("offset", 1), Minimum("limit", 1), Maximum("limit", 2000)),
-			},
-			Invoke: f.read,
-		},
-		Func[writeArgs]{
-			Spec: Definition[writeArgs]{
-
-				Name: "write_file",
-
-				Description: fmt.Sprintf("Create or replace a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Content is limited to %d bytes. Content is literal text, including newlines; do not add Markdown fences or shell heredocs. Parent directories must exist. Symlinks resolve to their targets. Replacements are atomic and retain file permissions.", f.config.Dir, f.config.MaxFileBytes),
-
-				Parameters: parameters[writeArgs](MinLength("path", 1)),
-			},
-			Invoke: f.write,
-		},
-		Func[editArgs]{
-			Spec: Definition[editArgs]{
-
-				Name: "edit_file",
-
-				Description: fmt.Sprintf("Replace exactly one occurrence of old with new in a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Old must be nonempty and unique; include surrounding text if ambiguous. Symlinks resolve to their targets. The resulting file is limited to %d bytes.", f.config.Dir, f.config.MaxFileBytes),
-
-				Parameters: parameters[editArgs](MinLength("path", 1), MinLength("old", 1)),
-			},
-			Invoke: f.edit,
-		},
+		builtin("read_file",
+			fmt.Sprintf("Read a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Returns numbered lines, starting at offset (1-based, default 1), up to limit (default 200, maximum 2000). Files are limited to %d bytes and output to %d bytes. Symlinks resolve to their targets.", f.config.Dir, f.config.MaxFileBytes, f.config.OutputLimit),
+			f.read, MinLength("path", 1), Minimum("offset", 1), Minimum("limit", 1), Maximum("limit", 2000)),
+		builtin("write_file",
+			fmt.Sprintf("Create or replace a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Content is limited to %d bytes. Content is literal text, including newlines; do not add Markdown fences or shell heredocs. Parent directories must exist. Symlinks resolve to their targets. Replacements are atomic and retain file permissions.", f.config.Dir, f.config.MaxFileBytes),
+			f.write, MinLength("path", 1)),
+		builtin("edit_file",
+			fmt.Sprintf("Replace exactly one occurrence of old with new in a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Old must be nonempty and unique; include surrounding text if ambiguous. Symlinks resolve to their targets. The resulting file is limited to %d bytes.", f.config.Dir, f.config.MaxFileBytes),
+			f.edit, MinLength("path", 1), MinLength("old", 1)),
 	}
 }
 

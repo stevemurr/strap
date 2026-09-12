@@ -16,13 +16,9 @@ type sendMessageArgs struct {
 
 // SendMessage routes an instruction through the executing agent's bound sender.
 func SendMessage() Tool {
-	return Func[sendMessageArgs]{
-		Spec: Definition[sendMessageArgs]{
-			Name:        "send_message",
-			Description: "Send an instruction to an existing agent. Returns a queued receipt; delivery status and replies are separate.",
-			Parameters:  parameters[sendMessageArgs](),
-		},
-		Invoke: func(ctx context.Context, call Call, args sendMessageArgs) (Result, error) {
+	return builtin("send_message",
+		"Send an instruction to an existing agent. Returns a queued receipt; delivery status and replies are separate.",
+		func(ctx context.Context, call Call, args sendMessageArgs) (Result, error) {
 			if call.Sender == nil {
 				return Result{}, errors.New("send_message requires an agent sender")
 			}
@@ -31,8 +27,7 @@ func SendMessage() Tool {
 				return Result{}, err
 			}
 			return JSON(receipt)
-		},
-	}
+		})
 }
 
 // MessageStatus reads delivery state through the supplied lookup function.
@@ -40,20 +35,15 @@ func MessageStatus(lookup func(message.MessageID) (message.Receipt, bool)) Tool 
 	type args struct {
 		ID message.MessageID `json:"message_id"`
 	}
-	return Func[args]{
-		Spec: Definition[args]{
-			Name:        "message_status",
-			Description: "Read a message's latest receipt: queued, consumed, or undelivered. Consumed does not mean completed.",
-			Parameters:  parameters[args](),
-		},
-		Invoke: func(ctx context.Context, _ Call, a args) (Result, error) {
+	return builtin("message_status",
+		"Read a message's latest receipt: queued, consumed, or undelivered. Consumed does not mean completed.",
+		func(ctx context.Context, _ Call, a args) (Result, error) {
 			receipt, ok := lookup(a.ID)
 			if !ok {
 				return Result{}, errors.New("unknown message")
 			}
 			return JSON(receipt)
-		},
-	}
+		})
 }
 
 // CreateAgent is a compatibility hook for low-level host creation callbacks.
@@ -65,19 +55,15 @@ func CreateAgent(handle Handler[work.Work]) Tool {
 		Context        string `json:"context,omitempty"`
 		ExpectedOutput string `json:"expected_output,omitempty"`
 	}
-	return Func[args]{
-		Spec: Definition[args]{
-			Name:        "create_agent",
-			Description: "Create an agent to complete an assignment. Its operating instructions are supplied by the application. Returns immediately; replies arrive later in your inbox.",
-			Parameters:  parameters[args](MinLength("task", 1)),
-		},
-		Invoke: func(ctx context.Context, c Call, a args) (Result, error) {
+	return builtin("create_agent",
+		"Create an agent to complete an assignment. Its operating instructions are supplied by the application. Returns immediately; replies arrive later in your inbox.",
+		func(ctx context.Context, c Call, a args) (Result, error) {
 			if strings.TrimSpace(a.Task) == "" {
 				return Result{}, errors.New("work task is required")
 			}
 			return handle(ctx, c, work.Work{Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput})
 		},
-	}
+		MinLength("task", 1))
 }
 
 // Management tools decode IDs and invoke application-supplied operations. Their
@@ -99,46 +85,32 @@ type InspectAgentArgs struct {
 }
 
 func InspectAgent(handle func(context.Context, Call, InspectAgentArgs) (Result, error)) Tool {
-	return Func[InspectAgentArgs]{
-		Spec: Definition[InspectAgentArgs]{
-			Name:        "inspect_agent",
-			Description: "Read an agent's current lifecycle state and actual conversation transcript. Defaults to the latest 20 messages, maximum 100. Results are chronological. Use the first returned position as before to read earlier messages. This reads a snapshot without messaging or interrupting the target.",
-			Parameters:  parameters[InspectAgentArgs](MinLength("agent_id", 1), Minimum("limit", 1), Maximum("limit", 100), Minimum("before", 1)),
-		},
-		Invoke: func(ctx context.Context, call Call, args InspectAgentArgs) (Result, error) {
+	return builtin("inspect_agent",
+		"Read an agent's current lifecycle state and actual conversation transcript. Defaults to the latest 20 messages, maximum 100. Results are chronological. Use the first returned position as before to read earlier messages. This reads a snapshot without messaging or interrupting the target.",
+		func(ctx context.Context, call Call, args InspectAgentArgs) (Result, error) {
 			if strings.TrimSpace(string(args.AgentID)) == "" {
 				return Result{}, errors.New("agent_id must not be empty")
 			}
 			return handle(ctx, call, args)
 		},
-	}
+		MinLength("agent_id", 1), Minimum("limit", 1), Maximum("limit", 100), Minimum("before", 1))
 }
 
 func agentOperation(name, description string, handle func(context.Context, Call, message.ActorID) (Result, error)) Tool {
 	type args struct {
 		AgentID message.ActorID `json:"agent_id"`
 	}
-	return Func[args]{
-		Spec: Definition[args]{
-			Name:        name,
-			Description: description,
-			Parameters:  parameters[args](MinLength("agent_id", 1)),
-		},
-		Invoke: func(ctx context.Context, c Call, a args) (Result, error) {
+	return builtin(name, description,
+		func(ctx context.Context, c Call, a args) (Result, error) {
 			if strings.TrimSpace(string(a.AgentID)) == "" {
 				return Result{}, errors.New("agent_id must not be empty")
 			}
 			return handle(ctx, c, a.AgentID)
 		},
-	}
+		MinLength("agent_id", 1))
 }
 func ListAgents(handle func(context.Context, Call) (Result, error)) Tool {
-	return Func[struct{}]{
-		Spec: Definition[struct{}]{
-			Name:        "list_agents",
-			Description: "List agents and their current lifecycle states.",
-			Parameters:  parameters[struct{}](),
-		},
-		Invoke: func(ctx context.Context, c Call, _ struct{}) (Result, error) { return handle(ctx, c) },
-	}
+	return builtin("list_agents",
+		"List agents and their current lifecycle states.",
+		func(ctx context.Context, c Call, _ struct{}) (Result, error) { return handle(ctx, c) })
 }

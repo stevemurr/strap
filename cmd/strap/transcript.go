@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -96,8 +97,6 @@ func inspectionResult(in conversation.AgentInspection) (tool.Result, error) {
 		budget -= len(encoded)
 		out.Transcript.Entries = append(out.Transcript.Entries, entry)
 	}
-	for i, j := 0, len(out.Transcript.Entries)-1; i < j; i, j = i+1, j-1 {
-		out.Transcript.Entries[i], out.Transcript.Entries[j] = out.Transcript.Entries[j], out.Transcript.Entries[i]
-	}
+	slices.Reverse(out.Transcript.Entries)
 	return tool.JSON(out)
 }

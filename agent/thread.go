@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"fmt"
 	"sync"
 
@@ -70,9 +71,7 @@ func (t *thread) requestMessages() ([]provider.Message, uint64) {
 }
 
 func (t *thread) snapshot(q TranscriptQuery) (TranscriptPage, error) {
-	if q.Limit == 0 {
-		q.Limit = DefaultTranscriptLimit
-	}
+	q.Limit = cmp.Or(q.Limit, DefaultTranscriptLimit)
 	if q.Limit < 1 || q.Limit > MaxTranscriptLimit {
 		return TranscriptPage{}, fmt.Errorf("transcript limit must be between 1 and %d", MaxTranscriptLimit)
 	}

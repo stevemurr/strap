@@ -5,6 +5,7 @@ import (
 	"encoding"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/big"
 	"reflect"
 	"slices"
@@ -406,11 +407,7 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 		if !ok {
 			return bad()
 		}
-		names := make([]string, 0, len(obj))
-		for name := range obj {
-			names = append(names, name)
-		}
-		slices.Sort(names)
+		names := slices.Sorted(maps.Keys(obj))
 		for _, name := range names {
 			if p.fields[name] == nil {
 				return nil, fmt.Errorf("%s.%s is not an allowed field", path, name)

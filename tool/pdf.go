@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -45,21 +46,11 @@ func NewPDF(config PDFConfig) (*PDF, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.MaxPages == 0 {
-		config.MaxPages = 6
-	}
-	if config.MaxFileBytes == 0 {
-		config.MaxFileBytes = 32 << 20
-	}
-	if config.MaxImageBytes == 0 {
-		config.MaxImageBytes = 16 << 20
-	}
-	if config.MaxDimension == 0 {
-		config.MaxDimension = 1600
-	}
-	if config.Timeout == 0 {
-		config.Timeout = 30 * time.Second
-	}
+	config.MaxPages = cmp.Or(config.MaxPages, 6)
+	config.MaxFileBytes = cmp.Or(config.MaxFileBytes, 32<<20)
+	config.MaxImageBytes = cmp.Or(config.MaxImageBytes, 16<<20)
+	config.MaxDimension = cmp.Or(config.MaxDimension, 1600)
+	config.Timeout = cmp.Or(config.Timeout, 30*time.Second)
 	if config.MaxPages < 1 || config.MaxPages > 32 || config.MaxFileBytes < 1 || config.MaxImageBytes < 1 || config.MaxDimension < 64 || config.MaxDimension > 4096 || config.Timeout <= 0 {
 		return nil, errors.New("invalid PDF limits: pages 1..32, dimension 64..4096, positive byte limits and timeout required")
 	}

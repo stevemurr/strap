@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -50,21 +51,20 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 		return err
 	}
 	c := conversation.New(ctx)
+	// Tool order is what the model sees: agent.New walks Spec.Tools in order.
+	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
+	// Auditors keep shell access with host permissions; only the writers go.
+	withoutFileWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool {
+		name := t.Definition().Name
+		return name == "write_file" || name == "edit_file"
+	})
 	executionSpec := agent.Spec{
 		Provider: p,
 		Prompt:   executionPrompt,
-		Tools:    append(append([]tool.Tool(nil), local...), tool.SendMessage(), tool.MessageStatus(c.Receipt)),
+		Tools:    slices.Concat(local, messaging),
 	}.Clone()
-	auditTools := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
-	for _, t := range local {
-		if name := t.Definition().Name; name != "write_file" && name != "edit_file" {
-			auditTools = append(auditTools, t)
-		}
-	}
-	session := workflow.New(ctx, c, executionSpec, agent.Spec{Provider: p, Prompt: auditorPrompt, Tools: auditTools})
-	rootTools := append(append([]tool.Tool(nil), local...), session.RootTools()...)
-	rootTools = append(rootTools, tool.SendMessage(), tool.MessageStatus(c.Receipt))
-	rootTools = append(rootTools, managementTools(c)...)
+	session := workflow.New(ctx, c, executionSpec, agent.Spec{Provider: p, Prompt: auditorPrompt, Tools: slices.Concat(messaging, withoutFileWrites)})
+	rootTools := slices.Concat(local, session.RootTools(), messaging, managementTools(c))
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

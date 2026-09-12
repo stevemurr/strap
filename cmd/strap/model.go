@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"net/http"
@@ -73,14 +74,16 @@ func (o *modelOptions) newProvider(baseURL, model string, httpClient *http.Clien
 		default:
 			return nil, fmt.Errorf("unknown generation preset %q; choose qwen3.6-coding or none", o.preset)
 		}
-		g.Temperature = override(o.overrides.Temperature, g.Temperature)
-		g.TopP = override(o.overrides.TopP, g.TopP)
-		g.TopK = override(o.overrides.TopK, g.TopK)
-		g.MinP = override(o.overrides.MinP, g.MinP)
-		g.PresencePenalty = override(o.overrides.PresencePenalty, g.PresencePenalty)
-		g.RepetitionPenalty = override(o.overrides.RepetitionPenalty, g.RepetitionPenalty)
-		g.MaxTokens = override(o.overrides.MaxTokens, g.MaxTokens)
-		g.EnableThinking = override(o.overrides.EnableThinking, g.EnableThinking)
+		// These fields must stay pointers: cmp.Or picks the first non-nil, so an
+		// explicit 0 or false still overrides the preset (DESIGN.md:152).
+		g.Temperature = cmp.Or(o.overrides.Temperature, g.Temperature)
+		g.TopP = cmp.Or(o.overrides.TopP, g.TopP)
+		g.TopK = cmp.Or(o.overrides.TopK, g.TopK)
+		g.MinP = cmp.Or(o.overrides.MinP, g.MinP)
+		g.PresencePenalty = cmp.Or(o.overrides.PresencePenalty, g.PresencePenalty)
+		g.RepetitionPenalty = cmp.Or(o.overrides.RepetitionPenalty, g.RepetitionPenalty)
+		g.MaxTokens = cmp.Or(o.overrides.MaxTokens, g.MaxTokens)
+		g.EnableThinking = cmp.Or(o.overrides.EnableThinking, g.EnableThinking)
 		return vllm.New(vllm.Config{BaseURL: baseURL, Model: model, HTTPClient: httpClient, Generation: g})
 	default:
 		return nil, fmt.Errorf("unknown backend %q; choose vllm or chatcompletions", o.backend)
@@ -99,9 +102,3 @@ func qwenCodingPreset() vllm.Generation {
 }
 
 func valuePtr[T any](v T) *T { return &v }
-func override[T any](explicit, fallback *T) *T {
-	if explicit != nil {
-		return explicit
-	}
-	return fallback
-}

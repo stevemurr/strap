@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -72,15 +73,9 @@ func NewShell(config ShellConfig) (*Shell, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.Timeout == 0 {
-		config.Timeout = 30 * time.Second
-	}
-	if config.MaxTimeout == 0 {
-		config.MaxTimeout = 5 * time.Minute
-	}
-	if config.OutputLimit == 0 {
-		config.OutputLimit = 64 * 1024
-	}
+	config.Timeout = cmp.Or(config.Timeout, 30*time.Second)
+	config.MaxTimeout = cmp.Or(config.MaxTimeout, 5*time.Minute)
+	config.OutputLimit = cmp.Or(config.OutputLimit, 64*1024)
 	if config.Timeout < time.Millisecond || config.MaxTimeout < config.Timeout || config.OutputLimit < 2 {
 		return nil, errors.New("invalid shell timeout or output limit")
 	}
