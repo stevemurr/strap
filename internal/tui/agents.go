@@ -39,6 +39,10 @@ func (m *model) showAgents() tea.Cmd {
 		inspection, err := m.session.InspectAgent(info.ID, conversation.InspectOptions{})
 		if err == nil {
 			row[1] = string(inspection.State)
+			if inspection.StateRevision >= m.revisions[info.ID] {
+				m.states[info.ID] = inspection.State
+				m.revisions[info.ID] = inspection.StateRevision
+			}
 			if latest := inspection.Usage.Latest; latest == nil {
 				row[4] = "—"
 			} else if latest.Usage != nil && latest.Usage.OutputTokens != nil && *latest.Usage.OutputTokens >= 0 {

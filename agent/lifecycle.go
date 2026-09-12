@@ -24,8 +24,20 @@ func (s State) Terminal() bool { return s == Stopped || s == Failed }
 type lifecycle struct {
 	mu         sync.Mutex
 	state      State
+	revision   uint64
 	changed    chan struct{}
 	waitCancel context.CancelFunc
+}
+
+type StateSnapshot struct {
+	State    State  `json:"state"`
+	Revision uint64 `json:"state_revision"`
+}
+
+func (a *Agent) StateSnapshot() StateSnapshot {
+	a.control.mu.Lock()
+	defer a.control.mu.Unlock()
+	return StateSnapshot{a.control.state, a.control.revision}
 }
 
 func (a *Agent) State() State {
@@ -41,8 +53,12 @@ func (a *Agent) setStateLocked(state State) {
 		return
 	}
 	a.control.state = state
+	a.control.revision++
 	close(a.control.changed)
 	a.control.changed = make(chan struct{})
+	if a.config.OnLifecycle != nil {
+		a.config.OnLifecycle(StateSnapshot{state, a.control.revision})
+	}
 	if a.config.OnState != nil {
 		a.config.OnState(state)
 	}

@@ -263,11 +263,16 @@ _, err = session.Send(session.Root(), "Inspect this project.")
 Import `github.com/stevemurr/strap/harness`. `Dependencies` accepts borrowed
 providers/tools for tests and explicit owned resources. `StartupError` retains a
 retryable cleanup handle if construction rollback fails. The current `NextEvent`
-stream has one reader; independent subscriptions are the next stage described
-in [the harness design](HARNESS_DESIGN.md). `Close(ctx)` rejects new commands,
+stream is available through independent `session.Subscribe(after)` readers and
+finite `session.Events(ctx, query)` pages, as described in
+[the harness design](HARNESS_DESIGN.md). `Close(ctx)` rejects new commands,
 cancels execution, drains final events, then closes owned resources. Its context
 limits the caller's wait, not cleanup. A cleanup error preserves `Closing` state;
 call `Close` again to retry unfinished resources. Inspection remains available.
+Call `Dispose(ctx)` when finished reading to release event storage. `Capture()`
+reports omissions and capture failures separately from execution state. Memory
+retention is bounded; an expired cursor is an explicit error. Lifecycle state
+revisions are separate from model history revisions.
 
 The public `work` package can be used independently of agents and transport:
 

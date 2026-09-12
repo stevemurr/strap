@@ -540,7 +540,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    pending receipts, nested workflow compensation, resource I/O racing cleanup,
    and final event delivery. Do not make closure cancel an observer context that
    is needed to read the tail. A blocked dependency never produces false closure.
-4. **Independent observation and lifecycle versions.** Implement `EventStore`
+4. **Independent observation and lifecycle versions — implemented.** Implement `EventStore`
    with bounded memory retention and a backend contract test suite. Replace the
    host relay with bounded publication and adapt the TUI to a subscription. Check
    two readers, no reader, detach while work runs, reconnect without duplicates,
@@ -600,4 +600,14 @@ and coordinated shutdown. `Close(ctx)` starts independent finalization and only
 bounds the caller's wait. Commands reject admission while closing; inspections
 and the final event tail remain available. Cleanup failure leaves `State()` at
 `Closing`, and the next close retries only unfinished resources.
-Bounded event retention, recording, and HTTP remain subsequent slices.
+The fourth slice adds public `eventlog.Store`, a bounded memory implementation,
+ordered publication, independent cursor subscriptions, and explicit disposal.
+`Events`, `Subscribe`, `Capture`, and `FlushEvents` expose observation without
+exposing store writes. The default retention is 4,096 entries / 16 MiB and the
+publication queue is 1,024 entries / 8 MiB. Inject storage with
+`Dependencies.EventStore(sessionID)`. Call `Dispose` to release storage after
+inspection; `Close` retains it. Capture failure is a stable close error, but
+execution can still reach `Closed` after its resources have been released.
+The TUI uses a subscription and can refresh snapshots after observation failure.
+Agent state snapshots/events carry a lifecycle revision independent of history.
+Persistent recording, automatic telemetry, and HTTP remain subsequent slices.

@@ -12,9 +12,10 @@ type Creation struct {
 }
 
 type AgentInfo struct {
-	ID     message.ActorID `json:"agent_id"`
-	Parent message.ActorID `json:"parent"`
-	State  agent.State     `json:"state"`
+	StateRevision uint64          `json:"state_revision"`
+	ID            message.ActorID `json:"agent_id"`
+	Parent        message.ActorID `json:"parent"`
+	State         agent.State     `json:"state"`
 }
 
 // Event is a notification to the host. Acknowledgments do not enter model inboxes
@@ -51,8 +52,9 @@ func (AgentExited) isEvent() {}
 
 // AgentStateChanged distinguishes a requested control from its acknowledged state.
 type AgentStateChanged struct {
-	Agent message.ActorID
-	State agent.State
+	Revision uint64 `json:"state_revision"`
+	Agent    message.ActorID
+	State    agent.State
 }
 
 func (AgentStateChanged) isEvent() {}

@@ -27,6 +27,7 @@ type binding struct {
 // Session is the application's single consumer of controller events. Host reads
 // consume a separate relay, so work dispatch proceeds even with no UI reader.
 type Session struct {
+	publish   func(conversation.Event)
 	closing   atomic.Bool
 	admission *admission.Gate
 	stopOwner func() bool
@@ -43,6 +44,9 @@ type Session struct {
 
 type Option func(*Session)
 
+// WithPublisher replaces the legacy host relay. It must enqueue without waiting for I/O.
+func WithPublisher(p func(conversation.Event)) Option { return func(s *Session) { s.publish = p } }
+
 func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admission = g } }
 
 func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec, options ...Option) *Session {
@@ -51,6 +55,9 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, events: inbox.New[conversation.Event](), done: make(chan struct{})}
 	for _, option := range options {
 		option(s)
+	}
+	if s.publish != nil {
+		s.events = nil
 	}
 	s.implementor.Tools = append(s.implementor.Tools, s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, tool.UpdatePlan(nil, s.updateProgress))
@@ -114,6 +121,14 @@ func (s *Session) RootTools() []tool.Tool {
 		}),
 	)
 }
+func (s *Session) emit(e conversation.Event) {
+	if s.publish != nil {
+		s.publish(e)
+	} else {
+		_ = s.events.Send(e)
+	}
+}
+
 func (s *Session) NextEvent(ctx context.Context) (conversation.Event, error) {
 	return s.events.Receive(ctx)
 }
@@ -147,7 +162,7 @@ func (s *Session) failure(b binding, detail string) {
 	}
 	_, err := s.Controller.Deliver(b.owner, message.Draft{To: b.owner, Kind: message.Notification, Content: fmt.Sprintf("Work %s delivery/execution needs attention for assignee %s: %s. Inspect work and reassign or cancel it; this is not an audit verdict.", b.work, b.recipient, detail)})
 	if err != nil {
-		_ = s.events.Send(conversation.MessageEvent{Message: message.Message{From: b.owner, To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work %s requires recovery: %s (owner notification failed: %v)", b.work, detail, err)}})
+		s.emit(conversation.MessageEvent{Message: message.Message{From: b.owner, To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work %s requires recovery: %s (owner notification failed: %v)", b.work, detail, err)}})
 	}
 }
 func (s *Session) run() {
@@ -157,7 +172,11 @@ func (s *Session) run() {
 		}
 	}()
 	defer close(s.done)
-	defer s.events.Close()
+	defer func() {
+		if s.events != nil {
+			s.events.Close()
+		}
+	}()
 	incoming := make(chan conversation.Event)
 	readerDone := make(chan struct{})
 	go func() {
@@ -185,7 +204,7 @@ func (s *Session) run() {
 	drain := func() {
 		for _, e := range s.Store.PendingEvents(0) {
 			if !published[e.ID] {
-				_ = s.events.Send(conversation.WorkEvent{Event: e.Clone()})
+				s.emit(conversation.WorkEvent{Event: e.Clone()})
 				published[e.ID] = true
 			}
 			if s.closing.Load() {
@@ -208,7 +227,7 @@ func (s *Session) run() {
 					info, err := s.Controller.InspectAgent(recipient, conversation.InspectOptions{})
 					if err == nil && !info.State.Terminal() {
 						if _, err = s.Controller.Deliver(e.Actor, message.Draft{To: recipient, Kind: message.Notification, Event: &e}); err != nil {
-							_ = s.events.Send(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work %s changed but recipient %s could not be notified: %v", w.ID, recipient, err)}})
+							s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work %s changed but recipient %s could not be notified: %v", w.ID, recipient, err)}})
 						}
 					}
 				}
@@ -247,7 +266,7 @@ func (s *Session) run() {
 				attempted[e.ID] = true
 				receipt, err := s.Controller.Deliver(e.Actor, message.Draft{To: w.Owner, Kind: kind, Event: &e})
 				if err != nil {
-					_ = s.events.Send(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s for %s remains pending: %v", e.Kind, w.ID, err)}})
+					s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s for %s remains pending: %v", e.Kind, w.ID, err)}})
 					continue
 				}
 				notifications[receipt.MessageID] = e.ID
@@ -271,7 +290,7 @@ func (s *Session) run() {
 				drain()
 				return
 			}
-			_ = s.events.Send(e)
+			s.emit(e)
 			switch event := e.(type) {
 			case conversation.AckEvent:
 				if id, ok := notifications[event.Receipt.MessageID]; ok {
@@ -283,7 +302,7 @@ func (s *Session) run() {
 						delete(revoked, id)
 					} else if event.Receipt.Status == message.Undelivered {
 						delete(notifications, event.Receipt.MessageID)
-						_ = s.events.Send(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s remains pending: owner did not consume notification %s", id, event.Receipt.MessageID)}})
+						s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s remains pending: owner did not consume notification %s", id, event.Receipt.MessageID)}})
 					}
 				}
 				if event.Receipt.Status == message.Undelivered {

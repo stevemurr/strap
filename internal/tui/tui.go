@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/inbox"
 	"github.com/stevemurr/strap/message"
 )
 
@@ -42,6 +43,8 @@ type Options struct {
 }
 
 func Run(ctx context.Context, session Session, options Options) error {
+	session, detach := observeSession(session)
+	defer detach()
 	listenCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := newModel(listenCtx, cancel, session, options)
@@ -79,6 +82,7 @@ type model struct {
 	entries        []entry
 	working        map[message.ActorID]bool
 	pending        map[message.MessageID]message.ActorID
+	revisions      map[message.ActorID]uint64
 	states         map[message.ActorID]agent.State
 	history        []string
 	historyIndex   int
@@ -115,7 +119,7 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 	m := &model{
 		ctx: ctx, cancel: cancel, session: session, options: options,
 		input: input, viewport: viewport.New(80, 17), width: 80, height: 24,
-		working: make(map[message.ActorID]bool), pending: make(map[message.MessageID]message.ActorID), states: make(map[message.ActorID]agent.State),
+		working: make(map[message.ActorID]bool), pending: make(map[message.MessageID]message.ActorID), states: make(map[message.ActorID]agent.State), revisions: make(map[message.ActorID]uint64),
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(stateStyle)),
 		now:     time.Now, activeTools: make(map[toolKey]agent.ToolActivity),
 		copyText: clipboard.WriteAll,
@@ -176,10 +180,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case received:
 		if msg.err != nil {
-			m.closed = true
+			m.closed = errors.Is(msg.err, inbox.ErrClosed) || errors.Is(msg.err, context.Canceled)
 			m.refreshActivity()
 			if !errors.Is(msg.err, context.Canceled) {
-				m.add("System", "Conversation closed: "+msg.err.Error(), false)
+				m.add("System", "Event observation stopped: "+msg.err.Error()+". Use /agents to refresh state; controls remain available while the session is open.", false)
 			}
 			return m, nil
 		}
@@ -411,6 +415,10 @@ func (m *model) observe(event conversation.Event) {
 	case conversation.ToolEvent:
 		m.toolEvent(e)
 	case conversation.AgentStateChanged:
+		if e.Revision > 0 && e.Revision <= m.revisions[e.Agent] {
+			return
+		}
+		m.revisions[e.Agent] = e.Revision
 		m.states[e.Agent] = e.State
 		switch e.State {
 		case agent.Running, agent.PauseRequested:
@@ -476,7 +484,9 @@ func (m *model) observe(event conversation.Event) {
 		}
 		m.addDetail(label, meta, body, false)
 	case conversation.AgentExited:
-		m.states[e.Agent] = agent.Stopped
+		if !m.states[e.Agent].Terminal() {
+			m.states[e.Agent] = agent.Stopped
+		}
 		delete(m.working, e.Agent)
 		for key := range m.activeTools {
 			if key.agent == e.Agent {

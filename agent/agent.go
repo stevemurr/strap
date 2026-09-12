@@ -42,7 +42,8 @@ type Config struct {
 	Outbox     message.Sender
 	OnConsumed func(message.Receipt)
 	// OnState enqueues state notifications; it must not block or reenter this agent.
-	OnState func(State)
+	OnState     func(State)
+	OnLifecycle func(StateSnapshot) // Ordered state and revision from the same lifecycle lock.
 	// OnCommentary enqueues assistant text accompanying a tool batch.
 	// It must not block on a consumer or reenter this agent.
 	OnCommentary func(string)
@@ -71,7 +72,7 @@ func New(config Config) (*Agent, error) {
 		return nil, errors.New("agent requires a provider, inbox, and outbox")
 	}
 	config.Spec = config.Spec.Clone()
-	a := &Agent{config: config, tools: make(map[string]tool.Tool), control: lifecycle{state: Idle, changed: make(chan struct{})}}
+	a := &Agent{config: config, tools: make(map[string]tool.Tool), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
 	for _, t := range config.Spec.Tools {
 		if t == nil {
 			return nil, errors.New("nil tool")

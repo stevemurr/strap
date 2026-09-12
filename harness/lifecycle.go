@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"github.com/stevemurr/strap/eventlog"
 	"time"
 
 	"github.com/stevemurr/strap/internal/admission"
@@ -66,9 +67,13 @@ func (s *Session) finalize(a *closeAttempt) {
 		err = s.resources.Close(cleanup)
 		cancel()
 	}
+	cleanupOK := err == nil
+	if cleanupOK && s.log != nil {
+		err = s.log.Finish(context.Background(), eventlog.Outcome{})
+	}
 	s.mu.Lock()
 	a.err = err
-	if err == nil {
+	if cleanupOK {
 		s.state = Closed
 		if s.stopOwner != nil {
 			s.stopOwner()

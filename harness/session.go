@@ -4,6 +4,9 @@ package harness
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/internal/resource"
@@ -32,6 +36,7 @@ type AgentConfig struct {
 }
 
 type Config struct {
+	Events                     EventConfig
 	Dir                        string
 	Model                      ModelConfig
 	LocalTools                 bool
@@ -41,8 +46,13 @@ type Config struct {
 
 // DefaultConfig returns independent CLI-compatible defaults without acquiring resources.
 func DefaultConfig() Config {
-	return Config{Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	return Config{Events: EventConfig{Retention: eventlog.Limits{Entries: 4096, Bytes: 16 << 20}, Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}}
+}
+
+type EventConfig struct {
+	Retention eventlog.Limits
+	Queue     eventlog.Limits
 }
 
 type AgentDependencies struct {
@@ -61,10 +71,15 @@ type OwnedResource struct {
 type Dependencies struct {
 	Provider                   provider.Provider // Shared fallback for all roles, useful for eval fakes.
 	Root, Implementor, Auditor AgentDependencies
+	EventStore                 func(sessionID string) (eventlog.Store, error) // Factory transfers storage ownership; called once.
 	Resources                  []OwnedResource
 }
 
 type Session struct {
+	id              string
+	log             *eventlog.Log
+	legacyOnce      sync.Once
+	legacy          *eventlog.Subscription
 	config          Config
 	controller      *conversation.Controller
 	workflow        *workflow.Session
@@ -79,6 +94,10 @@ type Session struct {
 
 // StartupError retains cleanup ownership if rollback could not complete.
 // Call Close again through errors.As; a partially built session is never usable.
+type startupCleanup struct{ s *Session }
+
+func (c startupCleanup) Close(ctx context.Context) error { return c.s.Dispose(ctx) }
+
 type StartupError struct {
 	cause   error
 	cleanup Resource
@@ -97,8 +116,8 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if cleanupErr := s.Close(cleanup); cleanupErr != nil {
-			err = &StartupError{cause: errors.Join(err, cleanupErr), cleanup: s}
+		if cleanupErr := s.Dispose(cleanup); cleanupErr != nil {
+			err = &StartupError{cause: errors.Join(err, cleanupErr), cleanup: startupCleanup{s}}
 		}
 	}()
 	for _, r := range deps.Resources {
@@ -114,6 +133,44 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	var id [16]byte
+	if _, err = rand.Read(id[:]); err != nil {
+		return nil, err
+	}
+	s.id = hex.EncodeToString(id[:])
+	if s.config.Events.Retention == (eventlog.Limits{}) {
+		s.config.Events.Retention = DefaultConfig().Events.Retention
+	}
+	if s.config.Events.Queue == (eventlog.Limits{}) {
+		s.config.Events.Queue = DefaultConfig().Events.Queue
+	}
+	if err = s.config.Events.Retention.Validate(); err != nil {
+		return nil, err
+	}
+	if err = s.config.Events.Queue.Validate(); err != nil {
+		return nil, err
+	}
+	var store eventlog.Store
+	if deps.EventStore != nil {
+		store, err = deps.EventStore(s.id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if store == nil {
+		store, err = eventlog.NewMemory(s.id, s.config.Events.Retention)
+		if err != nil {
+			return nil, err
+		}
+	}
+	s.log, err = eventlog.New(store, s.config.Events.Queue)
+	if err != nil {
+		return nil, err
+	}
+	data, _ := json.Marshal(struct {
+		ID string `json:"id"`
+	}{s.id})
+	_ = s.log.Publish(eventlog.Data{Kind: "session_started", Payload: data})
 	pool := transport.New()
 	s.resources.Add("provider transport", pool)
 	cfg = s.config
@@ -166,7 +223,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithAdmission(s.admission))
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish))
 	_, err = c.CreateAgent(message.User, agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), messaging, managementTools(s), deps.Root.Tools)})
 	if err != nil {
 		return nil, err
@@ -240,9 +297,6 @@ func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, rev
 
 // NextEvent is the transitional single-reader adapter used by the TUI until
 // independent subscriptions replace the relay in the event-storage stage.
-func (s *Session) NextEvent(ctx context.Context) (conversation.Event, error) {
-	return s.workflow.NextEvent(ctx)
-}
 
 func localTools(dir string) ([]tool.Tool, error) {
 	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir})

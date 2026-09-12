@@ -103,7 +103,9 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	runner, err := agent.New(agent.Config{
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
 		Outbox: sender{controller: c, actor: id}, OnConsumed: c.acknowledge,
-		OnState: func(state agent.State) { c.emit(AgentStateChanged{Agent: id, State: state}) },
+		OnLifecycle: func(s agent.StateSnapshot) {
+			c.emit(AgentStateChanged{Agent: id, State: s.State, Revision: s.Revision})
+		},
 		OnCommentary: func(text string) {
 			c.emit(CommentaryEvent{Agent: id, Content: text})
 		},
@@ -116,7 +118,7 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 		return Creation{}, err
 	}
 	owned := &ownedAgent{
-		info: AgentInfo{ID: id, Parent: parent, State: agent.Idle}, agent: runner, inbox: mail, ctx: ctx, cancel: cancel,
+		info: AgentInfo{ID: id, Parent: parent, State: agent.Idle, StateRevision: 1}, agent: runner, inbox: mail, ctx: ctx, cancel: cancel,
 	}
 	if parent == message.User {
 		c.root = id
@@ -241,7 +243,8 @@ func (c *Controller) Agents() []AgentInfo {
 	result := make([]AgentInfo, 0, len(c.order))
 	for _, id := range c.order {
 		info := c.agents[id].info
-		info.State = c.agents[id].agent.State()
+		state := c.agents[id].agent.StateSnapshot()
+		info.State, info.StateRevision = state.State, state.Revision
 		result = append(result, info)
 	}
 	return result
@@ -277,7 +280,8 @@ func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (A
 	}
 	info, runner := owned.info, owned.agent
 	c.mu.Unlock()
-	info.State = runner.State()
+	state := runner.StateSnapshot()
+	info.State, info.StateRevision = state.State, state.Revision
 	inspection := AgentInspection{AgentInfo: info, Usage: runner.Usage(), ContextRevision: runner.ContextRevision(), OutputTokenLimit: runner.OutputTokenLimit()}
 	if options.Transcript != nil {
 		page, err := runner.Transcript(*options.Transcript)
@@ -308,9 +312,10 @@ func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
 		return AgentInfo{}, err
 	}
 	owned := c.agents[id]
-	state, err := owned.agent.Pause()
+	_, err := owned.agent.Pause()
 	info := owned.info
-	info.State = state
+	state := owned.agent.StateSnapshot()
+	info.State, info.StateRevision = state.State, state.Revision
 	return info, err
 }
 
@@ -321,9 +326,10 @@ func (c *Controller) ResumeAgent(id message.ActorID) (AgentInfo, error) {
 		return AgentInfo{}, err
 	}
 	owned := c.agents[id]
-	state, err := owned.agent.Resume()
+	_, err := owned.agent.Resume()
 	info := owned.info
-	info.State = state
+	state := owned.agent.StateSnapshot()
+	info.State, info.StateRevision = state.State, state.Revision
 	return info, err
 }
 
@@ -334,10 +340,11 @@ func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	if !ok {
 		return AgentInfo{}, fmt.Errorf("unknown agent: %s", id)
 	}
-	state := owned.agent.RequestStop()
+	owned.agent.RequestStop()
 	owned.cancel()
 	info := owned.info
-	info.State = state
+	state := owned.agent.StateSnapshot()
+	info.State, info.StateRevision = state.State, state.Revision
 	return info, nil
 }
 

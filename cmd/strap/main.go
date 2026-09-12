@@ -56,7 +56,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		err = errors.Join(err, session.Close(cleanup))
+		err = errors.Join(err, session.Dispose(cleanup))
 	}()
 	return tui.Run(ctx, session, tui.Options{Model: *model, Endpoint: *baseURL})
 }
