@@ -77,7 +77,7 @@ type entry struct {
 }
 
 type model struct {
-	reasoningExpanded *bool // Explicit user preference overrides automatic collapse.
+	reasoningExpanded bool // Thinking is hidden until explicitly shown.
 	transcript        *transcriptView
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -116,7 +116,7 @@ type model struct {
 var (
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "111"})
 	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "242", Dark: "245"})
-	userStyle  = lipgloss.NewStyle().Bold(true)
+	userStyle  = lipgloss.NewStyle().Bold(true).AlignHorizontal(lipgloss.Left)
 	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"})
 )
 
@@ -252,7 +252,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "ctrl+d":
 			return m.quit()
-		case "f3":
+		case "ctrl+t":
 			if !m.selecting {
 				m.toggleReasoning()
 			}
@@ -340,7 +340,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. F3 expands or collapses reasoning; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/clear":
 			m.entries = nil
 			m.renderTranscript(true)
@@ -769,5 +769,5 @@ func (m *model) footer() string {
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter send · F3 reasoning · Alt+Enter newline · /help"
+	return "Enter send · Ctrl+T thinking · Alt+Enter newline · /help"
 }

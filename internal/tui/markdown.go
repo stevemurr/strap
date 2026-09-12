@@ -33,9 +33,9 @@ func (m *model) renderBody(e *entry) string {
 		}
 	}
 	if e.reasoning != "" {
-		heading := "▸ Reasoning · F3 expand"
+		heading := "▸ Thinking · Ctrl+T show"
 		if e.reasoningExpanded {
-			heading = "▾ Reasoning · F3 collapse\n" + e.reasoning
+			heading = "▾ Thinking · Ctrl+T hide\n" + e.reasoning
 		}
 		if body != "" {
 			heading += "\n\n"
@@ -43,7 +43,7 @@ func (m *model) renderBody(e *entry) string {
 		body = dimStyle.Render(heading) + body
 	}
 	// Wide tables and code lines must also fit after a terminal resize.
-	wrapped := ansi.Hardwrap(lipgloss.NewStyle().Width(width).Render(body), width, true)
+	wrapped := ansi.Hardwrap(lipgloss.NewStyle().AlignHorizontal(lipgloss.Left).Width(width).Render(body), width, true)
 	var lines []string
 	for line := range strings.SplitSeq(wrapped, "\n") {
 		// A double-width glyph cannot fit in a one-column terminal.

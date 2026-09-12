@@ -75,6 +75,7 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	defer detach()
 	m := newModel(ctx, cancel, observed, Options{})
 	m.input.SetValue("unfinished draft")
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Opt in before testing dynamic thinking rendering.
 	if _, err := session.Send(session.Root(), "respond"); err != nil {
 		t.Fatal(err)
 	}
@@ -105,10 +106,14 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 			if !reasoningVisible || !firstVisible || !secondVisible || strings.Count(view, "Early text arrives") != 1 {
 				t.Fatalf("expected one incrementally rendered reply:\n%s", view)
 			}
-			if strings.Contains(view, "Early reasoning") {
-				t.Fatal("reasoning did not auto-collapse")
+			if !strings.Contains(view, "Early reasoning") {
+				t.Fatal("explicit thinking preference was changed")
 			}
-			m.Update(tea.KeyMsg{Type: tea.KeyF3})
+			m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+			if strings.Contains(ansi.Strip(m.View()), "Early reasoning") {
+				t.Fatal("cannot hide thinking")
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 			if !strings.Contains(ansi.Strip(m.View()), "Early reasoning") {
 				t.Fatal("cannot expand reasoning")
 			}

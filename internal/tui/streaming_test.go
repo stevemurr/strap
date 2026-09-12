@@ -20,15 +20,15 @@ func TestReasoningDisplayKeepsUserChoiceAndFailedPartialText(t *testing.T) {
 	observe := func(e agent.Event) { m.Update(received{event: conversation.AgentEvent{Agent: "root", Event: e}}) }
 	observe(agent.OutputStarted{Output: id})
 	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Text: "private reasoning"})
-	if !strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.entries[0].body != "" {
+	if strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.entries[0].body != "" {
 		t.Fatal(m.View())
 	}
-	// Explicit collapse then expansion prevents the first content chunk collapsing it.
-	m.Update(tea.KeyMsg{Type: tea.KeyF3})
-	if strings.Contains(ansi.Strip(m.View()), "private reasoning") {
+	// Only explicit toggles change visibility, including after content arrives.
+	m.input.SetValue("draft")
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if !strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.input.Value() != "draft" {
 		t.Fatal(m.View())
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyF3})
 	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelContent, Text: "partial answer"})
 	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Offset: 17, Text: " continues"})
 	observe(agent.OutputFinished{Output: id, Status: agent.OutputFailed, Err: errors.New("length limit")})

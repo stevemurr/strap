@@ -29,10 +29,7 @@ func (m *model) observeOutput(fact agent.Event) {
 		id := e.Output
 		row := &m.entries[len(m.entries)-1]
 		row.output = &id
-		row.reasoningExpanded = true
-		if m.reasoningExpanded != nil {
-			row.reasoningExpanded = *m.reasoningExpanded
-		}
+		row.reasoningExpanded = m.reasoningExpanded
 	case agent.OutputDelta:
 		row := m.outputEntry(e.Output)
 		if row == nil {
@@ -44,12 +41,7 @@ func (m *model) observeOutput(fact agent.Event) {
 				row.meta = fmt.Sprintf("%s · thinking", e.Output.Agent)
 			}
 		} else {
-			if !row.contentStarted {
-				row.contentStarted = true
-				if m.reasoningExpanded == nil {
-					row.reasoningExpanded = false
-				}
-			}
+			row.contentStarted = true
 			row.body += safeText(e.Text)
 			row.meta = fmt.Sprintf("%s · responding", e.Output.Agent)
 		}
@@ -70,22 +62,11 @@ func (m *model) observeOutput(fact agent.Event) {
 	}
 }
 
-// F3 changes view state only. Further chunks and completion cannot undo it.
+// Ctrl+T is the terminal input for Cmd+T mappings. It changes only view state.
 func (m *model) toggleReasoning() {
-	expanded := true
-	if m.reasoningExpanded != nil {
-		expanded = !*m.reasoningExpanded
-	} else {
-		for i := len(m.entries) - 1; i >= 0; i-- {
-			if m.entries[i].reasoning != "" {
-				expanded = !m.entries[i].reasoningExpanded
-				break
-			}
-		}
-	}
-	m.reasoningExpanded = &expanded
+	m.reasoningExpanded = !m.reasoningExpanded
 	for i := range m.entries {
-		m.entries[i].reasoningExpanded = expanded
+		m.entries[i].reasoningExpanded = m.reasoningExpanded
 		m.entries[i].renderWidth = 0
 	}
 	m.renderTranscript(false)

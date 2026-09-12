@@ -52,9 +52,10 @@ this favors correctness over repeated-query performance. It shares the ledger's
 existing actor visibility rules and cannot dispatch anything. No inspection call
 resumes execution. The TUI uses the shared reducer, appends streaming text to one
 output row, and reconciles replies/commentary and optimistic input by stable IDs.
-Reasoning renders separately and expands initially, then collapses on first answer
-content unless the user has made an explicit F3 choice. That preference applies
-across output rows. The transcript browser's `t` mode reads reasoning from the log
+Thinking renders separately and is hidden by default. Only an explicit toggle
+changes its visibility, and the preference applies across output rows. Cmd+T
+requires a terminal mapping to Ctrl+T (`0x14`); Ctrl+T works directly.
+The transcript browser's `t` mode reads reasoning from the log
 at fixed cursors, including calls with no committed assistant-history entry.
 Reads run asynchronously; snapshots refresh with `r` and page through older calls.
 Clearing main display rows does not clear the shared projector or retained log.

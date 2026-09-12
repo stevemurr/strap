@@ -87,10 +87,12 @@ their first action and meaningful findings between batches. These host-only
 updates do not enter agent inboxes or mark work complete; the original text stays
 in the generating agent's assistant history without an additional message.
 Replies and progress text stream into a single row as the model generates them.
-Reasoning streams in a separate section while the model thinks. It automatically
-collapses when answer text begins; F3 expands or collapses reasoning across the
-view and keeps your choice for later output. Reasoning is recorded for inspection
-and recovery, but never enters subsequent model requests. In `/transcript [id]`,
+Thinking is hidden by default. Ctrl+T shows or hides it across the view and keeps
+your choice for later output. Cmd+T requires terminal-level forwarding as Ctrl+T
+(`0x14`), where supported. The terminal normally reserves Cmd+T for a new tab,
+and Strap's input library does not receive Command modifiers directly.
+Reasoning is recorded for inspection and recovery, but never enters subsequent
+model requests. In `/transcript [id]`,
 press `t` to switch between model history and reasoning inspection, `r` to refresh,
 and scroll above the top for older calls. Inspection includes active and failed
 calls and remains available after `/clear`.
