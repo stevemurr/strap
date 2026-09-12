@@ -27,7 +27,7 @@ type binding struct {
 // Session is the application's single consumer of controller events. It publishes
 // to the configured callback or a separate host relay, without waiting for a UI reader.
 type Session struct {
-	publish   func(conversation.Event)
+	publish   func(conversation.Event) error
 	closing   atomic.Bool
 	admission *admission.Gate
 	stopOwner func() bool
@@ -44,8 +44,10 @@ type Session struct {
 
 type Option func(*Session)
 
-// WithPublisher replaces the legacy host relay. It must enqueue without waiting for I/O.
-func WithPublisher(p func(conversation.Event)) Option { return func(s *Session) { s.publish = p } }
+// WithPublisher replaces the legacy host relay. It acknowledges required work records independently of the dispatcher.
+func WithPublisher(p func(conversation.Event) error) Option {
+	return func(s *Session) { s.publish = p }
+}
 
 func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admission = g } }
 
@@ -55,6 +57,9 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	for _, option := range options {
 		option(s)
+	}
+	if s.publish != nil {
+		s.Store = work.New(work.WithReporter(work.ReporterFunc(func(_ context.Context, e work.Event) error { return s.publish(conversation.WorkEvent{Event: e}) })))
 	}
 	if s.publish == nil {
 		s.events = inbox.New[conversation.Event]()
@@ -121,11 +126,11 @@ func (s *Session) RootTools() []tool.Tool {
 		}),
 	)
 }
-func (s *Session) emit(e conversation.Event) {
+func (s *Session) emit(e conversation.Event) error {
 	if s.publish != nil {
-		s.publish(e)
+		return s.publish(e)
 	} else {
-		_ = s.events.Send(e)
+		return s.events.Send(e)
 	}
 }
 
@@ -204,7 +209,9 @@ func (s *Session) run() {
 	drain := func() {
 		for _, e := range s.Store.PendingEvents(0) {
 			if !published[e.ID] {
-				s.emit(conversation.WorkEvent{Event: e.Clone()})
+				if s.publish == nil {
+					s.emit(conversation.WorkEvent{Event: e.Clone()})
+				}
 				published[e.ID] = true
 			}
 			if s.closing.Load() {
@@ -290,7 +297,9 @@ func (s *Session) run() {
 				drain()
 				return
 			}
-			s.emit(e)
+			if s.publish == nil {
+				s.emit(e)
+			}
 			switch event := e.(type) {
 			case conversation.AckEvent:
 				if id, ok := notifications[event.Receipt.MessageID]; ok {

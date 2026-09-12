@@ -7,9 +7,9 @@ import (
 	"github.com/stevemurr/strap/identity"
 )
 
-func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (Submission, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Submission, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, false)
 	if err != nil {
 		return Submission{}, err
@@ -42,14 +42,14 @@ func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (Submission,
 	if w.Kind == Repair {
 		w.State = Closed
 		w.Revision++
-		s.works[w.ID] = w
+		s.putWork(w.ID, w)
 	}
 	original.State = NeedsCheck
 	original.LatestSubmissionID = sub.ID
 	original.Revision++
 	original.Blocker = ""
-	s.works[original.ID] = original
-	s.submissions[sub.ID] = sub
+	s.putWork(original.ID, original)
+	s.putSubmission(sub.ID, sub)
 	s.emit(ReviewRequested, actor, original, true)
 	return s.submissionView(actor, sub), nil
 }
@@ -69,9 +69,9 @@ func (s *Store) contributor(actor identity.ActorID, id SubmissionID) bool {
 	}
 	return false
 }
-func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (Work, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (result Work, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	original, err := s.target(actor, r.WorkTarget, true)
 	if err != nil {
 		return Work{}, err
@@ -85,14 +85,14 @@ func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (Work,
 	w := Work{ID: ID(s.id("work")), Kind: AuditWork, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: original.Owner, RequestedBy: actor, Assignee: r.Auditor, Task: "Audit the submitted outcome: " + original.Task, ExpectedOutput: "Submit a pass or fail verdict with evidence. If unable to verify, report a blocker.", Scope: original.Scope, ParentID: original.ID, SubjectSubmissionID: r.SubmissionID}.Clone()
 	original.State = Checking
 	original.Revision++
-	s.works[original.ID] = original
-	s.works[w.ID] = w
+	s.putWork(original.ID, original)
+	s.putWork(w.ID, w)
 	s.emit(WorkAssigned, actor, w, true)
 	return w.Clone(), nil
 }
-func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (Audit, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (result Audit, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, false)
 	if err != nil {
 		return Audit{}, err
@@ -160,17 +160,17 @@ func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (Audit, erro
 		findings, _ := json.Marshal(a.Findings)
 		repair := Work{ID: ID(s.id("work")), Kind: Repair, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: original.Owner, RequestedBy: actor, Assignee: s.submissions[r.SubmissionID].SubmittedBy, Scope: scope, Task: "Repair the audited outcome: " + original.Task, Context: string(findings), ExpectedOutput: "Address every finding and submit the repaired outcome for another audit.", ParentID: original.ID, RequestedByAuditID: a.ID}.Clone()
 		a.RepairWorkID = repair.ID
-		s.works[repair.ID] = repair
+		s.putWork(repair.ID, repair)
 	}
 	if original.Scope != nil {
-		s.plans[p.ID] = p
+		s.putPlan(p.ID, p)
 	}
 	original.Revision++
 	w.State = Closed
 	w.Revision++
-	s.works[original.ID] = original
-	s.works[w.ID] = w
-	s.audits[a.ID] = a
+	s.putWork(original.ID, original)
+	s.putWork(w.ID, w)
+	s.putAudit(a.ID, a)
 	s.emit(AuditCompleted, actor, original, true)
 	s.events[len(s.events)-1].AuditID = a.ID
 	if a.RepairWorkID != "" {
@@ -178,9 +178,9 @@ func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (Audit, erro
 	}
 	return a.Clone(), nil
 }
-func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (Work, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (result Work, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, true)
 	if err != nil {
 		return Work{}, err
@@ -198,7 +198,7 @@ func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (Work, error
 	w.Revision++
 	w.AssignedAtRevision = w.Revision
 	w.Blocker = ""
-	s.works[w.ID] = w
+	s.putWork(w.ID, w)
 	s.emit(WorkReassigned, actor, w, true)
 	return w.Clone(), nil
 }
@@ -208,7 +208,7 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 			child.State = Cancelled
 			child.Revision++
 			child.Note = reason
-			s.works[child.ID] = child
+			s.putWork(child.ID, child)
 			s.emit(WorkCancelled, actor, child, true)
 		}
 	}
@@ -220,20 +220,20 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 				p.Steps[i].Status = Pending
 			}
 		}
-		s.plans[p.ID] = p
+		s.putPlan(p.ID, p)
 	}
 	w.State = Cancelled
 	w.Revision++
 	w.Note = reason
-	s.works[w.ID] = w
+	s.putWork(w.ID, w)
 	s.emit(WorkCancelled, actor, w, true)
 }
 
 // Cancelling repair cancels its implementation cycle. Cancelling an audit alone
 // returns the unchanged submission to needs_check so another auditor can review it.
-func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (Work, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, true)
 	if err != nil {
 		return Work{}, err
@@ -249,12 +249,12 @@ func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (Work, error) {
 		w.State = Cancelled
 		w.Revision++
 		w.Note = r.Reason
-		s.works[w.ID] = w
+		s.putWork(w.ID, w)
 		s.emit(WorkCancelled, actor, w, true)
 		original := s.works[w.ParentID]
 		original.State = NeedsCheck
 		original.Revision++
-		s.works[original.ID] = original
+		s.putWork(original.ID, original)
 		s.emit(ReviewRequested, actor, original, true)
 	}
 	return s.works[w.ID].Clone(), nil

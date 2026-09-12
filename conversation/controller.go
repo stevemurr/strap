@@ -26,6 +26,9 @@ type ownedAgent struct {
 }
 
 type Controller struct {
+	emission    sync.Mutex
+	reporter    Reporter
+	source      func(context.Context) (Event, error)
 	mu          sync.Mutex
 	closing     bool
 	ctx         context.Context
@@ -43,7 +46,19 @@ type Controller struct {
 
 // New creates an empty conversation. CreateAgent(message.User, spec) establishes
 // its root. The application supplies every agent's prompt and tools explicitly.
-func New(ctx context.Context) *Controller {
+type Reporter interface {
+	Publish(context.Context, Event) error
+}
+type ReporterFunc func(context.Context, Event) error
+
+func (f ReporterFunc) Publish(ctx context.Context, e Event) error { return f(ctx, e) }
+
+type Option func(*Controller)
+
+func WithReporting(r Reporter, source func(context.Context) (Event, error)) Option {
+	return func(c *Controller) { c.reporter = r; c.source = source; c.events = nil }
+}
+func New(ctx context.Context, options ...Option) *Controller {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &Controller{
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
@@ -51,18 +66,28 @@ func New(ctx context.Context) *Controller {
 		receipts: make(map[message.MessageID]message.Receipt),
 		events:   inbox.New[Event](),
 	}
+	for _, o := range options {
+		o(c)
+	}
 	go func() {
 		<-ctx.Done()
 		// Close admission under the same lock as CreateAgent's Add. Once
 		// released, all admitted agents are registered and no more can join.
 		c.mu.Lock()
 		c.closing = true
+		ownedAgents := make([]*ownedAgent, 0, len(c.agents))
 		for _, owned := range c.agents {
-			owned.agent.RequestStop()
+			ownedAgents = append(ownedAgents, owned)
 		}
 		c.mu.Unlock()
+		for _, owned := range ownedAgents {
+			owned.cancel()
+			owned.agent.RequestStop()
+		}
 		c.wg.Wait()
-		c.events.Close()
+		if c.events != nil {
+			c.events.Close()
+		}
 		close(c.done)
 	}()
 	return c
@@ -82,6 +107,8 @@ func (c *Controller) Root() message.ActorID {
 // Subsequent parents must be active agents. The parent receives text responses
 // and model failures. The supplied spec is used without tool or prompt injection.
 func (c *Controller) CreateAgent(parent message.ActorID, spec agent.Spec) (Creation, error) {
+	c.emission.Lock()
+	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.createLocked(parent, spec)
@@ -104,16 +131,25 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	mail := inbox.New[message.Message]()
 	runner, err := agent.New(agent.Config{
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
-		Outbox: sender{controller: c, actor: id}, OnConsumed: c.acknowledge,
-		OnLifecycle: func(s agent.StateSnapshot) {
-			c.emit(AgentStateChanged{Agent: id, State: s.State, Revision: s.Revision})
-		},
-		OnCommentary: func(text string) {
-			c.emit(CommentaryEvent{Agent: id, Content: text})
-		},
-		OnTool:      func(activity agent.ToolActivity) { c.emit(ToolEvent{Agent: id, Activity: activity}) },
-		OnToolBatch: func(batch agent.ToolBatch) { c.emit(ToolBatchEvent{Agent: id, Batch: batch}) },
-		OnUsage:     func(observation agent.UsageObservation) { c.emit(UsageEvent{Agent: id, Observation: observation}) },
+		Outbox: sender{controller: c, actor: id},
+		Reporter: agent.ReporterFunc(func(ctx context.Context, e agent.Event) error {
+			switch v := e.(type) {
+			case agent.Consumed:
+				return c.acknowledge(v.Receipt)
+			case agent.StateSnapshot:
+				return c.emit(AgentStateChanged{Agent: id, State: v.State, Revision: v.Revision})
+			case agent.Commentary:
+				return c.emit(CommentaryEvent{Agent: id, Content: v.Text, Output: &v.Output})
+			case agent.ToolActivity:
+				return c.emit(ToolEvent{Agent: id, Activity: v})
+			case agent.ToolBatch:
+				return c.emit(ToolBatchEvent{Agent: id, Batch: v})
+			case agent.UsageObservation:
+				return c.emit(UsageEvent{Agent: id, Observation: v})
+			default:
+				return c.emit(AgentEvent{Agent: id, Event: e})
+			}
+		}),
 	})
 	if err != nil {
 		cancel()
@@ -127,7 +163,10 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	}
 	c.agents[id] = owned
 	c.order = append(c.order, id)
-	c.emit(AgentStarted{Agent: owned.info})
+	if err := c.emitLocked(AgentStarted{Agent: owned.info}); err != nil {
+		cancel()
+		return Creation{}, err
+	}
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -139,6 +178,8 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 
 // Send delivers user input. Model-facing senders are bound to their own actor.
 func (c *Controller) Send(to message.ActorID, content string) (message.Receipt, error) {
+	c.emission.Lock()
+	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.sendLocked(message.User, message.Draft{To: to, Kind: message.Instruction, Content: content})
@@ -147,6 +188,8 @@ func (c *Controller) Send(to message.ActorID, content string) (message.Receipt, 
 // Deliver is a host operation for application-owned work dispatch. Model tools
 // continue to use their bound Sender; they cannot supply a sender identity.
 func (c *Controller) Deliver(from message.ActorID, draft message.Draft) (message.Receipt, error) {
+	c.emission.Lock()
+	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if from != message.User {
@@ -169,25 +212,29 @@ func (c *Controller) sendLocked(from message.ActorID, draft message.Draft) (mess
 			return message.Receipt{}, err
 		}
 	}
-	return c.deliverLocked(from, draft), nil
+	return c.deliverLocked(from, draft)
 }
 
-func (c *Controller) deliverLocked(from message.ActorID, draft message.Draft) message.Receipt {
+func (c *Controller) deliverLocked(from message.ActorID, draft message.Draft) (message.Receipt, error) {
 	c.nextMessage++
 	m := message.Message{
 		ID:   message.MessageID(fmt.Sprintf("message-%d", c.nextMessage)),
 		From: from, To: draft.To, Kind: draft.Kind, ReplyTo: draft.ReplyTo, Content: draft.Content,
-		Work: draft.Work, Event: draft.Event,
+		Work: draft.Work, Event: draft.Event, Output: draft.Output,
 	}
 	m = m.Clone()
 	r := message.Receipt{MessageID: m.ID, Recipient: m.To, Status: message.Queued}
 	c.receipts[m.ID] = r
-	c.emit(MessageEvent{Message: m.Clone()})
-	c.emit(AckEvent{Receipt: r})
+	if err := c.emitLocked(MessageEvent{Message: m.Clone()}); err != nil {
+		return r, err
+	}
+	if err := c.emitLocked(AckEvent{Receipt: r}); err != nil {
+		return r, err
+	}
 	if m.To != message.User {
 		_ = c.agents[m.To].inbox.Send(m)
 	}
-	return r
+	return r, nil
 }
 
 func (c *Controller) activeLocked(id message.ActorID) error {
@@ -201,14 +248,18 @@ func (c *Controller) activeLocked(id message.ActorID) error {
 	return nil
 }
 
-func (c *Controller) acknowledge(r message.Receipt) {
+func (c *Controller) acknowledge(r message.Receipt) error {
+	c.emission.Lock()
+	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.receipts[r.MessageID] = r
-	c.emit(AckEvent{Receipt: r})
+	return c.emitLocked(AckEvent{Receipt: r})
 }
 
 func (c *Controller) finish(a *ownedAgent, err error) {
+	c.emission.Lock()
+	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	a.cancel()
@@ -219,9 +270,9 @@ func (c *Controller) finish(a *ownedAgent, err error) {
 			Detail: "Agent stopped before consuming this message",
 		}
 		c.receipts[m.ID] = r
-		c.emit(AckEvent{Receipt: r})
+		c.emitLocked(AckEvent{Receipt: r})
 	}
-	c.emit(AgentExited{Agent: a.info.ID, Err: err})
+	_ = c.emitLocked(AgentExited{Agent: a.info.ID, Err: err})
 	if err != nil && !errors.Is(err, context.Canceled) && c.ctx.Err() == nil {
 		_, _ = c.sendLocked(a.info.ID, message.Draft{
 			To: a.info.Parent, Kind: message.Failure,
@@ -255,6 +306,9 @@ func (c *Controller) Agents() []AgentInfo {
 // NextEvent is a single-consumer host stream. It drains after Close, then returns
 // inbox.ErrClosed. Agents communicate through routed messages, not this stream.
 func (c *Controller) NextEvent(ctx context.Context) (Event, error) {
+	if c.source != nil {
+		return c.source(ctx)
+	}
 	return c.events.Receive(ctx)
 }
 
@@ -309,11 +363,12 @@ func (c *Controller) CountAgentTokens(ctx context.Context, id message.ActorID, r
 
 func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if err := c.activeLocked(id); err != nil {
+		c.mu.Unlock()
 		return AgentInfo{}, err
 	}
 	owned := c.agents[id]
+	c.mu.Unlock()
 	state, err := owned.agent.PauseSnapshot()
 	info := owned.info
 	info.State, info.StateRevision = state.State, state.Revision
@@ -322,11 +377,12 @@ func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
 
 func (c *Controller) ResumeAgent(id message.ActorID) (AgentInfo, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if err := c.activeLocked(id); err != nil {
+		c.mu.Unlock()
 		return AgentInfo{}, err
 	}
 	owned := c.agents[id]
+	c.mu.Unlock()
 	state, err := owned.agent.ResumeSnapshot()
 	info := owned.info
 	info.State, info.StateRevision = state.State, state.Revision
@@ -335,13 +391,14 @@ func (c *Controller) ResumeAgent(id message.ActorID) (AgentInfo, error) {
 
 func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	owned, ok := c.agents[id]
 	if !ok {
+		c.mu.Unlock()
 		return AgentInfo{}, fmt.Errorf("%w: %s", ErrAgentNotFound, id)
 	}
-	state := owned.agent.RequestStopSnapshot()
+	c.mu.Unlock()
 	owned.cancel()
+	state := owned.agent.RequestStopSnapshot()
 	info := owned.info
 	info.State, info.StateRevision = state.State, state.Revision
 	return info, nil
@@ -360,7 +417,25 @@ func (c *Controller) Close(ctx context.Context) error {
 	}
 }
 
-func (c *Controller) emit(event Event) { _ = c.events.Send(event) }
+func (c *Controller) emit(event Event) error {
+	if c.reporter != nil {
+		if err := c.reporter.Publish(context.Background(), event); err != nil {
+			c.cancel()
+			return err
+		}
+		return nil
+	}
+	return c.events.Send(event)
+}
+
+// emitLocked is called with emission and mu. Only emission spans the I/O wait.
+func (c *Controller) emitLocked(e Event) error {
+	c.mu.Unlock()
+	err := c.emit(e)
+	c.mu.Lock()
+	return err
+}
+func (c *Controller) Done() <-chan struct{} { return c.done }
 
 type sender struct {
 	controller *Controller
@@ -369,6 +444,8 @@ type sender struct {
 
 func (s sender) Send(ctx context.Context, draft message.Draft) (message.Receipt, error) {
 	c := s.controller
+	c.emission.Lock()
+	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {

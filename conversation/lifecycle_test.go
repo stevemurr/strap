@@ -46,7 +46,7 @@ func TestIdlePauseQueuesInputAndStopDrainsIt(t *testing.T) {
 		t.Fatalf("inspect: %+v %v", info, err)
 	}
 	info, err = c.StopAgent(c.Root())
-	if err != nil || info.State != agent.StopRequested {
+	if err != nil || (info.State != agent.StopRequested && !info.State.Terminal()) {
 		t.Fatalf("stop request: %+v %v", info, err)
 	}
 	event(t, c, func(e conversation.Event) bool {

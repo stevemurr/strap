@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Session) ID() string { return s.id }
-func (s *Session) publish(e conversation.Event) {
+func (s *Session) publish(e conversation.Event) error {
 	if exit, ok := e.(conversation.AgentExited); ok && exit.Err != nil && !errors.Is(exit.Err, context.Canceled) {
 		s.mu.Lock()
 		s.executionError = errors.Join(s.executionError, exit.Err)
@@ -21,12 +21,16 @@ func (s *Session) publish(e conversation.Event) {
 	d, err := eventcodec.EncodeEvent(e)
 	if err != nil {
 		s.log.Fail(err)
-		return
+		return err
 	}
-	_ = s.log.Publish(d)
+	if err := s.log.Publish(d); err != nil {
+		s.log.Fail(err)
+		return err
+	}
 	if batch, ok := e.(conversation.ToolBatchEvent); ok && s.telemetry != nil {
 		s.telemetry.schedule(batch)
 	}
+	return nil
 }
 func (s *Session) Events(ctx context.Context, q eventlog.Query) (eventlog.Page, error) {
 	return s.log.Read(ctx, q)
@@ -92,4 +96,42 @@ func (s *Session) Log(ctx context.Context, entry conversation.DiagnosticEvent) e
 		return err
 	}
 	return s.log.Publish(d)
+}
+
+// readWorkflow follows accepted controller facts. The workflow dispatcher never
+// acknowledges its own writes and does not own a second runtime event queue.
+func (s *Session) readWorkflow(ctx context.Context) (conversation.Event, error) {
+	for {
+		p, err := s.log.Read(ctx, eventlog.Query{After: s.workflowAfter, Limit: 1})
+		if err != nil {
+			return nil, err
+		}
+		if len(p.Events) > 0 {
+			s.workflowAfter = p.Next
+			e := p.Events[0]
+			if e.Kind != "ack" && e.Kind != "agent_exited" {
+				continue
+			}
+			return eventcodec.DecodeEvent(e)
+		}
+		if p.Head.State == eventlog.Failed {
+			return nil, eventlog.ErrCapture
+		}
+		select {
+		case <-s.controller.Done():
+			return nil, inbox.ErrClosed
+		default:
+		}
+		run, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(s.workflowReadLife, cancel)
+		_, err = s.log.Wait(run, p.Head.Cursor)
+		stop()
+		cancel()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+	}
 }

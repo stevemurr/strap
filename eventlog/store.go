@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/stevemurr/strap/identity"
 	"time"
 )
 
@@ -18,17 +19,27 @@ var (
 	ErrDetached = errors.New("subscription detached")
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 type Data struct {
-	Correlation string          `json:"correlation,omitempty"`
-	Kind        string          `json:"kind"`
-	Agent       string          `json:"agent,omitempty"`
-	Time        time.Time       `json:"time"`
-	Payload     json.RawMessage `json:"payload"`
+	Output      *identity.OutputID `json:"output,omitempty"`
+	Message     identity.MessageID `json:"message,omitempty"`
+	Correlation string             `json:"correlation,omitempty"`
+	Kind        string             `json:"kind"`
+	Agent       string             `json:"agent,omitempty"`
+	Time        time.Time          `json:"time"
+ "github.com/stevemurr/strap/identity"`
+	Payload json.RawMessage `json:"payload"`
 }
 
-func (d Data) Clone() Data { d.Payload = append(json.RawMessage(nil), d.Payload...); return d }
+func (d Data) Clone() Data {
+	if d.Output != nil {
+		v := *d.Output
+		d.Output = &v
+	}
+	d.Payload = append(json.RawMessage(nil), d.Payload...)
+	return d
+}
 func (d Data) Size() int {
 	return len(d.Kind) + len(d.Agent) + len(d.Correlation) + len(d.Payload) + 128
 }
@@ -106,17 +117,6 @@ func (l Limits) Validate() error {
 	return nil
 }
 
-// Fit replaces a payload that cannot fit with an explicit, correlated omission.
-func Fit(d Data, max int) (Data, bool) {
-	if d.Size() <= max {
-		return d, false
-	}
-	payload, _ := json.Marshal(struct {
-		Kind  string `json:"original_kind"`
-		Bytes int    `json:"original_bytes"`
-	}{d.Kind, d.Size()})
-	return Data{Kind: "omitted", Correlation: d.Correlation, Agent: d.Agent, Time: d.Time, Payload: payload}, true
-}
 func terminal(o Outcome) Data {
 	p, _ := json.Marshal(o)
 	return Data{Kind: "session_closed", Time: time.Now().UTC(), Payload: p}

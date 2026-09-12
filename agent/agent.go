@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,7 @@ func (s Spec) Clone() Spec {
 
 // Config supplies the collaborators owned by the conversation controller.
 type Config struct {
+	Reporter   Reporter // Required for recoverable hosts; nil is an explicitly unrecorded low-level agent.
 	ID         message.ActorID
 	ReplyTo    message.ActorID
 	Spec       Spec
@@ -58,6 +60,10 @@ type Config struct {
 }
 
 type Agent struct {
+	emission       sync.Mutex
+	reporting      reportState
+	stopRequested  atomic.Bool
+	nextOutput     uint64
 	nextInvocation uint64
 	config         Config
 	tools          map[string]tool.Tool
@@ -106,19 +112,31 @@ func New(config Config) (*Agent, error) {
 // Each tool batch settles before inbox input is consumed and another model call
 // begins. There is deliberately no revision validation or proposal loop here.
 func (a *Agent) Run(ctx context.Context) (err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	a.reporting.mu.Lock()
+	a.reporting.cancel = cancel
+	a.reporting.mu.Unlock()
 	var last message.MessageID
 	if !a.started.CompareAndSwap(false, true) {
 		return errors.New("agent already started")
 	}
 	defer func() {
+		a.emission.Lock()
+		defer a.emission.Unlock()
 		a.control.mu.Lock()
-		defer a.control.mu.Unlock()
 		state := Stopped
 		if err != nil && ctx.Err() == nil && !errors.Is(err, context.Canceled) {
 			state = Failed
 		}
 		a.setStateLocked(state)
+		a.unlockAndReportState()
+		err = errors.Join(err, a.reportError())
 	}()
+	initial, _ := a.thread.requestMessages()
+	if err := a.report(HistoryAppended{Position: 1, Message: initial[0]}); err != nil {
+		return err
+	}
 	for {
 		if err := a.waitInbox(ctx); err != nil {
 			return err
@@ -130,7 +148,9 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
 			last = incoming.ID
 		}
-		a.consume(incoming)
+		if err := a.consume(incoming); err != nil {
+			return err
+		}
 		if incoming.Kind == message.Observation {
 			continue
 		}
@@ -142,24 +162,18 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
 					last = incoming.ID
 				}
-				a.consume(incoming)
+				if err := a.consume(incoming); err != nil {
+					return err
+				}
 			}
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
 			request, revision := a.request()
-			response, err := a.config.Spec.Provider.Submit(ctx, request, nil)
-			a.recordUsage(revision, response.Usage)
+			response, output, err := a.generate(ctx, request, revision)
 			if err != nil {
 				return err
 			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			response.ToolCalls = provider.CopyCalls(response.ToolCalls)
-			a.thread.append(provider.Message{
-				Role: "assistant", Content: content.Text(response.Content), ToolCalls: response.ToolCalls,
-			})
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
@@ -168,15 +182,20 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 					return errors.New("model returned no text or tool calls")
 				}
 				_, err := a.config.Outbox.Send(ctx, message.Draft{
-					To: a.config.ReplyTo, Kind: message.Reply, ReplyTo: last, Content: response.Content,
+					To: a.config.ReplyTo, Kind: message.Reply, ReplyTo: last, Content: response.Content, Output: &output,
 				})
 				if err != nil {
 					return err
 				}
 				break
 			}
-			if a.config.OnCommentary != nil && strings.TrimSpace(response.Content) != "" {
-				a.config.OnCommentary(response.Content)
+			if strings.TrimSpace(response.Content) != "" {
+				if err := a.report(Commentary{Output: output, Text: response.Content}); err != nil {
+					return err
+				}
+				if a.config.OnCommentary != nil {
+					a.config.OnCommentary(response.Content)
+				}
 			}
 			var toolRevision uint64
 			for _, call := range response.ToolCalls {
@@ -190,32 +209,48 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				if err != nil {
 					result = tool.Text("Tool error: " + err.Error())
 				}
-				toolRevision = a.thread.append(provider.Message{
+				toolRevision, err = a.appendHistory(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,
-				})
+				}, nil)
+				if err != nil {
+					return err
+				}
 			}
-			if a.config.OnToolBatch != nil {
+			{
 				calls := make([]string, len(response.ToolCalls))
 				for i, call := range response.ToolCalls {
 					calls[i] = call.ID
 				}
-				a.config.OnToolBatch(ToolBatch{Calls: calls, ContextRevision: toolRevision})
+				batch := ToolBatch{Calls: calls, ContextRevision: toolRevision}
+				if err := a.report(batch); err != nil {
+					return err
+				}
+				if a.config.OnToolBatch != nil {
+					a.config.OnToolBatch(batch)
+				}
 			}
 		}
 	}
 }
 
-func (a *Agent) consume(incoming message.Message) {
+func (a *Agent) consume(incoming message.Message) error {
 	// Attribution must reach actual providers, not only test metadata.
 	encoded, _ := json.Marshal(incoming)
-	a.thread.append(provider.Message{
+	_, err := a.appendHistory(provider.Message{
 		Role: "user", Content: content.Text(string(encoded)), Envelope: &incoming,
-	})
+	}, nil)
+	if err != nil {
+		return err
+	}
+	if err := a.report(Consumed{Receipt: message.Receipt{MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed}}); err != nil {
+		return err
+	}
 	if a.config.OnConsumed != nil {
 		a.config.OnConsumed(message.Receipt{
 			MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed,
 		})
 	}
+	return nil
 }
 
 func (a *Agent) request() (provider.Request, uint64) {
@@ -233,13 +268,15 @@ func (a *Agent) call(ctx context.Context, call provider.ToolCall) (result tool.R
 	started := time.Now()
 	a.nextInvocation++
 	invocation := fmt.Sprintf("%s/tool-%d", a.config.ID, a.nextInvocation)
-	a.reportTool(ToolActivity{InvocationID: invocation, Call: call, StartedAt: started})
+	if err := a.reportTool(ToolActivity{InvocationID: invocation, Call: call, StartedAt: started}); err != nil {
+		return tool.Result{}, err
+	}
 	defer func() {
 		observedErr := err
 		if observedErr == nil {
 			observedErr = ctx.Err()
 		}
-		a.reportTool(ToolActivity{InvocationID: invocation, Diagnostic: tool.DiagnosticFrom(observedErr), Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr})
+		err = errors.Join(err, a.reportTool(ToolActivity{InvocationID: invocation, Diagnostic: tool.DiagnosticFrom(observedErr), Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr}))
 	}()
 	t, ok := a.tools[call.Name]
 	if !ok {

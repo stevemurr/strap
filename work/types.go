@@ -194,6 +194,7 @@ type Audit struct {
 	RepairWorkID ID               `json:"repair_work_id,omitempty"`
 }
 type Event struct {
+	Change       *Change          `json:"change,omitempty"`
 	ID           EventID          `json:"event_id"`
 	Kind         EventKind        `json:"kind"`
 	Actor        identity.ActorID `json:"actor"`
@@ -235,6 +236,10 @@ func (a Audit) Clone() Audit {
 	return a
 }
 func (e Event) Clone() Event {
+	if e.Change != nil {
+		v := e.Change.Clone()
+		e.Change = &v
+	}
 	e.Work = e.Work.Clone()
 	e.Steps = cloneSteps(e.Steps)
 	if e.Plan != nil {

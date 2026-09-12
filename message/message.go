@@ -11,7 +11,7 @@ import (
 )
 
 type ActorID = identity.ActorID
-type MessageID string
+type MessageID = identity.MessageID
 
 const User ActorID = "user"
 
@@ -28,14 +28,15 @@ const (
 // Message is an immutable, controller-addressed envelope. A user's message is
 // input to the conversation, not a new execution owner.
 type Message struct {
-	ID      MessageID   `json:"id"`
-	From    ActorID     `json:"from"`
-	To      ActorID     `json:"to"`
-	Kind    MessageKind `json:"kind"`
-	ReplyTo MessageID   `json:"reply_to,omitempty"`
-	Content string      `json:"content,omitempty"`
-	Work    *work.Work  `json:"work,omitempty"`
-	Event   *work.Event `json:"event,omitempty"`
+	Output  *identity.OutputID `json:"-"`
+	ID      MessageID          `json:"id"`
+	From    ActorID            `json:"from"`
+	To      ActorID            `json:"to"`
+	Kind    MessageKind        `json:"kind"`
+	ReplyTo MessageID          `json:"reply_to,omitempty"`
+	Content string             `json:"content,omitempty"`
+	Work    *work.Work         `json:"work,omitempty"`
+	Event   *work.Event        `json:"event,omitempty"`
 }
 
 type DeliveryStatus string
@@ -57,6 +58,7 @@ type Receipt struct {
 
 // Draft leaves sender identity and message identity to the controller.
 type Draft struct {
+	Output  *identity.OutputID // Host correlation; never encoded in the model envelope.
 	To      ActorID
 	Kind    MessageKind
 	ReplyTo MessageID
@@ -72,6 +74,10 @@ type Sender interface {
 
 // Clone gives the recipient its own structured payload.
 func (m Message) Clone() Message {
+	if m.Output != nil {
+		v := *m.Output
+		m.Output = &v
+	}
 	if m.Work != nil {
 		snapshot := m.Work.Clone()
 		m.Work = &snapshot

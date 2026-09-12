@@ -23,6 +23,7 @@ func (s State) Terminal() bool { return s == Stopped || s == Failed }
 
 type lifecycle struct {
 	mu         sync.Mutex
+	pending    *StateSnapshot
 	state      State
 	revision   uint64
 	changed    chan struct{}
@@ -56,78 +57,112 @@ func (a *Agent) setStateLocked(state State) {
 	a.control.revision++
 	close(a.control.changed)
 	a.control.changed = make(chan struct{})
-	if a.config.OnLifecycle != nil {
-		a.config.OnLifecycle(StateSnapshot{state, a.control.revision})
-	}
-	if a.config.OnState != nil {
-		a.config.OnState(state)
-	}
+	a.control.pending = &StateSnapshot{state, a.control.revision}
 }
 
-// Pause requests a boundary pause without canceling a model/tool operation.
-func (a *Agent) PauseSnapshot() (StateSnapshot, error) {
-	a.control.mu.Lock()
-	defer a.control.mu.Unlock()
-	state := a.control.state
-	if state.Terminal() || state == StopRequested {
-		return StateSnapshot{state, a.control.revision}, errors.New("agent is stopping or stopped")
+// unlockAndReportState releases the control lock before required publication.
+// emission serializes transitions, while stopRequested and cancellation bypass it.
+func (a *Agent) unlockAndReportState() {
+	p := a.control.pending
+	a.control.pending = nil
+	a.control.mu.Unlock()
+	if p == nil {
+		return
 	}
-	if state != Paused && state != PauseRequested {
+	_ = a.report(*p)
+	if a.config.OnLifecycle != nil {
+		a.config.OnLifecycle(*p)
+	}
+	if a.config.OnState != nil {
+		a.config.OnState(p.State)
+	}
+}
+func (a *Agent) PauseSnapshot() (StateSnapshot, error) {
+	a.emission.Lock()
+	defer a.emission.Unlock()
+	a.control.mu.Lock()
+	if a.control.state.Terminal() || a.stopRequested.Load() {
+		s := StateSnapshot{a.control.state, a.control.revision}
+		a.control.mu.Unlock()
+		return s, errors.New("agent is stopping or stopped")
+	}
+	if a.control.state != Paused && a.control.state != PauseRequested {
 		a.setStateLocked(PauseRequested)
 	}
 	if a.control.waitCancel != nil {
 		a.control.waitCancel()
 	}
-	return StateSnapshot{a.control.state, a.control.revision}, nil
+	s := StateSnapshot{a.control.state, a.control.revision}
+	a.unlockAndReportState()
+	return s, a.reportError()
 }
-func (a *Agent) Pause() (State, error) { s, err := a.PauseSnapshot(); return s.State, err }
-
-// Resume releases a pause or retracts a pending pause. The loop reports its next
-// active state when it reaches the boundary; it never restarts a stopped agent.
+func (a *Agent) Pause() (State, error) { s, e := a.PauseSnapshot(); return s.State, e }
 func (a *Agent) ResumeSnapshot() (StateSnapshot, error) {
+	a.emission.Lock()
+	defer a.emission.Unlock()
 	a.control.mu.Lock()
-	defer a.control.mu.Unlock()
-	state := a.control.state
-	if state.Terminal() || state == StopRequested {
-		return StateSnapshot{state, a.control.revision}, errors.New("agent is stopping or stopped")
+	if a.control.state.Terminal() || a.stopRequested.Load() {
+		s := StateSnapshot{a.control.state, a.control.revision}
+		a.control.mu.Unlock()
+		return s, errors.New("agent is stopping or stopped")
 	}
-	if state == Paused || state == PauseRequested {
+	if a.control.state == Paused || a.control.state == PauseRequested {
 		a.setStateLocked(Running)
 	}
-	return StateSnapshot{a.control.state, a.control.revision}, nil
+	s := StateSnapshot{a.control.state, a.control.revision}
+	a.unlockAndReportState()
+	return s, a.reportError()
 }
-func (a *Agent) Resume() (State, error) { s, err := a.ResumeSnapshot(); return s.State, err }
-
-// RequestStop closes admission to further loop operations. The owner also
-// cancels Run's context so an in-flight provider or tool can terminate.
+func (a *Agent) Resume() (State, error) { s, e := a.ResumeSnapshot(); return s.State, e }
 func (a *Agent) RequestStopSnapshot() StateSnapshot {
+	// This short control boundary also fences successful response commitment.
 	a.control.mu.Lock()
-	defer a.control.mu.Unlock()
-	if !a.control.state.Terminal() {
-		a.setStateLocked(StopRequested)
-	}
+	a.stopRequested.Store(true)
 	if a.control.waitCancel != nil {
 		a.control.waitCancel()
 	}
-	return StateSnapshot{a.control.state, a.control.revision}
+	a.control.mu.Unlock()
+	a.reporting.mu.Lock()
+	if a.reporting.cancel != nil {
+		a.reporting.cancel()
+	}
+	a.reporting.mu.Unlock()
+	a.emission.Lock()
+	defer a.emission.Unlock()
+	a.control.mu.Lock()
+	if !a.control.state.Terminal() {
+		a.setStateLocked(StopRequested)
+	}
+	s := StateSnapshot{a.control.state, a.control.revision}
+	a.unlockAndReportState()
+	return s
 }
 func (a *Agent) RequestStop() State { return a.RequestStopSnapshot().State }
-
 func (a *Agent) checkpoint(ctx context.Context) error {
 	for {
-		a.control.mu.Lock()
-		if err := ctx.Err(); err != nil {
-			a.control.mu.Unlock()
+		if err := a.reportError(); err != nil {
 			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.emission.Lock()
+		a.control.mu.Lock()
+		if a.stopRequested.Load() || ctx.Err() != nil {
+			a.control.mu.Unlock()
+			a.emission.Unlock()
+			return context.Canceled
 		}
 		switch a.control.state {
 		case StopRequested, Stopped, Failed:
 			a.control.mu.Unlock()
+			a.emission.Unlock()
 			return context.Canceled
 		case PauseRequested, Paused:
 			a.setStateLocked(Paused)
 			changed := a.control.changed
-			a.control.mu.Unlock()
+			a.unlockAndReportState()
+			a.emission.Unlock()
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -135,28 +170,29 @@ func (a *Agent) checkpoint(ctx context.Context) error {
 			}
 		default:
 			a.setStateLocked(Running)
-			a.control.mu.Unlock()
-			return nil
+			a.unlockAndReportState()
+			a.emission.Unlock()
+			return a.reportError()
 		}
 	}
 }
-
-// waitInbox waits without removing input. Pause interrupts only this idle wait,
-// leaving queued messages unconsumed until a subsequent checkpoint admits work.
 func (a *Agent) waitInbox(ctx context.Context) error {
 	for {
 		if err := a.checkpoint(ctx); err != nil {
 			return err
 		}
+		a.emission.Lock()
 		a.control.mu.Lock()
 		if a.control.state != Running {
 			a.control.mu.Unlock()
+			a.emission.Unlock()
 			continue
 		}
 		a.setStateLocked(Idle)
 		waitCtx, cancel := context.WithCancel(ctx)
 		a.control.waitCancel = cancel
-		a.control.mu.Unlock()
+		a.unlockAndReportState()
+		a.emission.Unlock()
 		err := a.config.Inbox.Wait(waitCtx)
 		a.control.mu.Lock()
 		a.control.waitCancel = nil

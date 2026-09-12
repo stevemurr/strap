@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"github.com/stevemurr/strap/agent"
+	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/work"
 )
@@ -29,6 +30,7 @@ func (MessageEvent) isEvent() {}
 // CommentaryEvent contains assistant progress text for the host.
 // It is never routed to an agent inbox or treated as a completed reply.
 type CommentaryEvent struct {
+	Output  *identity.OutputID `json:"output,omitempty"`
 	Agent   message.ActorID
 	Content string
 }
@@ -107,3 +109,11 @@ type ContextTokensEvent struct {
 }
 
 func (ContextTokensEvent) isEvent() {}
+
+// AgentEvent carries typed runtime output and history facts.
+type AgentEvent struct {
+	Agent identity.ActorID
+	Event agent.Event
+}
+
+func (AgentEvent) isEvent() {}

@@ -23,6 +23,8 @@ func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
 	var actor message.ActorID
 	var payload any = e
 	switch v := e.(type) {
+	case conversation.AgentEvent:
+		return encodeAgent(v)
 	case conversation.ContextTokensEvent:
 		kind = "context_tokens"
 		actor = v.Agent
@@ -68,7 +70,17 @@ func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
 		return eventlog.Data{}, fmt.Errorf("unsupported event %T", e)
 	}
 	raw, err := json.Marshal(payload)
-	return eventlog.Data{Kind: kind, Correlation: correlation, Agent: string(actor), Payload: raw}, err
+	d := eventlog.Data{Kind: kind, Correlation: correlation, Agent: string(actor), Payload: raw}
+	switch v := e.(type) {
+	case conversation.MessageEvent:
+		d.Message = v.Message.ID
+		d.Output = v.Message.Output
+	case conversation.CommentaryEvent:
+		d.Output = v.Output
+	case conversation.AckEvent:
+		d.Message = v.Receipt.MessageID
+	}
+	return d, err
 }
 func decode[T conversation.Event](data []byte) (conversation.Event, error) {
 	var v T
@@ -80,12 +92,20 @@ func decode[T conversation.Event](data []byte) (conversation.Event, error) {
 // directly. Domain event payloads are independent from the stored bytes.
 func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 	switch e.Kind {
+	case "output_started", "output_delta", "output_finished", "history_appended":
+		return decodeAgent(e)
 	case "context_tokens":
 		return decode[conversation.ContextTokensEvent](e.Payload)
 	case "diagnostic":
 		return decode[conversation.DiagnosticEvent](e.Payload)
 	case "message":
-		return decode[conversation.MessageEvent](e.Payload)
+		v, err := decode[conversation.MessageEvent](e.Payload)
+		if err != nil {
+			return nil, err
+		}
+		m := v.(conversation.MessageEvent)
+		m.Message.Output = e.Output
+		return m, nil
 	case "commentary":
 		return decode[conversation.CommentaryEvent](e.Payload)
 	case "ack":

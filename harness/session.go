@@ -49,7 +49,7 @@ type Config struct {
 
 // DefaultConfig returns independent CLI-compatible defaults without acquiring resources.
 func DefaultConfig() Config {
-	return Config{Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Retention: eventlog.Limits{Entries: 4096, Bytes: 16 << 20}, Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	return Config{Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}}
 }
 
@@ -81,25 +81,27 @@ type Dependencies struct {
 }
 
 type Session struct {
-	executionError  error
-	outcome         *eventlog.Outcome
-	startupError    string
-	effective       EffectiveConfig
-	telemetry       *telemetry
-	id              string
-	log             *eventlog.Log
-	legacyOnce      sync.Once
-	legacy          *eventlog.Subscription
-	config          Config
-	controller      *conversation.Controller
-	workflow        *workflow.Session
-	resources       *resource.Group
-	mu              sync.Mutex
-	state           State
-	attempt         *closeAttempt
-	admission       *admission.Gate
-	cancelExecution context.CancelFunc
-	stopOwner       func() bool
+	workflowAfter    uint64
+	workflowReadLife context.Context
+	executionError   error
+	outcome          *eventlog.Outcome
+	startupError     string
+	effective        EffectiveConfig
+	telemetry        *telemetry
+	id               string
+	log              *eventlog.Log
+	legacyOnce       sync.Once
+	legacy           *eventlog.Subscription
+	config           Config
+	controller       *conversation.Controller
+	workflow         *workflow.Session
+	resources        *resource.Group
+	mu               sync.Mutex
+	state            State
+	attempt          *closeAttempt
+	admission        *admission.Gate
+	cancelExecution  context.CancelFunc
+	stopOwner        func() bool
 }
 
 // StartupError retains cleanup ownership if rollback could not complete.
@@ -163,8 +165,10 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if s.config.Events.Queue == (eventlog.Limits{}) {
 		s.config.Events.Queue = DefaultConfig().Events.Queue
 	}
-	if err = s.config.Events.Retention.Validate(); err != nil {
-		return nil, err
+	if s.config.Events.Retention != (eventlog.Limits{}) {
+		if err = s.config.Events.Retention.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	if err = s.config.Events.Queue.Validate(); err != nil {
 		return nil, err
@@ -186,14 +190,26 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 			return nil, err
 		}
 	}
-	s.log, err = eventlog.New(store, s.config.Events.Queue, eventlog.WithFailureSink(deps.CaptureFailure))
+	head, headErr := store.Head(ctx)
+	if headErr != nil || head.Cursor.Session != s.id || head.Cursor.Sequence != 0 || head.State != eventlog.Writable {
+		s.resources.Add("invalid event store", store)
+		return nil, errors.Join(headErr, errors.New("event store must be empty, writable, and bound to this session"))
+	}
+	s.log, err = eventlog.New(store, s.config.Events.Queue, eventlog.WithFailureSink(func(err error) {
+		s.cancelExecution()
+		if deps.CaptureFailure != nil {
+			deps.CaptureFailure(err)
+		}
+	}))
 	if err != nil {
 		return nil, err
 	}
 	data, _ := json.Marshal(struct {
 		ID string `json:"id"`
 	}{s.id})
-	_ = s.log.Publish(eventlog.Data{Kind: "session_started", Payload: data})
+	if err = s.log.Publish(eventlog.Data{Kind: "session_started", Payload: data}); err != nil {
+		return nil, err
+	}
 	pool := transport.New()
 	s.resources.Add("provider transport", pool)
 	cfg = s.config
@@ -240,8 +256,11 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		s.resources.Add("web", web)
 		local = append(local, web.Tools()...)
 	}
-	c := conversation.New(execution)
+	c := conversation.New(execution, conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
 	s.controller = c
+	var stopReads context.CancelFunc
+	s.workflowReadLife, stopReads = context.WithCancel(context.Background())
+	go func() { <-c.Done(); stopReads() }()
 	s.telemetry = newTelemetry(s)
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
@@ -258,9 +277,11 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	implSpec, auditSpec := s.workflow.Specs()
 	s.effective = EffectiveConfig{Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil)}
-	s.mu.Lock()
 	configured, _ := json.Marshal(s.Configuration())
-	_ = s.log.Publish(eventlog.Data{Kind: "session_configured", Payload: configured})
+	if err = s.log.Publish(eventlog.Data{Kind: "session_configured", Payload: configured}); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
 	s.stopOwner = context.AfterFunc(ctx, func() { s.startCloseReason("owner_cancelled") })
 	s.mu.Unlock()
 	return s, nil

@@ -27,15 +27,18 @@ type ToolBatch struct {
 	ContextRevision uint64
 }
 
-func (a *Agent) reportTool(activity ToolActivity) {
-	if a.config.OnTool == nil {
-		return
-	}
+func (a *Agent) reportTool(activity ToolActivity) error {
 	activity.Call = provider.CopyCalls([]provider.ToolCall{activity.Call})[0]
 	activity.Result.Content = activity.Result.Content.Clone()
 	if activity.Diagnostic != nil {
 		d := activity.Diagnostic.Clone()
 		activity.Diagnostic = &d
 	}
-	a.config.OnTool(activity)
+	if err := a.report(activity); err != nil {
+		return err
+	}
+	if a.config.OnTool != nil {
+		a.config.OnTool(activity)
+	}
+	return nil
 }

@@ -46,7 +46,7 @@ func (a *Agent) Usage() UsageSnapshot {
 	return snapshot
 }
 
-func (a *Agent) recordUsage(revision uint64, reported *provider.Usage) {
+func (a *Agent) recordUsage(revision uint64, reported *provider.Usage) error {
 	a.usage.mu.Lock()
 	s := &a.usage.snapshot
 	s.Calls++
@@ -63,9 +63,15 @@ func (a *Agent) recordUsage(revision uint64, reported *provider.Usage) {
 		s.MissingOutputCalls++
 	}
 	a.usage.mu.Unlock()
+	eventCopy := observation
+	eventCopy.Usage = observation.Usage.Clone()
+	if err := a.report(eventCopy); err != nil {
+		return err
+	}
 	if a.config.OnUsage != nil {
 		event := observation
 		event.Usage = observation.Usage.Clone()
 		a.config.OnUsage(event)
 	}
+	return nil
 }

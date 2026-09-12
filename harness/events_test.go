@@ -61,33 +61,20 @@ type failedStore struct{ eventlog.Store }
 func (f failedStore) Append(context.Context, eventlog.Data) (eventlog.Event, error) {
 	return eventlog.Event{}, errors.New("storage unavailable")
 }
-func TestCaptureFailureDoesNotDisableCommandsOrHideCloseFailure(t *testing.T) {
+func TestCaptureFailureRejectsStartupAndReleasesStorage(t *testing.T) {
 	cfg := harness.DefaultConfig()
 	cfg.Web = nil
 	cfg.LocalTools = false
+	var store eventlog.Store
 	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}, EventStore: func(id string) (eventlog.Store, error) {
-		m, err := eventlog.NewMemory(id, eventlog.Limits{Entries: 10, Bytes: 4096})
-		return failedStore{m}, err
+		m, e := eventlog.NewMemory(id, eventlog.Limits{})
+		store = m
+		return failedStore{m}, e
 	}})
-	if err != nil {
-		t.Fatal(err)
+	if s != nil || !errors.Is(err, eventlog.ErrCapture) {
+		t.Fatal(s, err)
 	}
-	if err := s.FlushEvents(context.Background()); !errors.Is(err, eventlog.ErrCapture) {
-		t.Fatal(err)
-	}
-	if _, err := s.Send(s.Root(), "still admitted"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Close(context.Background()); !errors.Is(err, eventlog.ErrCapture) {
-		t.Fatal(err)
-	}
-	if s.State() != harness.Closed || s.Capture().CaptureError == "" {
-		t.Fatal(s.State(), s.Capture())
-	}
-	if err := s.Dispose(context.Background()); !errors.Is(err, eventlog.ErrCapture) {
-		t.Fatal(err)
-	}
-	if !s.Capture().Disposed {
-		t.Fatal("capture failure leaked storage")
+	if _, err := store.Head(context.Background()); !errors.Is(err, eventlog.ErrDisposed) {
+		t.Fatal("startup leaked storage", err)
 	}
 }

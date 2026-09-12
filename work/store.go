@@ -12,19 +12,27 @@ import (
 // Store owns one conversation's work. It never calls external code under its lock.
 // Creation is not deduplicated; state/revision checks fence repeated transitions.
 type Store struct {
-	mu          sync.Mutex
-	next        uint64
-	plans       map[PlanID]Plan
-	works       map[ID]Work
-	submissions map[SubmissionID]Submission
-	audits      map[AuditID]Audit
-	reserved    map[StepID]ID
-	events      []Event
-	ready       chan struct{}
+	emission      sync.Mutex
+	reporter      Reporter
+	change        Change
+	visibleEvents int
+	mu            sync.Mutex
+	next          uint64
+	plans         map[PlanID]Plan
+	works         map[ID]Work
+	submissions   map[SubmissionID]Submission
+	audits        map[AuditID]Audit
+	reserved      map[StepID]ID
+	events        []Event
+	ready         chan struct{}
 }
 
-func New() *Store {
-	return &Store{plans: map[PlanID]Plan{}, works: map[ID]Work{}, submissions: map[SubmissionID]Submission{}, audits: map[AuditID]Audit{}, reserved: map[StepID]ID{}, ready: make(chan struct{}, 1)}
+func New(options ...Option) *Store {
+	s := &Store{plans: map[PlanID]Plan{}, works: map[ID]Work{}, submissions: map[SubmissionID]Submission{}, audits: map[AuditID]Audit{}, reserved: map[StepID]ID{}, ready: make(chan struct{}, 1)}
+	for _, o := range options {
+		o(s)
+	}
+	return s
 }
 func (s *Store) id(prefix string) string { s.next++; return fmt.Sprintf("%s-%d", prefix, s.next) }
 func blank(v string) bool                { return strings.TrimSpace(v) == "" }
@@ -44,10 +52,7 @@ func (s *Store) steps(scope *Scope) []Step {
 }
 func (s *Store) emit(kind EventKind, actor identity.ActorID, w Work, actionable bool) {
 	s.events = append(s.events, Event{ID: EventID(s.id("event")), Kind: kind, Actor: actor, Work: w.Clone(), Steps: s.steps(w.Scope), SubmissionID: w.LatestSubmissionID, Actionable: actionable})
-	select {
-	case s.ready <- struct{}{}:
-	default:
-	}
+
 }
 
 // Ready is a coalesced wakeup for the application's single event dispatcher.
@@ -55,8 +60,8 @@ func (s *Store) Ready() <-chan struct{} { return s.ready }
 func (s *Store) PendingEvents(limit int) []Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if limit <= 0 || limit > len(s.events) {
-		limit = len(s.events)
+	if limit <= 0 || limit > s.visibleEvents {
+		limit = s.visibleEvents
 	}
 	out := make([]Event, limit)
 	for i := range out {
@@ -65,9 +70,12 @@ func (s *Store) PendingEvents(limit int) []Event {
 	return out
 }
 func (s *Store) AcknowledgeEvent(id EventID) error {
+	s.emission.Lock()
+	defer s.emission.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = slices.DeleteFunc(s.events, func(event Event) bool { return event.ID == id })
+	s.visibleEvents = len(s.events)
 	return nil
 }
 func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, error) {
@@ -87,9 +95,9 @@ func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, 
 	}
 	return w.Clone(), nil
 }
-func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (Plan, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	if blank(string(actor)) {
 		return Plan{}, ErrForbidden
 	}
@@ -193,15 +201,15 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (Plan, error) {
 		p.Steps = ordered
 	}
 	p.Revision++
-	s.plans[p.ID] = p.Clone()
+	s.putPlan(p.ID, p.Clone())
 	s.emit(PlanChanged, actor, Work{}, false)
 	snapshot := p.Clone()
 	s.events[len(s.events)-1].Plan = &snapshot
 	return p.Clone(), nil
 }
-func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (Work, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	if blank(string(actor)) || blank(string(r.Assignee)) || blank(r.Task) {
 		return Work{}, invalid("actor, assignee and task required")
 	}
@@ -240,13 +248,13 @@ func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (Work, error
 			s.reserved[id] = w.ID
 		}
 	}
-	s.works[w.ID] = w
+	s.putWork(w.ID, w)
 	s.emit(WorkAssigned, actor, w, true)
 	return w.Clone(), nil
 }
-func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (Work, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (result Work, err error) {
+	s.beginMutation()
+	defer s.endMutation(&err)
 	w, err := s.target(actor, u.WorkTarget, false)
 	if err != nil {
 		return Work{}, err
@@ -293,9 +301,9 @@ func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (Work, 
 	}
 	w.Revision++
 	if w.Scope != nil {
-		s.plans[p.ID] = p
+		s.putPlan(p.ID, p)
 	}
-	s.works[w.ID] = w
+	s.putWork(w.ID, w)
 	s.emit(ProgressChanged, actor, w, actionable)
 	return w.Clone(), nil
 }

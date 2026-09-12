@@ -417,3 +417,20 @@ func (s *Subscription) Next(ctx context.Context) (Event, error) {
 		}
 	}
 }
+
+func (l *Log) Head(ctx context.Context) (Head, error) {
+	run, done, err := l.reads.Begin(ctx)
+	if err != nil {
+		return Head{}, ErrDisposed
+	}
+	defer done()
+	return l.store.Head(run)
+}
+func (l *Log) Wait(ctx context.Context, after Cursor) (Head, error) {
+	run, done, err := l.reads.Begin(ctx)
+	if err != nil {
+		return Head{}, ErrDisposed
+	}
+	defer done()
+	return l.store.Wait(run, after)
+}
