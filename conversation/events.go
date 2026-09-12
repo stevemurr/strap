@@ -25,6 +25,15 @@ type MessageEvent struct{ Message message.Message }
 
 func (MessageEvent) isEvent() {}
 
+// CommentaryEvent contains assistant progress text for the host.
+// It is never routed to an agent inbox or treated as a completed reply.
+type CommentaryEvent struct {
+	Agent   message.ActorID
+	Content string
+}
+
+func (CommentaryEvent) isEvent() {}
+
 type AckEvent struct{ Receipt message.Receipt }
 
 func (AckEvent) isEvent() {}

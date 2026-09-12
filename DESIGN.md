@@ -107,6 +107,17 @@ owns its argument and result bytes. These host events never enter agent inboxes
 or add messages to model history. Observers enqueue notifications without waiting
 for a UI consumer.
 
+`agent.Config.OnCommentary` reports nonblank assistant text accompanying tool
+calls once per response, after the existing lifecycle checkpoint and before tool
+dispatch. The controller emits an attributed `CommentaryEvent` through the same
+host queue, and the workflow session relays it without inbox delivery or work
+mutations. The UI renders it as a progress paragraph separating tool groups while
+preserving activity, scroll, and selection state. The original assistant text
+remains in model history exactly once; observation adds no context. Text-only
+responses still use the normal reply path. Commentary uses complete responses,
+not token streaming, and its frequency depends on the model following the
+application prompts' milestone guidance.
+
 The UI derives a spinner and elapsed timer from pending input, agent state, and
 active tool calls. Delegated work stays visible when the root is idle. It retains
 the duration of the last active period when idle; active tools show individual

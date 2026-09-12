@@ -77,7 +77,13 @@ After an exchange, `Idle` means the agent is waiting for another message.
 
 An animated spinner tracks the current active period, including delegated work,
 with separate elapsed times for running tools. The last active duration remains
-visible when idle. Replies appear when complete; token streaming is not implemented.
+visible when idle. Assistant text accompanying tool calls appears as an attributed
+progress paragraph before that batch's tool rows. Agents are prompted to explain
+their first action and meaningful findings between batches. These host-only
+updates do not enter agent inboxes or mark work complete; the original text stays
+in the generating agent's assistant history without an additional message.
+Replies and progress text appear when each model response completes; token
+streaming is not implemented.
 
 After a tool batch finishes, its tool line shows the agent's context size, for
 example `agent-1 · Read file ×2 · 12,345 context tokens`. The TUI counts that exact

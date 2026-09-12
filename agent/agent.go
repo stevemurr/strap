@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +43,9 @@ type Config struct {
 	OnConsumed func(message.Receipt)
 	// OnState enqueues state notifications; it must not block or reenter this agent.
 	OnState func(State)
+	// OnCommentary enqueues assistant text accompanying a tool batch.
+	// It must not block on a consumer or reenter this agent.
+	OnCommentary func(string)
 	// OnTool enqueues execution notifications; it must not block on a consumer.
 	OnTool func(ToolActivity)
 	// OnToolBatch enqueues a complete tool batch's history boundary. It must
@@ -168,6 +172,9 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 					return err
 				}
 				break
+			}
+			if a.config.OnCommentary != nil && strings.TrimSpace(response.Content) != "" {
+				a.config.OnCommentary(response.Content)
 			}
 			var toolRevision uint64
 			for _, call := range response.ToolCalls {

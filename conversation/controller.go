@@ -103,7 +103,10 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	runner, err := agent.New(agent.Config{
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
 		Outbox: sender{controller: c, actor: id}, OnConsumed: c.acknowledge,
-		OnState:     func(state agent.State) { c.emit(AgentStateChanged{Agent: id, State: state}) },
+		OnState: func(state agent.State) { c.emit(AgentStateChanged{Agent: id, State: state}) },
+		OnCommentary: func(text string) {
+			c.emit(CommentaryEvent{Agent: id, Content: text})
+		},
 		OnTool:      func(activity agent.ToolActivity) { c.emit(ToolEvent{Agent: id, Activity: activity}) },
 		OnToolBatch: func(batch agent.ToolBatch) { c.emit(ToolBatchEvent{Agent: id, Batch: batch}) },
 		OnUsage:     func(observation agent.UsageObservation) { c.emit(UsageEvent{Agent: id, Observation: observation}) },

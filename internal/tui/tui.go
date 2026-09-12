@@ -358,6 +358,12 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 func (m *model) observe(event conversation.Event) {
 	defer m.refreshActivity()
 	switch e := event.(type) {
+	case conversation.CommentaryEvent:
+		label := "Message"
+		if e.Agent == m.session.Root() {
+			label = "Strap"
+		}
+		m.addDetail(label, string(e.Agent)+" · progress", e.Content, false)
 	case conversation.WorkEvent:
 		change := e.Event
 		title := string(change.Kind)
