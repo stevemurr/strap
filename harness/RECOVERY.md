@@ -148,3 +148,21 @@ See [HTTP routes and errors](httpapi/README.md),
 [httpapi/recovery_test.go](httpapi/recovery_test.go),
 [agent/output_test.go](../agent/output_test.go), and
 [eventlog/recovery_test.go](../eventlog/recovery_test.go).
+
+## Live reasoning verification
+
+Run the opt-in TUI path against a thinking-capable endpoint:
+
+```sh
+STRAP_LIVE_BASE_URL=http://192.168.1.237:8355 \
+  go test -race ./internal/tui -run '^TestLiveReasoningTUI$' -count=1 -timeout 3m -v
+```
+
+`STRAP_LIVE_MODEL` optionally overrides `qwen3.6`. The test sends a synthetic
+arithmetic prompt with local/browser tools disabled and an 8,192-token cap. It
+requires reasoning to render while generation is active, compares retained
+reasoning with the streamed bytes, verifies exclusion from model history, and
+opens the TUI reasoning inspector. It logs timing and byte counts without logging
+the reasoning text. Deterministic HTTP tests in `harness/reasoning_test.go` also
+verify that the next outgoing model request excludes reasoning and that replay
+from JSONL recovers the same output.
