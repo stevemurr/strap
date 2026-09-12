@@ -8,6 +8,8 @@ state `094885f`. This is the proposed successor to the observation contracts in
 The next level of detail is defined in
 [Types and interfaces](docs/architecture/STREAMING_CONTRACTS.md), covering storage,
 required publication, subscriptions, runtime reporting, and projection reads.
+Its final audit also specifies atomic seal visibility, independent failure and
+cancellation signaling, content reads, and inspection health on incomplete logs.
 
 ## Decision
 
@@ -91,6 +93,10 @@ miss an append between those operations: waiting checks the current head and
 terminal/failure state under the same synchronization used to register a waiter.
 Wakeups are hints; readers recheck the store predicate. Keep backend I/O and
 mutable buffer ownership private, with no aliases exposed to readers.
+Sealing publishes its terminal record and sealed head atomically after the
+backend's seal/sync succeeds. A failed attempted seal cannot expose an accepted
+successful terminal record. Failure signaling must remain available while an
+append is blocked; a late write cannot advance the head of a failed store.
 
 Required records remain available from sequence 1 until explicit disposal. The
 current Memory eviction and Fit omission records cannot implement this contract.
@@ -273,6 +279,12 @@ and status fixed across those pages. It is an optional finite read, not a requir
 step in attachment. If a projection has not reached a requested minimum cursor,
 wait with the caller's context or report lag explicitly; do not label older state
 with the newer cursor.
+Inspection returns source health separately from the output's state at its
+applied cursor. If capture ended after history commitment but before completion
+was recorded, preserve that history and show incomplete observation. Never
+fabricate a successful/canceled terminal output, or an indefinitely running one,
+from an incomplete prefix. Content reads resolve immutable IDs through committed
+references in the same session and use bounded byte pages.
 
 For every supported prefix N, `Apply(records[1:N])` defines the view at N. Server
 read models use that same reducer and expose their applied cursor. They are

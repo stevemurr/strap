@@ -6,6 +6,9 @@ Status: proposed contracts, not implementation. This refines
 shapes; they are not standalone source files. Existing domain requests and
 responses remain in their current packages unless explicitly described here.
 
+Final design audit: 2026-09-12, against `c93c514`. The corrections and remaining
+implementation proof obligations are recorded at the end of this document.
+
 ## Package boundaries
 
 | Package | Responsibility |
@@ -133,9 +136,13 @@ type Store interface {
 ```
 
 Each store is created for exactly one session. A single session-owned publication
-worker calls Append/Seal/Fail; reads and waiting may be concurrent. Close satisfies the
-existing Resource contract. Exposing a Store factory does not expose an owned
+worker calls Append/Seal. Reads, waiting, and Fail may be concurrent. Close satisfies
+the existing Resource contract. Exposing a Store factory does not expose an owned
 store's mutation methods to SDK clients.
+Session construction validates that its store names the expected session, is
+Writable, and has an empty prefix before accepting startup records. A read-only
+interrupted archive is finite incomplete input, not a Writable store that waits
+for a nonexistent producer. Archive inspection cannot implicitly resume execution.
 
 - Append accepts one complete record and returns its readable cursor. It never
   evicts accepted records or substitutes omissions. Large content is framed before
@@ -154,9 +161,17 @@ store's mutation methods to SDK clients.
   failures perform the same transition. Subsequent failures preserve the first
   cause; Fail does not change an already sealed or closed store. An exporter
   failure after a successful seal cannot rewrite the session outcome.
+  Fail updates/wakes the store's status without waiting on backend I/O. If it wins
+  before an in-flight append/seal commit, that write must not advance the readable
+  head when it eventually returns. If commitment won first, its accepted record
+  remains in the prefix. Physical I/O completion is joined separately.
 - Seal appends exactly one terminal session record using the next sequence and
   freezes the log. Repeated sealing with the same outcome returns the same record;
   a conflicting outcome errors. A failed store cannot be successfully sealed.
+  Expose the terminal record, new head, and Sealed state at one commit boundary,
+  after the backend's required seal/sync work succeeds. A seal failure leaves
+  Failed plus the previously accepted prefix; bytes from an ambiguous attempted
+  terminal write are not exposed as an accepted successful terminal record.
 - A failed store permits reads of its known readable prefix where storage remains
   accessible. Subscriptions drain that prefix and then report failure. Corruption
   or inability to read the prefix fails immediately. Neither condition is EOF.
@@ -168,6 +183,10 @@ cleanup errors, cleanup attempts, and recovery failure. An omission count cannot
 stand in for required data. A backend's append/sync durability is configuration,
 not something inferred from readable Head. Initial disk support can retain the
 current sync-on-seal policy without promising process-crash recovery.
+Problem.Message and terminal control fields are bounded summaries. Full captured
+execution-error text can use a correlated diagnostic record and content reference;
+it must not make the terminal record arbitrarily large. A failed store may be
+unable to retain new diagnostic details, which must remain explicitly unavailable.
 
 ## Publication versus observation
 
@@ -175,12 +194,18 @@ current sync-on-seal policy without promising process-crash recovery.
 // package eventlog: concrete session-owned coordinator
 func (l *Log) Publish(ctx context.Context, data Data) (Cursor, error)
 func (l *Log) Finish(ctx context.Context, outcome Outcome) (Cursor, error)
+func (l *Log) Fail(err error)
 ```
 
 Publish waits for accepted storage, not merely queue admission. Log owns bounded
 ingress, the independent writer, failure propagation, and drain lifetime. Its
 writer does not call agents, workflow dispatch, or external observers. Backend
 failures initiate session cancellation through a nonblocking failure notification.
+The publication budget includes admitted data, the in-flight write, and owned
+copies/encoding buffers. Acquire bounded capacity before making queue-owned copies;
+limit concurrent pending producers so blocked callers cannot form an unbounded
+queue outside the queue. This bounds publication machinery, not all agent history
+or caller-owned inputs. Operation/HTTP admission has its own limits.
 
 Caller cancellation before admission prevents publication. After admission,
 cancellation can stop that caller's wait without withdrawing the queued record;
@@ -212,6 +237,17 @@ release that state lock, and then publish. Do not merely replace existing
 OnLifecycle/OnTool function bodies with blocking writes. The emission sequencer
 must not be needed by the writer, a read model, or the failure/cancellation signal.
 The workflow event consumer cannot be the worker acknowledging its own writes.
+
+Stop and failure signal execution cancellation without waiting for storage or the
+emission sequencer. State mutation/cancellation acceptance and response commitment
+use a short local control boundary; no I/O or publication wait holds it. Ordered
+stop/lifecycle reporting can finish later using the drain lifetime. A successful
+control acknowledgment still waits for its required record. Backend failure must
+wake blocked publication callers independently of the writer: Log.Fail latches
+Store.Fail, cancels active writes, and fails queued completions without waiting
+for its own publication queue. A late backend result cannot overwrite failure.
+A backend ignoring its deadline is an outstanding resource, not a confirmed
+completed close.
 
 An error after domain mutation is a failure to make the transition recoverable;
 it does not undo that mutation or any external effect. Stop subsequent execution
@@ -246,6 +282,9 @@ HTTP maps these same records and exclusive cursors to NDJSON. Use named session
 authorization for replay and content access. Initial replay needs no mutable
 configuration fetch to render earlier records correctly. Historical schema and
 configuration records determine their interpretation.
+Subscription Close is idempotent and cancels its pending Next/backend read;
+disposal cancels and joins all admitted reads before closing storage. Register
+the store as one owned resource, not independently under both Log and Session.
 
 ## Streaming types
 
@@ -271,6 +310,13 @@ lifetime and awaited before calculating terminal Bytes. Do not use an ambiguous
 canceled Publish wait to guess whether the last delta should be sent again.
 Nil observation does not change execution policy. Non-streaming providers can emit
 no callbacks; the agent publishes the final validated text in bounded chunks.
+An asynchronous coalescer failure is latched by the call owner and cancels active
+provider I/O even if no further callback arrives. A successful Submit return cannot
+override that failure: join/check the coalescer before history commitment. Empty
+protocol deltas are filtered by the adapter; reasoning-only fields are not silently
+mixed into assistant text. Deadline expiry is a failed generation with a timeout
+code; intentional stop/owner cancellation is canceled. A storage/publication error
+remains a recovery failure even if cancellation subsequently ends the provider call.
 
 ```go
 // package agent: representative members of Event
@@ -323,6 +369,13 @@ Completion is ordered against cancellation at the agent's local commit boundary;
 later cancellation affects subsequent work, not the committed output status.
 An output with tools is complete before tool execution begins. Usage remains a
 separate event correlated to the same call; replay does not increment it twice.
+The reducer accepts only started -> delta* -> one terminal finish, matching byte
+counts and valid history references. No delta follows finish. Completed output has
+a history position and no output error; failed/canceled output has no history
+position and a classified reason. A log can end after history commitment but
+before output_finished if storage/process failure intervenes. Preserve that
+accepted history entry and expose incomplete observation; do not synthesize either
+a successful finish or a canceled, uncommitted result from that prefix.
 
 ## Record DTOs and large content
 
@@ -438,20 +491,64 @@ type TextPage struct {
     End     bool
 }
 
-func (s *Session) InspectOutput(ctx context.Context, id identity.OutputID) (projection.OutputView, error)
+type OutputInspection struct {
+    Output projection.OutputView
+    Source eventlog.Head
+}
+
+func (s *Session) InspectOutput(ctx context.Context, id identity.OutputID) (OutputInspection, error)
 func (s *Session) ReadOutputText(ctx context.Context, q OutputTextQuery) (TextPage, error)
 ```
 
 InspectOutput waits for the projection to apply at least the readable log head
 captured when the call began, or returns the caller's context/error. It reports
-the actual applied cursor, which may be newer. No runtime state is mixed into it.
+the actual applied cursor, which may be newer. Source is sampled after reading
+the projection and has a cursor at least as new as Output.Through. Its availability
+is separate from the deterministic state at that prefix; no runtime reads are
+mixed into either value. A failed source can return its last reconstructable
+output together with Source.Failure. An active status there means active at the
+recorded prefix, not confirmed ongoing generation. Views show recovery failure
+instead of an indefinite spinner. A reducer failure is returned as an explicit
+projection error and wakes inspection waiters; it must not leave them waiting
+forever for an unattainable cursor.
 ReadOutputText uses the returned Through boundary even if the output has since
 completed. Its pages end on valid UTF-8 boundaries; invalid byte offsets and a
 budget too small for the next code point return explicit errors. End means end
 of text at Through, not end of generation.
 
-Ordinary ContentRef reads use byte offsets and byte pages, since they also serve
-binary images. Agent, message, work, and transcript projection queries follow the
+Ordinary content reads use byte offsets and byte pages, since they also serve
+binary images:
+
+```go
+// package harness
+type ContentQuery struct {
+    ID       identity.ContentID
+    Offset   uint64
+    MaxBytes int
+}
+
+type ContentPage struct {
+    Ref    eventlog.ContentRef
+    Offset uint64
+    Data   []byte
+    Next   uint64
+    End    bool
+}
+
+func (s *Session) ReadContent(context.Context, ContentQuery) (ContentPage, error)
+```
+
+Resolve ID from accepted referencing records or their rebuildable index, not
+caller-supplied paths, byte ranges in a file, or an unverified ContentRef. No
+committed reference means content is not yet available through this method,
+even if raw chunk records exist. A reused ID with conflicting metadata is invalid.
+Reads validate session authorization, offset and budget, return independent bytes,
+and remain fixed to that immutable object. A budget/offset error is distinct from
+not-found, disposed, unavailable storage, and integrity failure. ReadContent waits
+only for indexing through the head captured on entry; it does not wait indefinitely
+for a future object to be published.
+
+Agent, message, work, and transcript projection queries follow the
 same finite-read principle: stable identities/positions, bounded pages, and the
 applied cursor. These inspection methods are optional reads, never a bootstrap
 requirement for Subscribe. A future checkpoint can accelerate Projector without
@@ -478,3 +575,27 @@ and subscription signatures. Migrate all in-repo adapters/fakes together, docume
 the public API break, and retain legacy archives only under their declared coverage.
 No production interfaces are added by this documentation stage. The acceptance
 suite in STREAMING_DESIGN remains the implementation gate.
+
+## Final audit corrections and proof obligations
+
+The core architecture is unchanged. This pass closes failure/race gaps rather
+than adding another state authority or bootstrap API.
+
+| Priority | Finding | Correction / required test |
+| --- | --- | --- |
+| P1 | A seal could expose a terminal record before sync failed | Terminal record/head/Sealed become visible together after successful seal; inject failure between terminal write and sync |
+| P1 | Queued failure reporting could wait behind a stuck write | Concurrent non-I/O Fail path; blocked callers wake, late writes cannot advance a failed head, cleanup still joins I/O |
+| P1 | Stop could wait on a reporter blocked by storage | Cancellation bypasses emission waits; test stop while publication is saturated and while commitment races cancellation |
+| P1 | Accepted history may outlive a missing output_finished | Preserve the accepted prefix and report source failure, never invent an output terminal transition |
+| P1 | Coalescer failure could be lost when no further token arrives | Cancel provider on asynchronous failure and check the joined coalescer result before committing history |
+| P2 | A bounded queue could still accumulate unbounded waiting copies | Account for encoding/in-flight buffers and bound pending producer admission |
+| P2 | Failed observation could look like an output still running | OutputInspection separates prefix state from source health; reducer failure wakes waiters |
+| P2 | Large content had no concrete public read method | ReadContent by immutable ID, byte paging, scoped authorization, and reference/integrity validation |
+
+Implementation must prove these contracts with controlled interleavings, not
+assume that moving callbacks outside mutexes is sufficient. Validate the package
+dependency graph, every required record family, store conformance for memory/disk,
+and projection equivalence at a common cursor. Numeric limits, indexing data
+structures, and the precise lock/ownership implementation remain implementation
+choices; they must meet these fixed acceptance criteria. No runtime correctness
+claim follows from this documentation audit alone.
