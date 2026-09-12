@@ -26,6 +26,10 @@ func run(ctx context.Context) error {
 		return err
 	}
 
+	return runSteps(ctx, shell)
+}
+
+func runSteps(ctx context.Context, shell tool.Tool) error {
 	// These are the same JSON arguments an agent passes to Tool.Call.
 	steps := []struct {
 		label string
@@ -58,11 +62,13 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func main() {
+func main() { mainWithExit(os.Exit) }
+
+func mainWithExit(exit func(int)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exit(1)
 	}
 }

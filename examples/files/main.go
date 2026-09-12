@@ -27,6 +27,10 @@ func run(ctx context.Context) error {
 	for _, operation := range files.Tools() {
 		kit[operation.Definition().Name] = operation
 	}
+	return runSteps(ctx, kit)
+}
+
+func runSteps(ctx context.Context, kit map[string]tool.Tool) error {
 	steps := []struct {
 		label     string
 		name      string
@@ -83,11 +87,13 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func main() {
+func main() { mainWithExit(os.Exit) }
+
+func mainWithExit(exit func(int)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exit(1)
 	}
 }

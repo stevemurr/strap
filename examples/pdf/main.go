@@ -87,7 +87,9 @@ func run(ctx context.Context, path, baseURL, model string) (err error) {
 		}
 	}
 }
-func main() {
+func main() { mainWithExit(os.Exit) }
+
+func mainWithExit(exit func(int)) {
 	path := flag.String("file", "tool/testdata/pages.pdf", "PDF to read")
 	baseURL := flag.String("base-url", "http://127.0.0.1:1234", "Model server URL")
 	model := flag.String("model", "qwen/qwen3-vl-4b", "Image-capable model")
@@ -99,6 +101,6 @@ func main() {
 	defer cancel()
 	if err := run(ctx, *path, *baseURL, *model); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exit(1)
 	}
 }

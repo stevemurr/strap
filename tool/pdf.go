@@ -196,6 +196,11 @@ type limitedBuffer struct {
 	exceeded bool
 }
 
+// Hide bytes.Buffer's ReaderFrom fast path so io.Copy still enforces Write's cap.
+func (b *limitedBuffer) ReadFrom(r io.Reader) (int64, error) {
+	return io.Copy(struct{ io.Writer }{b}, r)
+}
+
 func (b *limitedBuffer) Write(data []byte) (int, error) {
 	n := len(data)
 	remaining := max(0, b.limit-b.Len())

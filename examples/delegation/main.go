@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -131,8 +132,8 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request) (provide
 	}
 	return invoke("submit_work", work.SubmitRequest{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }
-func run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func run(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	p := &cycleProvider{reviews: map[work.SubmissionID]bool{}, done: make(chan work.Work, 1)}
 	c := conversation.New(ctx)
@@ -155,6 +156,10 @@ func run() error {
 	if _, err = c.Send(c.Root(), "Begin"); err != nil {
 		return err
 	}
+	return reportOutcome(ctx, s, p)
+}
+
+func reportOutcome(ctx context.Context, s *workflow.Session, p *cycleProvider) error {
 	select {
 	case w := <-p.done:
 		fmt.Printf("%s accepted after failed audit, scoped repair, and passing audit.\n", w.ID)
@@ -170,8 +175,11 @@ func run() error {
 		return ctx.Err()
 	}
 }
-func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+func main() { mainWithExit(context.Background(), os.Exit) }
+
+func mainWithExit(ctx context.Context, exit func(int)) {
+	if err := run(ctx); err != nil {
+		log.Print(err)
+		exit(1)
 	}
 }

@@ -63,7 +63,9 @@ func run(ctx context.Context, baseURL, model string) (err error) {
 		}
 	}
 }
-func main() {
+func main() { mainWithExit(os.Exit) }
+
+func mainWithExit(exit func(int)) {
 	baseURL := flag.String("base-url", "http://127.0.0.1:1234", "Local server root or API prefix")
 	model := flag.String("model", "qwen/qwen3-vl-4b", "Model identifier served by the local endpoint")
 	timeout := flag.Duration("timeout", 5*time.Minute, "Overall demonstration deadline")
@@ -73,6 +75,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(interrupt, *timeout)
 	defer cancel()
 	if err := run(ctx, *baseURL, *model); err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		exit(1)
 	}
 }
