@@ -71,14 +71,15 @@ func (o ModelConfig) Resolve() (ModelConfig, error) {
 	}
 }
 
-// Qwen's precise-coding thinking preset and general output budget, checked
+// Qwen's precise-coding thinking parameters, checked
 // 2026-09-11: https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices
+// Strap uses a 128K output budget for extended thinking and coding.
 // Fresh pointers keep presets independent even before the adapter snapshots them.
 func qwenCodingPreset() vllm.Generation {
 	return vllm.Generation{
 		Temperature: valuePtr(0.6), TopP: valuePtr(0.95), TopK: valuePtr(20),
 		MinP: valuePtr(0.0), PresencePenalty: valuePtr(0.0), RepetitionPenalty: valuePtr(1.0),
-		MaxTokens: valuePtr(32768), EnableThinking: valuePtr(true),
+		MaxTokens: valuePtr(131072), EnableThinking: valuePtr(true),
 	}
 }
 

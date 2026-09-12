@@ -109,13 +109,13 @@ func TestEffectiveModelConfigResolvesPresetWithoutAliasing(t *testing.T) {
 	defer s.Dispose(context.Background())
 	info := s.Configuration()
 	m := info.Root.Model
-	if m == nil || m.Preset != "qwen3.6-coding" || m.Generation.MaxTokens == nil || *m.Generation.MaxTokens != 32768 || m.BaseURL != "http://localhost:9999/v1" {
+	if m == nil || m.Preset != "qwen3.6-coding" || m.Generation.MaxTokens == nil || *m.Generation.MaxTokens != 131072 || m.BaseURL != "http://localhost:9999/v1" {
 		t.Fatal(m)
 	}
 	*m.Generation.MaxTokens = 1
 	info.Root.Tools[0].Parameters[0] = '!'
 	again := s.Configuration()
-	if *again.Root.Model.Generation.MaxTokens != 32768 || again.Root.Tools[0].Parameters[0] == '!' {
+	if *again.Root.Model.Generation.MaxTokens != 131072 || again.Root.Tools[0].Parameters[0] == '!' {
 		t.Fatal("configuration aliases reader")
 	}
 }

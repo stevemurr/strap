@@ -19,7 +19,7 @@ import (
 func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 	preset := map[string]any{
 		"temperature": 0.6, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0,
-		"presence_penalty": 0.0, "repetition_penalty": 1.0, "max_tokens": 32768.0,
+		"presence_penalty": 0.0, "repetition_penalty": 1.0, "max_tokens": 131072.0,
 		"chat_template_kwargs": map[string]any{"enable_thinking": true},
 	}
 	for _, tc := range []struct {

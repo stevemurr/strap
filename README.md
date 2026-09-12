@@ -18,13 +18,13 @@ The server must support Chat Completions and tool calling. For a generic compati
 server, use `-backend chatcompletions`, which sends no generation overrides.
 See `go run ./cmd/strap -help` for all options.
 
-The Qwen preset follows the [Qwen3.6-35B-A3B precise-coding guidance](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices):
+The Qwen preset follows the [Qwen3.6-35B-A3B precise-coding sampling guidance](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices), with a 128K output budget for extended thinking and coding:
 
 | Setting | Value |
 |---|---|
 | Temperature / top-p / top-k | `0.6` / `0.95` / `20` |
 | Min-p / presence penalty / repetition penalty | `0` / `0` / `1` |
-| Maximum output tokens | `32768` |
+| Maximum output tokens | `131072` |
 | Thinking | Enabled |
 
 Explicit flags override individual preset values. Use `-preset none` to leave
