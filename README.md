@@ -633,6 +633,10 @@ sandbox against concurrent filesystem changes, and shell access remains unrestri
 
 ## Current scope
 
+The public session API and adapter-independent architecture are tracked in
+[the audited harness design](HARNESS_DESIGN.md). Shared typed workflow operations
+now back the model tools; the `harness.Session` API is not implemented yet.
+
 This is an executable design scaffold. Messages, receipts, and history are in
 memory; persistence, deduplication, streaming, context compaction, and admission
 policies are deferred. There is no behavior framework, permission stack, workspace

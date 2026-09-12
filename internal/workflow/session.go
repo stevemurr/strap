@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"sync"
 
 	"github.com/stevemurr/strap/agent"
@@ -44,14 +42,14 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, events: inbox.New[conversation.Event](), done: make(chan struct{})}
 	s.implementor.Tools = append(s.implementor.Tools, s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, tool.UpdatePlan(nil, s.updateProgress))
-	s.implementor.Tools = append(s.implementor.Tools, tool.SubmitWork(func(_ context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
-		v, e := s.Store.SubmitWork(c.Actor, r)
+	s.implementor.Tools = append(s.implementor.Tools, tool.SubmitWork(func(ctx context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
+		v, e := s.SubmitWork(ctx, c.Actor, r)
 		return result(v, e)
 	}))
 	s.auditor.Tools = append(s.auditor.Tools, s.commonTools()...)
 	s.auditor.Tools = append(s.auditor.Tools, tool.UpdateWork(s.updateProgress))
-	s.auditor.Tools = append(s.auditor.Tools, tool.SubmitAudit(func(_ context.Context, c tool.Call, r work.AuditRequest) (tool.Result, error) {
-		v, e := s.Store.SubmitAudit(c.Actor, r)
+	s.auditor.Tools = append(s.auditor.Tools, tool.SubmitAudit(func(ctx context.Context, c tool.Call, r work.AuditRequest) (tool.Result, error) {
+		v, e := s.SubmitAudit(ctx, c.Actor, r)
 		return result(v, e)
 	}))
 	go s.run()
@@ -65,178 +63,43 @@ func result(v any, err error) (tool.Result, error) {
 }
 func (s *Session) commonTools() []tool.Tool {
 	return []tool.Tool{
-		tool.GetAudit(func(_ context.Context, c tool.Call, id work.AuditID) (tool.Result, error) {
-			v, e := s.Store.GetAudit(c.Actor, id)
+		tool.GetAudit(func(ctx context.Context, c tool.Call, id work.AuditID) (tool.Result, error) {
+			v, e := s.GetAudit(ctx, c.Actor, id)
 			return result(v, e)
 		}),
-		tool.GetPlan(func(_ context.Context, c tool.Call, id work.PlanID) (tool.Result, error) {
-			v, e := s.Store.GetPlan(c.Actor, id)
+		tool.GetPlan(func(ctx context.Context, c tool.Call, id work.PlanID) (tool.Result, error) {
+			v, e := s.GetPlan(ctx, c.Actor, id)
 			return result(v, e)
 		}),
-		tool.GetWork(func(_ context.Context, c tool.Call, id work.ID) (tool.Result, error) { return s.getWork(c.Actor, id) }),
+		tool.GetWork(func(ctx context.Context, c tool.Call, id work.ID) (tool.Result, error) {
+			v, err := s.InspectWork(ctx, c.Actor, id)
+			return result(v, err)
+		}),
 	}
 }
-func (s *Session) getWork(actor identity.ActorID, id work.ID) (tool.Result, error) {
-	w, err := s.Store.GetWork(actor, id)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	v := struct {
-		Work       work.Work        `json:"work"`
-		Steps      []work.Step      `json:"steps,omitempty"`
-		Submission *work.Submission `json:"submission,omitempty"`
-		Audit      *work.Audit      `json:"audit,omitempty"`
-	}{Work: w}
-	if w.Scope != nil {
-		p, e := s.Store.GetPlan(actor, w.Scope.PlanID)
-		if e == nil {
-			for _, step := range p.Steps {
-				if slices.Contains(w.Scope.StepIDs, step.ID) {
-					v.Steps = append(v.Steps, step)
-				}
-			}
-		}
-	}
-	sid := w.LatestSubmissionID
-	if w.Kind == work.AuditWork {
-		sid = w.SubjectSubmissionID
-	}
-	if sid != "" {
-		sub, e := s.Store.GetSubmission(actor, sid)
-		if e != nil {
-			return tool.Result{}, e
-		}
-		v.Submission = &sub
-	}
-	if w.RequestedByAuditID != "" {
-		a, e := s.Store.GetAudit(actor, w.RequestedByAuditID)
-		if e != nil {
-			return tool.Result{}, e
-		}
-		v.Audit = &a
-	}
-	return tool.JSON(v)
-}
-func (s *Session) updateProgress(_ context.Context, c tool.Call, u work.ProgressUpdate) (tool.Result, error) {
-	v, e := s.Store.UpdateProgress(c.Actor, u)
+func (s *Session) updateProgress(ctx context.Context, c tool.Call, u work.ProgressUpdate) (tool.Result, error) {
+	v, e := s.UpdateProgress(ctx, c.Actor, u)
 	return result(v, e)
 }
 func (s *Session) RootTools() []tool.Tool {
 	return append(s.commonTools(),
-		tool.UpdatePlan(func(_ context.Context, c tool.Call, u work.PlanUpdate) (tool.Result, error) {
-			v, e := s.Store.UpdatePlan(c.Actor, u)
+		tool.UpdatePlan(func(ctx context.Context, c tool.Call, u work.PlanUpdate) (tool.Result, error) {
+			v, e := s.UpdatePlan(ctx, c.Actor, u)
 			return result(v, e)
 		}, nil),
-		tool.AssignWork(s.assign),
-		tool.CancelWork(func(_ context.Context, c tool.Call, r work.CancelRequest) (tool.Result, error) {
-			v, e := s.Store.Cancel(c.Actor, r)
+		tool.AssignWork(func(ctx context.Context, c tool.Call, r tool.AssignWorkArgs) (tool.Result, error) {
+			v, err := s.AssignWork(ctx, c.Actor, r)
+			return result(v, err)
+		}),
+		tool.CancelWork(func(ctx context.Context, c tool.Call, r work.CancelRequest) (tool.Result, error) {
+			v, e := s.CancelWork(ctx, c.Actor, r)
 			return result(v, e)
 		}),
-		tool.ReassignWork(s.reassign),
+		tool.ReassignWork(func(ctx context.Context, c tool.Call, r work.ReassignRequest) (tool.Result, error) {
+			v, err := s.ReassignWork(ctx, c.Actor, r)
+			return result(v, err)
+		}),
 	)
-}
-func (s *Session) eligible(id identity.ActorID, kind work.Kind) error {
-	s.mu.Lock()
-	role, ok := s.roles[id]
-	s.mu.Unlock()
-	if !ok || role != kind {
-		return fmt.Errorf("agent %s is not provisioned for %s", id, kind)
-	}
-	info, err := s.Controller.InspectAgent(id, conversation.InspectOptions{})
-	if err != nil {
-		return err
-	}
-	if info.State.Terminal() {
-		return fmt.Errorf("agent %s has exited", id)
-	}
-	return nil
-}
-func (s *Session) provision(parent, requested identity.ActorID, kind work.Kind) (identity.ActorID, bool, error) {
-	if requested != "" {
-		return requested, false, s.eligible(requested, kind)
-	}
-	spec := s.implementor
-	if kind == work.AuditWork {
-		spec = s.auditor
-	}
-	created, err := s.Controller.CreateAgent(parent, spec)
-	if err != nil {
-		return "", false, err
-	}
-	s.mu.Lock()
-	s.roles[created.AgentID] = kind
-	s.mu.Unlock()
-	return created.AgentID, true, nil
-}
-func (s *Session) reassign(ctx context.Context, c tool.Call, r work.ReassignRequest) (tool.Result, error) {
-	w, err := s.Store.GetWork(c.Actor, r.ID)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if w.Owner != c.Actor {
-		return tool.Result{}, work.ErrForbidden
-	}
-	if w.State != work.Active {
-		return tool.Result{}, work.ErrState
-	}
-	if w.Revision != r.ExpectedRevision {
-		return tool.Result{}, work.ErrConflict
-	}
-	kind := work.Implementation
-	if w.Kind == work.AuditWork {
-		kind = work.AuditWork
-	}
-	id, created, err := s.provision(c.Actor, r.Assignee, kind)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	r.Assignee = id
-	if err = ctx.Err(); err == nil {
-		w, err = s.Store.Reassign(c.Actor, r)
-	}
-	if err != nil && created {
-		_, stopErr := s.Controller.StopAgent(id)
-		err = errors.Join(err, stopErr)
-	}
-	return result(w, err)
-}
-func (s *Session) assign(ctx context.Context, c tool.Call, a tool.AssignWorkArgs) (tool.Result, error) {
-	if c.Actor != s.Root() {
-		return tool.Result{}, work.ErrForbidden
-	}
-	if a.Kind != work.Implementation && a.Kind != work.AuditWork {
-		return tool.Result{}, fmt.Errorf("kind must be implementation or audit")
-	}
-	if a.Kind == work.Implementation {
-		if strings.TrimSpace(a.Task) == "" || a.WorkID != "" || a.ExpectedRevision != 0 || a.SubmissionID != "" {
-			return tool.Result{}, fmt.Errorf("implementation requires task and cannot select an audit submission")
-		}
-	} else {
-		if a.WorkID == "" || a.ExpectedRevision == 0 || a.SubmissionID == "" || a.Scope != nil || a.Task != "" || a.Context != "" || a.ExpectedOutput != "" {
-			return tool.Result{}, fmt.Errorf("audit requires work_id, expected_revision and submission_id; its task and scope are derived")
-		}
-	}
-	id, created, provisionErr := s.provision(c.Actor, a.Assignee, a.Kind)
-	if provisionErr != nil {
-		return tool.Result{}, provisionErr
-	}
-	var w work.Work
-	var err error
-	if e := ctx.Err(); e != nil {
-		err = e
-	} else if a.Kind == work.Implementation {
-		w, err = s.Store.AssignWork(c.Actor, work.AssignRequest{Assignee: id, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput, Scope: a.Scope})
-	} else {
-		w, err = s.Store.AssignAudit(c.Actor, work.AssignAuditRequest{WorkTarget: work.WorkTarget{ID: a.WorkID, ExpectedRevision: a.ExpectedRevision}, SubmissionID: a.SubmissionID, Auditor: id})
-	}
-	if err != nil {
-		if created {
-			_, stopErr := s.Controller.StopAgent(id)
-			err = errors.Join(err, stopErr)
-		}
-		return tool.Result{}, err
-	}
-	return tool.JSON(w)
 }
 func (s *Session) NextEvent(ctx context.Context) (conversation.Event, error) {
 	return s.events.Receive(ctx)

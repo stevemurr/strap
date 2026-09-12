@@ -77,17 +77,8 @@ func UpdateWork(handle Handler[work.ProgressUpdate]) Tool {
 		Minimum("expected_revision", 1), MinLength("work_id", 1))
 }
 
-type AssignWorkArgs struct {
-	Kind             work.Kind         `json:"kind"`
-	Assignee         identity.ActorID  `json:"assignee,omitempty"`
-	Task             string            `json:"task,omitempty"`
-	Context          string            `json:"context,omitempty"`
-	ExpectedOutput   string            `json:"expected_output,omitempty"`
-	Scope            *work.Scope       `json:"scope,omitempty"`
-	WorkID           work.ID           `json:"work_id,omitempty"`
-	ExpectedRevision work.Revision     `json:"expected_revision,omitempty"`
-	SubmissionID     work.SubmissionID `json:"submission_id,omitempty"`
-}
+// AssignWorkArgs preserves the tool API while sharing its typed application request.
+type AssignWorkArgs = work.AssignmentRequest
 
 func AssignWork(handle Handler[AssignWorkArgs]) Tool {
 	type implementation struct {

@@ -9,6 +9,15 @@ The implemented work ledger, shared plans, and implementation/audit/repair flow
 are described in [WORK_DESIGN.md](WORK_DESIGN.md). Application wiring composes this
 with the conversation core; the controller does not own work policy.
 
+The application now exposes typed operations in
+[`internal/workflow/operations.go`](internal/workflow/operations.go). Model tool
+handlers adapt arguments and results around those same operations. They share
+provisioning, revision checks, root-only plan/assignment policy, and compensation
+when a newly created agent's ledger registration fails. Registration
+success is a ledger outcome; actual dispatch and receipt processing remain
+asynchronous. The future public session API is tracked in
+[HARNESS_DESIGN.md](HARNESS_DESIGN.md).
+
 ## Complete map
 
 ```text

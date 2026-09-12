@@ -4,6 +4,11 @@ Proposed design and code sketch; no runtime changes are implemented by this
 document. Snippets show the intended boundaries, with supporting implementation
 explicitly described below. They are not a complete patch.
 
+The [public harness design](HARNESS_DESIGN.md#session-diagnostics) now supersedes
+this document's CLI-owned recorder and workflow-observer wiring. Its diagnostic
+capture examples remain design input; implementation should use the session's
+canonical publication/storage path rather than add a parallel event stream.
+
 Record tool execution to one JSONL file per session so an edit failure can be
 examined alongside its exact arguments and the file text that was searched.
 The terminal and model continue to receive the existing short error message.

@@ -149,7 +149,9 @@ type AssignAuditRequest struct {
 }
 type ReassignRequest struct {
 	WorkTarget
-	Assignee identity.ActorID `json:"assignee"`
+	// Applications may provision a replacement when omitted. Store.Reassign
+	// still requires a resolved assignee.
+	Assignee identity.ActorID `json:"assignee,omitempty"`
 }
 type CancelRequest struct {
 	WorkTarget
