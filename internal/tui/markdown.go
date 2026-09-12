@@ -37,10 +37,13 @@ func (m *model) renderBody(e *entry) string {
 		if e.reasoningExpanded {
 			heading = "▾ Thinking · Ctrl+T hide\n" + e.reasoning
 		}
+		// Keep the separator outside the styled block: Lip Gloss pads trailing
+		// blank lines to the heading width, which would indent the answer.
+		thinking := dimStyle.Render(heading)
 		if body != "" {
-			heading += "\n\n"
+			thinking += "\n\n"
 		}
-		body = dimStyle.Render(heading) + body
+		body = thinking + body
 	}
 	// Wide tables and code lines must also fit after a terminal resize.
 	wrapped := ansi.Hardwrap(lipgloss.NewStyle().AlignHorizontal(lipgloss.Left).Width(width).Render(body), width, true)
