@@ -80,8 +80,8 @@ type Store interface {
 }
 
 type Limits struct {
-	Entries int
-	Bytes   int
+	Entries int `json:"entries"`
+	Bytes   int `json:"bytes"`
 }
 
 func (l Limits) Validate() error {

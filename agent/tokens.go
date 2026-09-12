@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 
 	"github.com/stevemurr/strap/provider"
 )
+
+var ErrTokenCountingUnsupported = errors.New("provider does not support token counting")
 
 // ContextRevision identifies the current retained history, including replies
 // and tool results. Queued inbox messages have not entered that history yet.
@@ -33,7 +35,7 @@ func (a *Agent) OutputTokenLimit() *int64 {
 func (a *Agent) CountTokens(ctx context.Context, revision uint64) (int64, error) {
 	counter, ok := a.config.Spec.Provider.(provider.TokenCounter)
 	if !ok {
-		return 0, fmt.Errorf("provider does not support token counting")
+		return 0, ErrTokenCountingUnsupported
 	}
 	messages, err := a.thread.messagesAt(revision)
 	if err != nil {

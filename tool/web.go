@@ -22,14 +22,14 @@ import (
 // Missing executables are reported when their tool is called. Construction
 // never starts a browser. The runtime is safe to share across agents.
 type WebConfig struct {
-	WKRenderPath          string
-	AgentBrowserPath      string
-	BrowserExecutablePath string
-	SearchTimeout         time.Duration // default 20 seconds, including queue/startup
-	OpenTimeout           time.Duration // default 30 seconds, including queue/startup
-	MaxPageChars          int           // default 1 million Unicode code points retained per page
-	CacheBytes            int           // default 16 MiB, including retained text and link metadata
-	CacheTTL              time.Duration // default 10 minutes; snapshots also evicted for space
+	WKRenderPath          string        `json:"wkrender_path"`
+	AgentBrowserPath      string        `json:"agent_browser_path"`
+	BrowserExecutablePath string        `json:"browser_executable_path"`
+	SearchTimeout         time.Duration `json:"search_timeout_ns"` // default 20 seconds, including queue/startup
+	OpenTimeout           time.Duration `json:"open_timeout_ns"`   // default 30 seconds, including queue/startup
+	MaxPageChars          int           `json:"max_page_chars"`    // default 1 million Unicode code points retained per page
+	CacheBytes            int           `json:"cache_bytes"`       // default 16 MiB, including retained text and link metadata
+	CacheTTL              time.Duration `json:"cache_ttl_ns"`      // default 10 minutes; snapshots also evicted for space
 }
 
 type Web struct {

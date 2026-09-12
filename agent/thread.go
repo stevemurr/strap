@@ -2,6 +2,7 @@ package agent
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -15,6 +16,8 @@ const (
 
 // TranscriptQuery selects a chronological page from the append-only thread.
 // Before is an exclusive, one-based position; zero selects the latest messages.
+var ErrInvalidQuery = errors.New("invalid agent history query")
+
 type TranscriptQuery struct {
 	Limit  int
 	Before uint64
@@ -54,7 +57,7 @@ func (t *thread) messagesAt(revision uint64) ([]provider.Message, error) {
 	t.mu.RLock()
 	if revision == 0 || revision > t.revision {
 		t.mu.RUnlock()
-		return nil, fmt.Errorf("invalid context revision %d", revision)
+		return nil, fmt.Errorf("%w: invalid context revision %d", ErrInvalidQuery, revision)
 	}
 	messages := append([]provider.Message(nil), t.messages[:revision]...)
 	t.mu.RUnlock()
@@ -73,14 +76,14 @@ func (t *thread) requestMessages() ([]provider.Message, uint64) {
 func (t *thread) snapshot(q TranscriptQuery) (TranscriptPage, error) {
 	q.Limit = cmp.Or(q.Limit, DefaultTranscriptLimit)
 	if q.Limit < 1 || q.Limit > MaxTranscriptLimit {
-		return TranscriptPage{}, fmt.Errorf("transcript limit must be between 1 and %d", MaxTranscriptLimit)
+		return TranscriptPage{}, fmt.Errorf("%w: transcript limit must be between 1 and %d", ErrInvalidQuery, MaxTranscriptLimit)
 	}
 	t.mu.RLock()
 	end := len(t.messages)
 	if q.Before != 0 {
 		if q.Before > uint64(end)+1 {
 			t.mu.RUnlock()
-			return TranscriptPage{}, fmt.Errorf("transcript position %d is beyond the thread", q.Before)
+			return TranscriptPage{}, fmt.Errorf("%w: transcript position %d is beyond the thread", ErrInvalidQuery, q.Before)
 		}
 		end = int(q.Before - 1)
 	}

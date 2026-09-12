@@ -560,7 +560,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    Check attachment does not change configured provider/tool calls, and use an
    external-package Go test to prove no internal imports are needed. Compare
    domain results and causal events, not timing-dependent total event order.
-7. **HTTP adapter.** Add wire DTOs, error mappings, authorized host capabilities,
+7. **HTTP adapter — implemented.** Add wire DTOs, error mappings, authorized host capabilities,
    event encoding, session lookup, and deliberate retry/idempotency behavior over
    the established API. Contract-test it against direct Go calls with scripted
    dependencies. Disconnect must only detach the request/subscription.
@@ -629,4 +629,11 @@ an explicit on-demand measurement request. `Configuration()` resolves built-in
 provider presets and records role prompts/tool order, while injected providers
 are marked opaque. `Inspect()` reports state, configuration, capture health and
 coverage without claiming a global atomic snapshot. External-package tests prove
-that observer attachment does not change provider traffic. HTTP remains next.
+that observer attachment does not change provider traffic. The seventh slice adds `harness/httpapi.Service`, explicit host authorization,
+HTTP DTOs/error codes, managed session lookup, finite pages, and NDJSON streams.
+CLI `-listen` serves on loopback using `STRAP_API_TOKEN`. Disconnect only detaches
+observation; session factories use service lifetime. Dynamic agent collaborators
+are selected by host profiles. Mutation requests are not retried; unsupported
+idempotency keys are rejected. Contract tests run the full audit/repair cycle
+through direct Go and HTTP calls and verify real stream reconnection. See
+[the HTTP API](harness/httpapi/README.md).

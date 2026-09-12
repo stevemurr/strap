@@ -13,12 +13,12 @@ import (
 
 // ModelConfig is shared by CLI and library hosts. The model name never selects a preset.
 type ModelConfig struct {
-	Backend    string
-	Preset     string
-	BaseURL    string
-	Model      string
-	Timeout    time.Duration
-	Generation vllm.Generation
+	Backend    string          `json:"backend"`
+	Preset     string          `json:"preset"`
+	BaseURL    string          `json:"base_url"`
+	Model      string          `json:"model"`
+	Timeout    time.Duration   `json:"timeout_ns"`
+	Generation vllm.Generation `json:"generation"`
 }
 
 // NewProvider borrows the supplied HTTP client. Sessions supply their owned transport.

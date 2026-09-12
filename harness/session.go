@@ -31,18 +31,20 @@ import (
 type Resource = resource.Resource
 
 type AgentConfig struct {
-	Prompt prompt.Prompt
-	Model  *ModelConfig // Nil uses the session model configuration.
+	Prompt prompt.Prompt `json:"prompt"`
+	Model  *ModelConfig  `json:"model,omitempty"` // Nil uses the session model configuration.
 }
 
 type Config struct {
-	Telemetry                  TelemetryConfig
-	Events                     EventConfig
-	Dir                        string
-	Model                      ModelConfig
-	LocalTools                 bool
-	Web                        *tool.WebConfig // Nil disables browser/search tools.
-	Root, Implementor, Auditor AgentConfig
+	Telemetry   TelemetryConfig `json:"telemetry"`
+	Events      EventConfig     `json:"events"`
+	Dir         string          `json:"dir"`
+	Model       ModelConfig     `json:"model"`
+	LocalTools  bool            `json:"local_tools"`
+	Web         *tool.WebConfig `json:"web"` // Nil disables browser/search tools.
+	Root        AgentConfig     `json:"root"`
+	Implementor AgentConfig     `json:"implementor"`
+	Auditor     AgentConfig     `json:"auditor"`
 }
 
 // DefaultConfig returns independent CLI-compatible defaults without acquiring resources.
@@ -52,9 +54,9 @@ func DefaultConfig() Config {
 }
 
 type EventConfig struct {
-	JSONLPath string // Empty uses memory; nonempty exclusively creates a durable trace file.
-	Retention eventlog.Limits
-	Queue     eventlog.Limits
+	JSONLPath string          `json:"jsonl_path,omitempty"` // Empty uses memory; nonempty exclusively creates a durable trace file.
+	Retention eventlog.Limits `json:"retention"`
+	Queue     eventlog.Limits `json:"queue"`
 }
 
 type AgentDependencies struct {
@@ -364,3 +366,6 @@ func cloneModel(m ModelConfig) ModelConfig {
 	g.EnableThinking = copyPtr(g.EnableThinking)
 	return m
 }
+
+// Clone returns an independent configuration for host assembly/adapters.
+func (c Config) Clone() Config { return cloneConfig(c) }

@@ -14,6 +14,8 @@ import (
 )
 
 var ErrClosed = errors.New("conversation closed")
+var ErrAgentNotFound = errors.New("unknown agent")
+var ErrAgentStopped = errors.New("agent stopped")
 
 type ownedAgent struct {
 	info   AgentInfo
@@ -191,10 +193,10 @@ func (c *Controller) deliverLocked(from message.ActorID, draft message.Draft) me
 func (c *Controller) activeLocked(id message.ActorID) error {
 	a, ok := c.agents[id]
 	if !ok {
-		return fmt.Errorf("unknown agent: %s", id)
+		return fmt.Errorf("%w: %s", ErrAgentNotFound, id)
 	}
 	if a.agent.State().Terminal() || a.ctx.Err() != nil {
-		return fmt.Errorf("agent stopped: %s", id)
+		return fmt.Errorf("%w: %s", ErrAgentStopped, id)
 	}
 	return nil
 }
@@ -276,7 +278,7 @@ func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (A
 	owned, ok := c.agents[id]
 	if !ok {
 		c.mu.Unlock()
-		return AgentInspection{}, fmt.Errorf("unknown agent: %s", id)
+		return AgentInspection{}, fmt.Errorf("%w: %s", ErrAgentNotFound, id)
 	}
 	info, runner := owned.info, owned.agent
 	c.mu.Unlock()
@@ -300,7 +302,7 @@ func (c *Controller) CountAgentTokens(ctx context.Context, id message.ActorID, r
 	owned, ok := c.agents[id]
 	c.mu.Unlock()
 	if !ok {
-		return 0, fmt.Errorf("unknown agent: %s", id)
+		return 0, fmt.Errorf("%w: %s", ErrAgentNotFound, id)
 	}
 	return owned.agent.CountTokens(ctx, revision)
 }
@@ -336,7 +338,7 @@ func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	defer c.mu.Unlock()
 	owned, ok := c.agents[id]
 	if !ok {
-		return AgentInfo{}, fmt.Errorf("unknown agent: %s", id)
+		return AgentInfo{}, fmt.Errorf("%w: %s", ErrAgentNotFound, id)
 	}
 	state := owned.agent.RequestStopSnapshot()
 	owned.cancel()

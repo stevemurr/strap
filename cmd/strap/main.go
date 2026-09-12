@@ -28,6 +28,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	wkPath := flags.String("wkrender", "", "Path to wkrender (default PATH or ~/.harness/bin/wkrender)")
 	abPath := flags.String("agent-browser", "", "Path to agent-browser 0.37.1 (default PATH or Strap's isolated installation)")
 	browserPath := flags.String("browser-executable", "", "Chrome executable for open_url (default installed Chrome on macOS or agent-browser discovery)")
+	listenAddress := flags.String("listen", "", "Serve the harness HTTP API at a loopback address (requires STRAP_API_TOKEN)")
 	recordPath := flags.String("record", "", "Record session events and tool diagnostics to a new JSONL file")
 	modelOptions := modelFlags(flags)
 	if err := flags.Parse(args); err != nil {
@@ -50,6 +51,9 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	cfg.Web = nil
 	if *webEnabled {
 		cfg.Web = &tool.WebConfig{WKRenderPath: *wkPath, AgentBrowserPath: *abPath, BrowserExecutablePath: *browserPath}
+	}
+	if *listenAddress != "" {
+		return runHTTP(ctx, cfg, *listenAddress, os.Getenv("STRAP_API_TOKEN"))
 	}
 	session, err := harness.New(ctx, cfg, harness.Dependencies{})
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/stevemurr/strap/harness"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,5 +27,14 @@ func TestInvalidFlagsFailBeforeStartingConversation(t *testing.T) {
 		if err := run(context.Background(), args, &out); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
+	}
+}
+
+func TestHTTPModeRequiresTokenAndLoopbackAddress(t *testing.T) {
+	if err := runHTTP(context.Background(), harness.DefaultConfig(), "127.0.0.1:0", ""); err == nil {
+		t.Fatal("missing token accepted")
+	}
+	if err := runHTTP(context.Background(), harness.DefaultConfig(), "0.0.0.0:0", "test"); err == nil {
+		t.Fatal("non-loopback CLI server accepted")
 	}
 }

@@ -13,10 +13,10 @@ import (
 // TelemetryConfig governs automatic I/O independently of observer attachment.
 // Explicit CountAgentTokens remains a separate, caller-requested operation.
 type TelemetryConfig struct {
-	ContextTokens bool
-	Concurrency   int
-	Queue         int
-	Timeout       time.Duration
+	ContextTokens bool          `json:"context_tokens"`
+	Concurrency   int           `json:"concurrency"`
+	Queue         int           `json:"queue"`
+	Timeout       time.Duration `json:"timeout_ns"`
 }
 
 func (c *TelemetryConfig) defaults() error {

@@ -282,6 +282,10 @@ domain events and tool diagnostics; it does not include full model requests,
 responses, or external artifacts. Compare causal events rather than assuming
 identical total ordering across concurrent runs.
 
+The [HTTP adapter](harness/httpapi/README.md) exposes these same operations. Run
+`strap -listen 127.0.0.1:8080` with `STRAP_API_TOKEN` set, or embed the authorized
+`httpapi.Service` handler. Each connection has its own event cursor.
+
 For durable diagnostics, set `cfg.Events.JSONLPath` or pass `-record trace.jsonl`
 to the CLI. Recording exclusively creates a new file and includes tool arguments,
 results, errors, and exact edit-failure snapshots. Traces contain task/file data.

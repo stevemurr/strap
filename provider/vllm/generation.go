@@ -9,14 +9,14 @@ import (
 // leaves a field to the server; explicit zero/false is sent unchanged. New
 // validates finite numbers and snapshots all values without supplying defaults.
 type Generation struct {
-	Temperature       *float64 // [0, 2]; zero selects greedy decoding.
-	TopP              *float64 // (0, 1]
-	TopK              *int     // -1 or 0 disables filtering; positive values select k.
-	MinP              *float64 // [0, 1]
-	PresencePenalty   *float64 // [-2, 2]
-	RepetitionPenalty *float64 // > 0; 1 disables the penalty.
-	MaxTokens         *int     // > 0; output budget, not context length.
-	EnableThinking    *bool    // Requires support in the served chat template.
+	Temperature       *float64 `json:"temperature,omitempty"`        // [0, 2]; zero selects greedy decoding.
+	TopP              *float64 `json:"top_p,omitempty"`              // (0, 1]
+	TopK              *int     `json:"top_k,omitempty"`              // -1 or 0 disables filtering; positive values select k.
+	MinP              *float64 `json:"min_p,omitempty"`              // [0, 1]
+	PresencePenalty   *float64 `json:"presence_penalty,omitempty"`   // [-2, 2]
+	RepetitionPenalty *float64 `json:"repetition_penalty,omitempty"` // > 0; 1 disables the penalty.
+	MaxTokens         *int     `json:"max_tokens,omitempty"`         // > 0; output budget, not context length.
+	EnableThinking    *bool    `json:"enable_thinking,omitempty"`    // Requires support in the served chat template.
 }
 
 type generationFields struct {
