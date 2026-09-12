@@ -17,7 +17,7 @@ import (
 
 type modelFunc func(context.Context, provider.Request) (provider.Response, error)
 
-func (f modelFunc) Submit(c context.Context, r provider.Request) (provider.Response, error) {
+func (f modelFunc) Submit(c context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	return f(c, r)
 }
 

@@ -29,10 +29,10 @@ func TestToolCallRoundTrip(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if string(request["model"]) != `"local-model"` || string(request["stream"]) != "false" {
+		if string(request["model"]) != `"local-model"` || string(request["stream"]) != "true" {
 			t.Errorf("bad request: %s", request)
 		}
-		if len(request) != 4 {
+		if len(request) != 5 {
 			t.Errorf("unexpected internal fields: %v", request)
 		}
 		var messages []map[string]json.RawMessage
@@ -101,7 +101,7 @@ func TestToolCallRoundTrip(t *testing.T) {
 		},
 		Tools: []provider.ToolDefinition{{Name: "create_agent", Parameters: json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)}},
 	}
-	response, err := c.Submit(context.Background(), request)
+	response, err := c.Submit(context.Background(), request, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestToolCallRoundTrip(t *testing.T) {
 		provider.Message{Role: "assistant", ToolCalls: response.ToolCalls},
 		provider.Message{Role: "tool", ToolCallID: "call-42", Content: content.Text(`{"agent_id":"child","instruction":{"message_id":"assignment-1","recipient":"child","status":"queued"}}`)},
 	)
-	response, err = c.Submit(context.Background(), request)
+	response, err = c.Submit(context.Background(), request, nil)
 	if err != nil || response.Content != "Delegated." {
 		t.Fatalf("%+v %v", response, err)
 	}
@@ -133,7 +133,7 @@ func TestAPIPrefixAndHTTPErrorWithoutRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.Submit(context.Background(), provider.Request{})
+	_, err = c.Submit(context.Background(), provider.Request{}, nil)
 	var responseError *chatcompletions.HTTPError
 	if !errors.As(err, &responseError) || responseError.StatusCode != 503 || !strings.Contains(responseError.Body, "model not loaded") {
 		t.Fatalf("lost server diagnostic: %v", err)
@@ -160,7 +160,7 @@ func TestIncompleteAndMalformedResponsesAreErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := c.Submit(context.Background(), provider.Request{}); err == nil {
+			if _, err := c.Submit(context.Background(), provider.Request{}, nil); err == nil {
 				t.Fatal("invalid completion accepted")
 			}
 		})
@@ -186,7 +186,7 @@ func TestCancellationReachesHTTPCall(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { _, err := c.Submit(ctx, provider.Request{}); done <- err }()
+	go func() { _, err := c.Submit(ctx, provider.Request{}, nil); done <- err }()
 	select {
 	case <-entered:
 	case <-time.After(3 * time.Second):

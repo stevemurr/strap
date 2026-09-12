@@ -23,7 +23,7 @@ type editScript struct {
 	modelError chan string
 }
 
-func (p *editScript) Submit(ctx context.Context, r provider.Request) (provider.Response, error) {
+func (p *editScript) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	switch p.step.Add(1) {
 	case 1:
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "reused", Name: "write_file", Arguments: json.RawMessage(`{"path":"file","content":"original"}`)}}}, nil

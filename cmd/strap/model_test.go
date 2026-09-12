@@ -54,6 +54,7 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 				delete(body, "model")
 				delete(body, "messages")
 				delete(body, "stream")
+				delete(body, "stream_options")
 				if !reflect.DeepEqual(body, tc.want) {
 					t.Errorf("got %#v, want %#v", body, tc.want)
 				}
@@ -76,7 +77,7 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 			} else if _, ok := p.(*vllm.Client); !ok {
 				t.Fatal("wrong backend")
 			}
-			if _, err := p.Submit(context.Background(), provider.Request{}); err != nil {
+			if _, err := p.Submit(context.Background(), provider.Request{}, nil); err != nil {
 				t.Fatal(err)
 			}
 		})

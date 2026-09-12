@@ -50,7 +50,7 @@ func TestGenerationSnapshotAndConcurrentIsolation(t *testing.T) {
 		}
 		// Only protocol fields and typed generation options may cross the wire.
 		for name := range body {
-			if _, ok := want[name]; !ok && name != "model" && name != "messages" && name != "tools" && name != "stream" {
+			if _, ok := want[name]; !ok && name != "model" && name != "messages" && name != "tools" && name != "stream" && name != "stream_options" {
 				t.Errorf("unexpected wire field %s", name)
 			}
 		}
@@ -93,7 +93,7 @@ func TestGenerationSnapshotAndConcurrentIsolation(t *testing.T) {
 				got, err := client.Submit(context.Background(), provider.Request{
 					Agent: message.ActorID(text), Messages: []provider.Message{{Role: "user", Content: content.Text(text), Envelope: &message.Message{ID: "private"}}},
 					Tools: []provider.ToolDefinition{{Name: "inspect", Parameters: json.RawMessage(`{"type":"object"}`)}},
-				})
+				}, nil)
 				if err != nil || got.Content != text {
 					t.Errorf("response lost correlation: %+v %v", got, err)
 				}
@@ -109,7 +109,7 @@ func TestUnsetGenerationUsesServerDefaults(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		if len(body) != 3 || body["model"] == nil || body["messages"] == nil || string(body["stream"]) != "false" {
+		if len(body) != 4 || body["model"] == nil || body["messages"] == nil || string(body["stream"]) != "true" {
 			t.Errorf("unexpected defaults: %s", body)
 		}
 		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
@@ -119,7 +119,7 @@ func TestUnsetGenerationUsesServerDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Submit(context.Background(), provider.Request{}); err != nil {
+	if _, err := client.Submit(context.Background(), provider.Request{}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -173,7 +173,7 @@ func TestServerRejectionAndCancellationArePreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.Submit(context.Background(), provider.Request{})
+	_, err = client.Submit(context.Background(), provider.Request{}, nil)
 	var responseError *vllm.HTTPError
 	if !errors.As(err, &responseError) || responseError.StatusCode != 400 || !strings.Contains(responseError.Body, "chat_template_kwargs") {
 		t.Fatalf("lost server diagnostic: %v", err)
@@ -183,7 +183,7 @@ func TestServerRejectionAndCancellationArePreserved(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := client.Submit(ctx, provider.Request{}); !errors.Is(err, context.Canceled) {
+	if _, err := client.Submit(ctx, provider.Request{}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("lost cancellation: %v", err)
 	}
 	if calls.Load() != 1 {

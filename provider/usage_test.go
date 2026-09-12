@@ -69,7 +69,7 @@ func TestAdaptersReportUsage(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					got, err := client.Submit(context.Background(), provider.Request{})
+					got, err := client.Submit(context.Background(), provider.Request{}, nil)
 					if (err != nil) != tc.wantError || !reflect.DeepEqual(got.Usage, tc.want) {
 						t.Fatalf("usage = %+v, err = %v; want %+v, error %v", got.Usage, err, tc.want, tc.wantError)
 					}

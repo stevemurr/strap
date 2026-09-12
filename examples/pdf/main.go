@@ -24,7 +24,7 @@ type observed struct {
 	images int
 }
 
-func (p *observed) Submit(ctx context.Context, request provider.Request) (provider.Response, error) {
+func (p *observed) Submit(ctx context.Context, request provider.Request, observer provider.Observer) (provider.Response, error) {
 	count := 0
 	for _, msg := range request.Messages {
 		for _, part := range msg.Content {
@@ -37,7 +37,7 @@ func (p *observed) Submit(ctx context.Context, request provider.Request) (provid
 		p.images = count
 		fmt.Printf("Submitting %d rendered page images to the model.\n", count)
 	}
-	return p.Provider.Submit(ctx, request)
+	return p.Provider.Submit(ctx, request, observer)
 }
 func run(ctx context.Context, path, baseURL, model string) (err error) {
 	pdf, err := tool.NewPDF(tool.PDFConfig{})

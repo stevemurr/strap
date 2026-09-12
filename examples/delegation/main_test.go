@@ -36,7 +36,7 @@ func TestDelegationExample(t *testing.T) {
 func TestScriptRejectsMissingWorkAndToolFailures(t *testing.T) {
 	for _, request := range []provider.Request{{Agent: message.ActorID("worker")}, {Messages: []provider.Message{{Role: "tool", Content: content.Text("Tool error: invalid request")}}}} {
 		p := &cycleProvider{}
-		if _, err := p.Submit(context.Background(), request); err == nil {
+		if _, err := p.Submit(context.Background(), request, nil); err == nil {
 			t.Fatal("invalid script state accepted")
 		}
 	}
@@ -77,7 +77,7 @@ func TestScriptValidatesAssignmentsAndWorkerCapabilities(t *testing.T) {
 				request.Messages[0].Envelope.Work = &audit
 				request.Tools = []provider.ToolDefinition{{Name: "submit_work"}}
 			}
-			response, err := p.Submit(context.Background(), request)
+			response, err := p.Submit(context.Background(), request, nil)
 			if mode == "stale review notification" {
 				if err != nil || response.Content != "Waiting for the work cycle." {
 					t.Fatal(response, err)

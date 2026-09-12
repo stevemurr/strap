@@ -17,7 +17,7 @@ import (
 
 type idle struct{}
 
-func (idle) Submit(context.Context, provider.Request) (provider.Response, error) {
+func (idle) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	return provider.Response{Content: "ready"}, nil
 }
 
@@ -97,7 +97,7 @@ func TestHeadlessSessionOwnsAssemblyAndWork(t *testing.T) {
 
 type observeProvider struct{ requests chan provider.Request }
 
-func (p *observeProvider) Submit(_ context.Context, r provider.Request) (provider.Response, error) {
+func (p *observeProvider) Submit(_ context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	p.requests <- r
 	return provider.Response{Content: "ok"}, nil
 }

@@ -33,7 +33,7 @@ type cycleProvider struct {
 	done     chan work.Work
 }
 
-func (p *cycleProvider) Submit(ctx context.Context, r provider.Request) (provider.Response, error) {
+func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
@@ -219,7 +219,7 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 
 type idleProvider struct{}
 
-func (idleProvider) Submit(context.Context, provider.Request) (provider.Response, error) {
+func (idleProvider) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	return provider.Response{Content: "waiting"}, nil
 }
 func TestOldBindingFailureAndPendingAssignment(t *testing.T) {

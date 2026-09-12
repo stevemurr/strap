@@ -52,10 +52,34 @@ func (e *HTTPError) Error() string {
 
 // Submit accepts an adapter-owned wire struct, including its typed extensions.
 // It never retries or rewrites options after an HTTP rejection.
-func (c *Client) Submit(ctx context.Context, wire any) (provider.Response, error) {
-	var result completion
-	if err := c.Post(ctx, c.endpoint, wire, &result); err != nil {
+func (c *Client) Submit(ctx context.Context, wire any, observer provider.Observer) (provider.Response, error) {
+
+	data, err := json.Marshal(wire)
+	if err != nil {
+		return provider.Response{}, fmt.Errorf("encode request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(data))
+	if err != nil {
 		return provider.Response{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return provider.Response{}, fmt.Errorf("submit: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return provider.Response{}, &HTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+	}
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return readStream(resp.Body, observer)
+	}
+	// Some compatible servers return a complete JSON response to streaming requests.
+	var result completion
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return provider.Response{}, fmt.Errorf("decode response: %w", err)
 	}
 	return decode(result)
 }

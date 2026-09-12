@@ -76,7 +76,7 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("vllm: HTTP %d: %s", e.StatusCode, e.Body)
 }
 
-func (c *Client) Submit(ctx context.Context, input provider.Request) (provider.Response, error) {
+func (c *Client) Submit(ctx context.Context, input provider.Request, observer provider.Observer) (provider.Response, error) {
 	base, err := chatwire.Encode(c.model, input)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("vllm: encode content: %w", err)
@@ -87,7 +87,7 @@ func (c *Client) Submit(ctx context.Context, input provider.Request) (provider.R
 		chatwire.Request
 		generationFields
 	}{base, c.generation}
-	result, err := c.wire.Submit(ctx, wire)
+	result, err := c.wire.Submit(ctx, wire, observer)
 	if err != nil {
 		var responseError *chatwire.HTTPError
 		if errors.As(err, &responseError) {

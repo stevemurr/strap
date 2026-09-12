@@ -22,7 +22,7 @@ import (
 
 type idleProvider struct{ calls atomic.Int32 }
 
-func (p *idleProvider) Submit(context.Context, provider.Request) (provider.Response, error) {
+func (p *idleProvider) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	p.calls.Add(1)
 	return provider.Response{Content: "unexpected call"}, nil
 }

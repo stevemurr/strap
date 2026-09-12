@@ -148,7 +148,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				return err
 			}
 			request, revision := a.request()
-			response, err := a.config.Spec.Provider.Submit(ctx, request)
+			response, err := a.config.Spec.Provider.Submit(ctx, request, nil)
 			a.recordUsage(revision, response.Usage)
 			if err != nil {
 				return err

@@ -19,7 +19,10 @@ type Chat struct {
 
 type Request struct {
 	Chat
-	Stream bool `json:"stream"`
+	Stream        bool `json:"stream"`
+	StreamOptions struct {
+		IncludeUsage bool `json:"include_usage"`
+	} `json:"stream_options"`
 }
 
 type chatMessage struct {
@@ -76,6 +79,8 @@ type contentPart struct {
 
 func Encode(model string, input provider.Request) (Request, error) {
 	result := Request{Chat: Chat{Model: model, Messages: make([]requestMessage, 0, len(input.Messages))}}
+	result.Stream = true
+	result.StreamOptions.IncludeUsage = true
 	var images []requestMessage
 	flush := func() { result.Messages = append(result.Messages, images...); images = nil }
 	for _, m := range input.Messages {

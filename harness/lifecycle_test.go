@@ -18,7 +18,7 @@ type blockedProvider struct {
 	started, cancelled, release chan struct{}
 }
 
-func (p *blockedProvider) Submit(ctx context.Context, _ provider.Request) (provider.Response, error) {
+func (p *blockedProvider) Submit(ctx context.Context, _ provider.Request, observer provider.Observer) (provider.Response, error) {
 	close(p.started)
 	<-ctx.Done()
 	close(p.cancelled)
@@ -188,7 +188,7 @@ func TestShutdownCancelsAndJoinsHostTokenCount(t *testing.T) {
 
 type failingProvider struct{}
 
-func (failingProvider) Submit(context.Context, provider.Request) (provider.Response, error) {
+func (failingProvider) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	return provider.Response{}, errors.New("model execution failed")
 }
 func TestTerminalOutcomeSurvivesStorageDisposal(t *testing.T) {

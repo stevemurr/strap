@@ -21,7 +21,7 @@ type telemetryScript struct {
 	finished, measured chan struct{}
 }
 
-func (p *telemetryScript) Submit(_ context.Context, r provider.Request) (provider.Response, error) {
+func (p *telemetryScript) Submit(_ context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	p.submits.Add(1)
 	p.mu.Lock()
 	p.steps[string(r.Agent)]++
@@ -128,7 +128,7 @@ type concurrentTelemetry struct {
 	release      chan struct{}
 }
 
-func (p *concurrentTelemetry) Submit(_ context.Context, r provider.Request) (provider.Response, error) {
+func (p *concurrentTelemetry) Submit(_ context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	p.mu.Lock()
 	p.steps[string(r.Agent)]++
 	n := p.steps[string(r.Agent)]

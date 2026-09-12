@@ -76,7 +76,7 @@ func TestCountTokensMatchesGenerationPrompt(t *testing.T) {
 			if len(bodies) != 1 {
 				t.Fatal("counting also requested generation")
 			}
-			if _, err := client.Submit(context.Background(), input); err != nil {
+			if _, err := client.Submit(context.Background(), input, nil); err != nil {
 				t.Fatal(err)
 			}
 			count, submit := bodies["/tokenize"], bodies["/v1/chat/completions"]

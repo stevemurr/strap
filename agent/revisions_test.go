@@ -11,7 +11,7 @@ import (
 
 type revisionProvider struct{}
 
-func (revisionProvider) Submit(context.Context, provider.Request) (provider.Response, error) {
+func (revisionProvider) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	return provider.Response{}, nil
 }
 

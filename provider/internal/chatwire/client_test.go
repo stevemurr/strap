@@ -67,7 +67,7 @@ func TestRequestTranslationAndTransport(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Model != "model" || body.Stream || len(body.Messages) != 7 || len(body.Tools) != 1 {
+		if body.Model != "model" || !body.Stream || len(body.Messages) != 7 || len(body.Tools) != 1 {
 			t.Errorf("wire: %+v", body)
 		}
 		if body.Messages[3].Role != "tool" || body.Messages[4].ToolCallID != "c2" || body.Messages[5].Role != "user" || !strings.Contains(string(body.Messages[5].Content), "data:image/png;base64,AQID") || !strings.Contains(string(body.Messages[5].Content), "tool call c1") {
@@ -78,7 +78,7 @@ func TestRequestTranslationAndTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Submit(context.Background(), request)
+	response, err := c.Submit(context.Background(), request, nil)
 	if err != nil || response.Content != "done" {
 		t.Fatalf("%+v %v", response, err)
 	}
@@ -106,7 +106,7 @@ func TestCompletionValidationAndUsage(t *testing.T) {
 		{"invalid arguments", `[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"read","arguments":"{"}}]}}]`, `null`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			response, err := client(t, `{"choices":`+tc.choices+`,"usage":`+tc.usage+`}`).Submit(context.Background(), struct{}{})
+			response, err := client(t, `{"choices":`+tc.choices+`,"usage":`+tc.usage+`}`).Submit(context.Background(), struct{}{}, nil)
 			if (err != nil) != tc.invalid {
 				t.Fatalf("response=%+v err=%v", response, err)
 			}
@@ -129,7 +129,7 @@ func TestCompletionValidationAndUsage(t *testing.T) {
 }
 func TestTransportFailures(t *testing.T) {
 	c := client(t, `invalid`)
-	if _, err := c.Submit(context.Background(), struct{}{}); err == nil || !strings.Contains(err.Error(), "decode response") {
+	if _, err := c.Submit(context.Background(), struct{}{}, nil); err == nil || !strings.Contains(err.Error(), "decode response") {
 		t.Fatal(err)
 	}
 	if err := c.Post(context.Background(), "https://model.test", make(chan int), nil); err == nil || !strings.Contains(err.Error(), "encode request") {
@@ -141,13 +141,13 @@ func TestTransportFailures(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	failing, _ := chatwire.New("https://model.test", &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) { return nil, r.Context().Err() })})
-	if _, err := failing.Submit(ctx, nil); !errors.Is(err, context.Canceled) {
+	if _, err := failing.Submit(ctx, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	rejecting, _ := chatwire.New("https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 429, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 5000)))}, nil
 	})})
-	_, err := rejecting.Submit(context.Background(), nil)
+	_, err := rejecting.Submit(context.Background(), nil, nil)
 	var status *chatwire.HTTPError
 	if !errors.As(err, &status) || status.StatusCode != 429 || len(status.Body) != 4096 || !strings.HasPrefix(err.Error(), "HTTP 429:") {
 		t.Fatal(err)

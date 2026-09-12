@@ -25,7 +25,7 @@ type call struct {
 }
 type controlledProvider struct{ calls chan call }
 
-func (m *controlledProvider) Submit(ctx context.Context, request provider.Request) (provider.Response, error) {
+func (m *controlledProvider) Submit(ctx context.Context, request provider.Request, observer provider.Observer) (provider.Response, error) {
 	c := call{request: request, answer: make(chan answer, 1)}
 	select {
 	case m.calls <- c:

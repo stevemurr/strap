@@ -35,7 +35,7 @@ type cycleProvider struct {
 	done     chan work.Work
 }
 
-func (p *cycleProvider) Submit(ctx context.Context, r provider.Request) (provider.Response, error) {
+func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++

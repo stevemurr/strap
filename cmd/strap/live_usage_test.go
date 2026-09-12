@@ -133,7 +133,7 @@ func TestLiveTokenUsage(t *testing.T) {
 			p, wire := liveUsageProvider(t, baseURL, model, tc.options)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			r, err := p.Submit(ctx, provider.Request{Messages: []provider.Message{{Role: "user", Content: content.Text(tc.text)}}})
+			r, err := p.Submit(ctx, provider.Request{Messages: []provider.Message{{Role: "user", Content: content.Text(tc.text)}}}, nil)
 			if (err != nil) != tc.truncated {
 				t.Fatalf("unexpected Submit error: %v", err)
 			}

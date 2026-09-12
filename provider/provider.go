@@ -14,7 +14,7 @@ import (
 type Provider interface {
 	// Submit may return Usage alongside an error. Callers may record that usage,
 	// but must not consume Content or ToolCalls when err is non-nil.
-	Submit(context.Context, Request) (Response, error)
+	Submit(context.Context, Request, Observer) (Response, error)
 }
 
 type Request struct {
@@ -71,3 +71,10 @@ func CopyCalls(in []ToolCall) []ToolCall {
 	}
 	return out
 }
+
+// Delta is an append-only, valid UTF-8 text prefix. Callbacks are serial.
+type Delta struct{ Text string }
+type Observer interface{ OnDelta(Delta) error }
+type ObserverFunc func(Delta) error
+
+func (f ObserverFunc) OnDelta(d Delta) error { return f(d) }

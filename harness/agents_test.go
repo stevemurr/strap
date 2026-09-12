@@ -15,7 +15,7 @@ import (
 
 type unusedProvider struct{}
 
-func (unusedProvider) Submit(ctx context.Context, _ provider.Request) (provider.Response, error) {
+func (unusedProvider) Submit(ctx context.Context, _ provider.Request, observer provider.Observer) (provider.Response, error) {
 	<-ctx.Done()
 	return provider.Response{}, ctx.Err()
 }

@@ -73,7 +73,7 @@ func TestImagesFollowCompleteToolBatch(t *testing.T) {
 		{Role: "tool", ToolCallID: "a", Content: imageContent},
 		{Role: "tool", ToolCallID: "b", Content: imageContent},
 		{Role: "user", Content: content.Text("follow up")},
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRejectUnsupportedImageContentBeforeHTTP(t *testing.T) {
 		{Role: "user", Content: content.Content{{Image: &content.Image{MIMEType: "application/pdf", Data: []byte{1}}}}},
 		{Role: "user", Content: content.Content{{Image: &content.Image{MIMEType: "image/png"}}}},
 	} {
-		if _, err := p.Submit(context.Background(), provider.Request{Messages: []provider.Message{msg}}); err == nil || !strings.Contains(err.Error(), "encode content") {
+		if _, err := p.Submit(context.Background(), provider.Request{Messages: []provider.Message{msg}}, nil); err == nil || !strings.Contains(err.Error(), "encode content") {
 			t.Fatalf("expected content rejection before HTTP, got %v", err)
 		}
 	}

@@ -19,7 +19,7 @@ import (
 
 type idle struct{}
 
-func (idle) Submit(context.Context, provider.Request) (provider.Response, error) {
+func (idle) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	return provider.Response{Content: "ready"}, nil
 }
 func config() harness.Config {

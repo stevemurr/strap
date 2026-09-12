@@ -79,7 +79,7 @@ func TestUsageConcurrentInspection(t *testing.T) {
 
 type usageProvider func(context.Context, provider.Request) (provider.Response, error)
 
-func (f usageProvider) Submit(ctx context.Context, r provider.Request) (provider.Response, error) {
+func (f usageProvider) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	return f(ctx, r)
 }
 
