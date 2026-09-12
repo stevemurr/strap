@@ -1,9 +1,10 @@
 # Public harness session: audited foundation
 
-Status: implementation started from repository baseline `88373f7`. Stages 1 and 2
-are implemented: shared workflow operations, public session assembly, owned
-resources, and private provider transport. Remaining stages are pending. Contracts below describe the intended end state
-unless marked implemented.
+Status: all seven foundation stages are implemented and committed in sequence
+from repository baseline `88373f7`: shared commands, session assembly, coordinated
+shutdown, event storage, persistent diagnostics, headless telemetry, and HTTP.
+The planning audit below records the original findings; implementation results
+and remaining limits are described in the stage checklist and final audit.
 
 Planning audit: 2026-09-12. Incorporates agent-bound tools, independent lifecycle
 revisions, a replaceable event store, explicit resources, a private provider
@@ -522,7 +523,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    root-only restrictions, stale revisions, cancellation, and provisioning rollback.
    Root-only plan editing is enforced at the operation boundary as well as by tool
    selection. Empty replacement assignees serialize as omitted, matching automatic
-   provisioning. Session-wide admission/close coordination remains stage 3.
+   provisioning. Stage 3 adds session-wide admission/close coordination.
 2. **Public session assembly — implemented.** Move role prompts, provider resolution, local-tool
    assembly, management/inspection adapters, and cleanup into `harness`. Change
    the CLI to use it. Check exact effective role configurations, partial startup
@@ -532,7 +533,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    cancellation/body cleanup, rejection after close, repeated close, and that
    closing one session leaves another session and borrowed transports usable.
    `Session.NextEvent` is a transitional single-reader adapter for the existing TUI;
-   independent subscriptions replace it in stage 4. The controller/store remain
+   stage 4 adds independent subscriptions. The controller/store remain
    private, and external-package tests exercise construction and audited work.
 3. **Lifecycle finalization — implemented.** Add the admission gate, separate cancellation and
    draining, and stable closing outcome. Check send/assignment racing close,
@@ -637,3 +638,18 @@ are selected by host profiles. Mutation requests are not retried; unsupported
 idempotency keys are rejected. Contract tests run the full audit/repair cycle
 through direct Go and HTTP calls and verify real stream reconnection. See
 [the HTTP API](harness/httpapi/README.md).
+
+## Final integration audit
+
+Terminal outcomes now persist the initiating reason, execution error summary,
+cleanup attempts/errors, and capture status outside retained event storage.
+Failed cleanup emits a diagnostic and keeps `Closing`; a successful retry seals
+with the final cleanup outcome. `Dispose` advances to `Disposed` while keeping
+terminal inspection available. Resolved configuration is also recorded as a
+`session_configured` event. Oversized tool records keep runtime invocation
+correlation in their omission record. If the terminal outcome itself cannot fit,
+sealing reports capture failure rather than replacing the terminal record with
+an apparently successful seal.
+
+Canonical event serialization lives in `harness/eventcodec`, keeping storage/wire
+encoding out of agent execution and conversation routing.

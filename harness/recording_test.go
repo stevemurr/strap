@@ -13,6 +13,7 @@ import (
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/provider"
 )
 
@@ -77,7 +78,7 @@ func TestDurableToolDiagnosticsCorrelateRepeatedProviderIDs(t *testing.T) {
 		if e.Kind != "tool" {
 			continue
 		}
-		v, err := conversation.DecodeEvent(e)
+		v, err := eventcodec.DecodeEvent(e)
 		if err != nil {
 			t.Fatal(err)
 		}

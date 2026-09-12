@@ -7,6 +7,7 @@ import (
 
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
+	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/inbox"
 	"github.com/stevemurr/strap/message"
 )
@@ -34,7 +35,7 @@ func (s *observedSession) NextEvent(ctx context.Context) (conversation.Event, er
 		if err != nil {
 			return nil, err
 		}
-		v, err := conversation.DecodeEvent(e)
+		v, err := eventcodec.DecodeEvent(e)
 		if err != nil || v != nil {
 			return v, err
 		}

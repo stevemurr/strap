@@ -81,6 +81,9 @@ type Dependencies struct {
 }
 
 type Session struct {
+	executionError  error
+	outcome         *eventlog.Outcome
+	startupError    string
 	effective       EffectiveConfig
 	telemetry       *telemetry
 	id              string
@@ -121,6 +124,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		if err == nil {
 			return
 		}
+		s.mu.Lock()
+		s.startupError = err.Error()
+		s.mu.Unlock()
 		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if cleanupErr := s.Dispose(cleanup); cleanupErr != nil {
@@ -253,7 +259,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	implSpec, auditSpec := s.workflow.Specs()
 	s.effective = EffectiveConfig{Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil)}
 	s.mu.Lock()
-	s.stopOwner = context.AfterFunc(ctx, func() { s.startClose() })
+	configured, _ := json.Marshal(s.Configuration())
+	_ = s.log.Publish(eventlog.Data{Kind: "session_configured", Payload: configured})
+	s.stopOwner = context.AfterFunc(ctx, func() { s.startCloseReason("owner_cancelled") })
 	s.mu.Unlock()
 	return s, nil
 }

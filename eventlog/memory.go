@@ -106,7 +106,11 @@ func (m *Memory) Seal(ctx context.Context, o Outcome) error {
 		}
 		return nil
 	}
-	m.append(terminal(o))
+	d := terminal(o)
+	if d.Size() > m.limits.Bytes {
+		return errors.New("shutdown outcome exceeds retained event byte limit")
+	}
+	m.append(d)
 	m.outcome = &o
 	return nil
 }

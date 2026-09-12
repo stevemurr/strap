@@ -21,16 +21,19 @@ var (
 const SchemaVersion = 1
 
 type Data struct {
-	Kind    string          `json:"kind"`
-	Agent   string          `json:"agent,omitempty"`
-	Time    time.Time       `json:"time"`
-	Payload json.RawMessage `json:"payload"`
+	Correlation string          `json:"correlation,omitempty"`
+	Kind        string          `json:"kind"`
+	Agent       string          `json:"agent,omitempty"`
+	Time        time.Time       `json:"time"`
+	Payload     json.RawMessage `json:"payload"`
 }
 
 func (d Data) Clone() Data { d.Payload = append(json.RawMessage(nil), d.Payload...); return d }
-func (d Data) Size() int   { return len(d.Kind) + len(d.Agent) + len(d.Payload) + 128 }
+func (d Data) Size() int {
+	return len(d.Kind) + len(d.Agent) + len(d.Correlation) + len(d.Payload) + 128
+}
 func (d Data) Validate() error {
-	if d.Kind == "" || len(d.Kind) > 128 || len(d.Agent) > 256 || !json.Valid(d.Payload) {
+	if d.Kind == "" || len(d.Kind) > 128 || len(d.Agent) > 256 || len(d.Correlation) > 256 || !json.Valid(d.Payload) {
 		return errors.New("invalid event data")
 	}
 	return nil
@@ -58,9 +61,12 @@ func (q Query) Validate() error {
 }
 
 type Outcome struct {
-	Error        string `json:"error,omitempty"`
-	CaptureError string `json:"capture_error,omitempty"`
-	Omitted      uint64 `json:"omitted"`
+	Reason          string `json:"reason,omitempty"`
+	CleanupError    string `json:"cleanup_error,omitempty"`
+	CleanupAttempts uint64 `json:"cleanup_attempts"`
+	Error           string `json:"error,omitempty"`
+	CaptureError    string `json:"capture_error,omitempty"`
+	Omitted         uint64 `json:"omitted"`
 }
 
 type Page struct {
@@ -100,7 +106,7 @@ func Fit(d Data, max int) (Data, bool) {
 		Kind  string `json:"original_kind"`
 		Bytes int    `json:"original_bytes"`
 	}{d.Kind, d.Size()})
-	return Data{Kind: "omitted", Agent: d.Agent, Time: d.Time, Payload: payload}, true
+	return Data{Kind: "omitted", Correlation: d.Correlation, Agent: d.Agent, Time: d.Time, Payload: payload}, true
 }
 func terminal(o Outcome) Data {
 	p, _ := json.Marshal(o)

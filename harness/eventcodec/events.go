@@ -1,10 +1,12 @@
-package conversation
+// Package eventcodec snapshots runtime notifications into versioned session records.
+package eventcodec
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/message"
 )
@@ -16,29 +18,29 @@ type exitedRecord struct {
 
 // EncodeEvent snapshots host events into the versioned storage envelope. Errors
 // are stored as text; they cannot be reconstructed as original Go error values.
-func EncodeEvent(e Event) (eventlog.Data, error) {
-	var kind string
+func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
+	var kind, correlation string
 	var actor message.ActorID
 	var payload any = e
 	switch v := e.(type) {
-	case ContextTokensEvent:
+	case conversation.ContextTokensEvent:
 		kind = "context_tokens"
 		actor = v.Agent
-	case DiagnosticEvent:
+	case conversation.DiagnosticEvent:
 		kind = "diagnostic"
-	case MessageEvent:
+	case conversation.MessageEvent:
 		kind = "message"
 		actor = v.Message.From
-	case CommentaryEvent:
+	case conversation.CommentaryEvent:
 		kind = "commentary"
 		actor = v.Agent
-	case AckEvent:
+	case conversation.AckEvent:
 		kind = "ack"
 		actor = v.Receipt.Recipient
-	case AgentStarted:
+	case conversation.AgentStarted:
 		kind = "agent_started"
 		actor = v.Agent.ID
-	case AgentExited:
+	case conversation.AgentExited:
 		kind = "agent_exited"
 		actor = v.Agent
 		x := exitedRecord{Agent: v.Agent}
@@ -46,27 +48,29 @@ func EncodeEvent(e Event) (eventlog.Data, error) {
 			x.Error = v.Err.Error()
 		}
 		payload = x
-	case AgentStateChanged:
+	case conversation.AgentStateChanged:
 		kind = "agent_state"
 		actor = v.Agent
-	case ToolEvent:
+	case conversation.ToolEvent:
+		payload = toolRecord{Agent: v.Agent, Activity: encodeTool(v.Activity)}
+		correlation = v.Activity.InvocationID
 		kind = "tool"
 		actor = v.Agent
-	case WorkEvent:
+	case conversation.WorkEvent:
 		kind = "work"
-	case ToolBatchEvent:
+	case conversation.ToolBatchEvent:
 		kind = "tool_batch"
 		actor = v.Agent
-	case UsageEvent:
+	case conversation.UsageEvent:
 		kind = "usage"
 		actor = v.Agent
 	default:
 		return eventlog.Data{}, fmt.Errorf("unsupported event %T", e)
 	}
 	raw, err := json.Marshal(payload)
-	return eventlog.Data{Kind: kind, Agent: string(actor), Payload: raw}, err
+	return eventlog.Data{Kind: kind, Correlation: correlation, Agent: string(actor), Payload: raw}, err
 }
-func decode[T Event](data []byte) (Event, error) {
+func decode[T conversation.Event](data []byte) (conversation.Event, error) {
 	var v T
 	err := json.Unmarshal(data, &v)
 	return v, err
@@ -74,41 +78,41 @@ func decode[T Event](data []byte) (Event, error) {
 
 // DecodeEvent returns nil for log control records, which callers may inspect
 // directly. Domain event payloads are independent from the stored bytes.
-func DecodeEvent(e eventlog.Event) (Event, error) {
+func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 	switch e.Kind {
 	case "context_tokens":
-		return decode[ContextTokensEvent](e.Payload)
+		return decode[conversation.ContextTokensEvent](e.Payload)
 	case "diagnostic":
-		return decode[DiagnosticEvent](e.Payload)
+		return decode[conversation.DiagnosticEvent](e.Payload)
 	case "message":
-		return decode[MessageEvent](e.Payload)
+		return decode[conversation.MessageEvent](e.Payload)
 	case "commentary":
-		return decode[CommentaryEvent](e.Payload)
+		return decode[conversation.CommentaryEvent](e.Payload)
 	case "ack":
-		return decode[AckEvent](e.Payload)
+		return decode[conversation.AckEvent](e.Payload)
 	case "agent_started":
-		return decode[AgentStarted](e.Payload)
+		return decode[conversation.AgentStarted](e.Payload)
 	case "agent_exited":
 		var x exitedRecord
 		if err := json.Unmarshal(e.Payload, &x); err != nil {
 			return nil, err
 		}
-		v := AgentExited{Agent: x.Agent}
+		v := conversation.AgentExited{Agent: x.Agent}
 		if x.Error != "" {
 			v.Err = errors.New(x.Error)
 		}
 		return v, nil
 	case "agent_state":
-		return decode[AgentStateChanged](e.Payload)
+		return decode[conversation.AgentStateChanged](e.Payload)
 	case "tool":
-		return decode[ToolEvent](e.Payload)
+		return decodeTool(e.Payload)
 	case "work":
-		return decode[WorkEvent](e.Payload)
+		return decode[conversation.WorkEvent](e.Payload)
 	case "tool_batch":
-		return decode[ToolBatchEvent](e.Payload)
+		return decode[conversation.ToolBatchEvent](e.Payload)
 	case "usage":
-		return decode[UsageEvent](e.Payload)
-	case "session_closed", "session_started":
+		return decode[conversation.UsageEvent](e.Payload)
+	case "session_closed", "session_started", "session_configured":
 		return nil, nil
 	case "omitted":
 		return nil, fmt.Errorf("event %d payload omitted: %s", e.Sequence, e.Payload)

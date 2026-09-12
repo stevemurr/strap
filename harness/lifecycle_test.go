@@ -185,3 +185,72 @@ func TestShutdownCancelsAndJoinsHostTokenCount(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type failingProvider struct{}
+
+func (failingProvider) Submit(context.Context, provider.Request) (provider.Response, error) {
+	return provider.Response{}, errors.New("model execution failed")
+}
+func TestTerminalOutcomeSurvivesStorageDisposal(t *testing.T) {
+	s := newLifecycleSession(t, context.Background(), failingProvider{})
+	if _, err := s.Send(s.Root(), "run"); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		e, err := s.NextEvent(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := e.(conversation.AgentExited); ok {
+			break
+		}
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	before := s.Inspect()
+	if before.Outcome == nil || before.Outcome.Error != "model execution failed" || before.Outcome.Reason != "requested" || before.Outcome.CleanupAttempts != 1 {
+		t.Fatal(before)
+	}
+	if err := s.Dispose(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	after := s.Inspect()
+	if after.State != harness.Disposed || after.Outcome.Error != before.Outcome.Error || !after.Capture.Disposed {
+		t.Fatal(after)
+	}
+}
+func TestCleanupFailureIsInspectableBeforeRetryAndRecorded(t *testing.T) {
+	owned := &closer{}
+	owned.fail.Store(true)
+	s := newLifecycleSession(t, context.Background(), idle{}, harness.OwnedResource{Name: "test", Resource: owned})
+	if err := s.Close(context.Background()); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	if info := s.Inspect(); info.Outcome == nil || info.Outcome.CleanupError == "" {
+		t.Fatal(info)
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	info := s.Inspect()
+	if info.Outcome.CleanupAttempts != 2 || info.Outcome.CleanupError != "" {
+		t.Fatal(info)
+	}
+	found := false
+	for {
+		e, err := s.NextEvent(context.Background())
+		if errors.Is(err, inbox.ErrClosed) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d, ok := e.(conversation.DiagnosticEvent); ok && d.Message == "Session cleanup failed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("cleanup diagnostic lost")
+	}
+}

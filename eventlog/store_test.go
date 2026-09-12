@@ -381,3 +381,19 @@ func TestCaptureFailureUsesIndependentSinkOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOversizeOmissionPreservesInvocationAndTerminalFailureIsExplicit(t *testing.T) {
+	m := memory(t, 10, 4096)
+	raw, _ := json.Marshal(strings.Repeat("x", 5000))
+	e, err := m.Append(ctx, eventlog.Data{Kind: "tool", Agent: "agent-1", Correlation: "agent-1/tool-2", Payload: raw})
+	if err != nil || e.Kind != "omitted" || e.Correlation != "agent-1/tool-2" {
+		t.Fatal(e, err)
+	}
+	if err = m.Seal(ctx, eventlog.Outcome{Error: strings.Repeat("x", 5000)}); err == nil {
+		t.Fatal("oversized terminal outcome silently omitted")
+	}
+	p, err := m.Read(ctx, eventlog.Query{Limit: 10})
+	if err != nil || p.Sealed {
+		t.Fatal(p, err)
+	}
+}

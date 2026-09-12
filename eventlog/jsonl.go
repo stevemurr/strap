@@ -231,7 +231,11 @@ func (s *JSONL) Seal(ctx context.Context, o Outcome) error {
 		}
 		return nil
 	}
-	if _, err := s.append(terminal(o)); err != nil {
+	d := terminal(o)
+	if d.Size() > maxJSONLRecord/2 {
+		return errors.New("shutdown outcome exceeds JSONL record limit")
+	}
+	if _, err := s.append(d); err != nil {
 		return err
 	}
 	if err := s.syncFile(); err != nil {

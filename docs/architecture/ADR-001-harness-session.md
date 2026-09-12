@@ -43,7 +43,7 @@ external ownership. Diagnostics share the session's canonical event publication.
 Use one session per eval trial initially. Trial selection, grading, and aggregate
 scores remain in the eval runner. After the memory store, implement opt-in JSONL
 recording for persistent tool diagnostics using the same storage contract. Coverage,
-capture health, and retention are distinct. HTTP routing, SQLite, complete eval
+capture health, and retention are distinct. SQLite, complete eval
 archives, execution recovery, and a separate run abstraction are subsequent work.
 
 ## Consequences
@@ -59,4 +59,5 @@ archives, execution recovery, and a separate run abstraction are subsequent work
 - Internal workflow callbacks and CLI assembly must be refactored before HTTP can
   provide the full harness. Merely wrapping `conversation.Controller` is insufficient.
 
-Implementation is pending. See [the audited design](../../HARNESS_DESIGN.md).
+The seven foundation stages, including JSONL diagnostics and HTTP, are implemented.
+See [the audited design](../../HARNESS_DESIGN.md) for checks and remaining scope.

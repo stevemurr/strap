@@ -295,7 +295,9 @@ resuming execution. Successful session closure syncs a JSONL trace.
 Call `Dispose(ctx)` when finished reading to release event storage. `Capture()`
 reports omissions and capture failures separately from execution state. Memory
 retention is bounded; an expired cursor is an explicit error. Lifecycle state
-revisions are separate from model history revisions.
+revisions are separate from model history revisions. Final inspection preserves
+the shutdown reason, execution errors, and cleanup outcome after state advances
+to `disposed`. Resolved configuration is included in recorded session events.
 
 The public `work` package can be used independently of agents and transport:
 
@@ -687,13 +689,13 @@ sandbox against concurrent filesystem changes, and shell access remains unrestri
 
 The public session API and adapter-independent architecture are tracked in
 [the audited harness design](HARNESS_DESIGN.md). Shared typed workflow operations
-back both the model tools and the public `harness.Session` API. Session assembly
-and resource ownership are implemented; event storage and lifecycle changes are
-being introduced in separate stages.
+back both the model tools and the public `harness.Session` API. Session assembly, coordinated shutdown, bounded event storage, JSONL diagnostics,
+independent observation, automatic telemetry, and the HTTP adapter are implemented.
 
-This is an executable design scaffold. Messages, receipts, and history are in
-memory; persistence, deduplication, streaming, context compaction, and admission
-policies are deferred. There is no behavior framework, permission stack, workspace
+Agent messages, receipts, work state, and model history remain in memory. Event
+persistence does not restore running execution. Mutation deduplication, model
+response streaming, context compaction, and runtime memory/backpressure budgets
+are deferred. There is no behavior framework, permission stack, workspace
 model, or configurable workflow engine. Work revisions validate ledger mutations;
 they do not gate general model responses or local-tool execution.
 

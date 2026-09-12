@@ -231,12 +231,13 @@ automatically count requests or alter its usage totals; compaction and context
 budget decisions remain caller policy.
 
 After appending every result in a tool batch, `OnToolBatch` publishes its call IDs
-and history revision through `conversation.ToolBatchEvent`. The TUI invokes
-`CountAgentTokens` asynchronously for that boundary, using a ten-second timeout.
+and history revision through `conversation.ToolBatchEvent`. The harness schedules
+`CountAgentTokens` for that boundary under its telemetry policy, using a bounded
+worker pool and a ten-second default timeout. The TUI observes measurement events.
 The controller selects the owning agent; its append-only thread supplies an
 independent snapshot through the recorded revision, together with its original
 tool definitions. Provider I/O holds neither controller nor history locks, and
-headless consumers do not trigger counting automatically. Counts never enter
+headless execution follows the same automatic policy as attached execution. Counts never enter
 model history or usage accounting. Tool rows display the latest completed batch
 per agent, preserving earlier row counts, scroll position, and frozen copies;
 unavailable measurements stay visibly unavailable.

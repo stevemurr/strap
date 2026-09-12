@@ -2,8 +2,10 @@ package harness
 
 import (
 	"context"
-	"github.com/stevemurr/strap/eventlog"
 	"time"
+
+	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/eventlog"
 
 	"github.com/stevemurr/strap/internal/admission"
 )
@@ -11,9 +13,10 @@ import (
 type State string
 
 const (
-	Open    State = "open"
-	Closing State = "closing"
-	Closed  State = "closed"
+	Open     State = "open"
+	Closing  State = "closing"
+	Closed   State = "closed"
+	Disposed State = "disposed"
 )
 
 var ErrClosed = admission.ErrClosed
@@ -36,7 +39,8 @@ func (s *Session) Close(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
-func (s *Session) startClose() *closeAttempt {
+func (s *Session) startClose() *closeAttempt { return s.startCloseReason("requested") }
+func (s *Session) startCloseReason(reason string) *closeAttempt {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.attempt != nil {
@@ -44,6 +48,10 @@ func (s *Session) startClose() *closeAttempt {
 	}
 	if s.state == Open {
 		s.state = Closing
+		if s.startupError != "" {
+			reason = "startup_failed"
+		}
+		s.outcome = &eventlog.Outcome{Reason: reason}
 		s.admission.Seal()
 		if s.workflow != nil {
 			s.workflow.BeginClosing()
@@ -69,16 +77,42 @@ func (s *Session) finalize(a *closeAttempt) {
 		s.telemetry.wg.Wait()
 	}
 	if err == nil {
+		s.mu.Lock()
+		s.outcome.CleanupAttempts++
+		s.mu.Unlock()
 		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		err = s.resources.Close(cleanup)
 		cancel()
 	}
 	cleanupOK := err == nil
-	if cleanupOK && s.log != nil {
-		err = s.log.Finish(context.Background(), eventlog.Outcome{})
+	s.mu.Lock()
+	s.outcome.CleanupError = ""
+	if err != nil {
+		s.outcome.CleanupError = err.Error()
 	}
+	if s.executionError != nil {
+		s.outcome.Error = s.executionError.Error()
+	}
+	if s.startupError != "" {
+		s.outcome.Error = s.startupError
+	}
+	outcome := *s.outcome
+	s.mu.Unlock()
+	if !cleanupOK && s.log != nil {
+		s.publish(conversation.DiagnosticEvent{Level: "error", Message: "Session cleanup failed", Fields: map[string]string{"error": err.Error()}})
+	}
+	if cleanupOK && s.log != nil {
+		err = s.log.Finish(context.Background(), outcome)
+	}
+	if s.log != nil {
+		capture := s.log.Status()
+		outcome.CaptureError = capture.CaptureError
+		outcome.Omitted = capture.Omitted
+	}
+
 	s.mu.Lock()
 	a.err = err
+	s.outcome = &outcome
 	if cleanupOK {
 		s.state = Closed
 		if s.stopOwner != nil {

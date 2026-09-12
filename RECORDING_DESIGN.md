@@ -1,7 +1,7 @@
 # Tool execution recording
 
-Proposed design and code sketch; no runtime changes are implemented by this
-document. Snippets show the intended boundaries, with supporting implementation
+Historical design sketch. Session-owned recording is now implemented in
+`eventlog`, `harness/eventcodec`, and `harness`; this document retains the original proposal. Snippets show the intended boundaries, with supporting implementation
 explicitly described below. They are not a complete patch.
 
 The [public harness design](HARNESS_DESIGN.md#session-diagnostics) now supersedes

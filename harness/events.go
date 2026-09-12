@@ -7,12 +7,18 @@ import (
 
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
+	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/inbox"
 )
 
 func (s *Session) ID() string { return s.id }
 func (s *Session) publish(e conversation.Event) {
-	d, err := conversation.EncodeEvent(e)
+	if exit, ok := e.(conversation.AgentExited); ok && exit.Err != nil && !errors.Is(exit.Err, context.Canceled) {
+		s.mu.Lock()
+		s.executionError = errors.Join(s.executionError, exit.Err)
+		s.mu.Unlock()
+	}
+	d, err := eventcodec.EncodeEvent(e)
 	if err != nil {
 		s.log.Fail(err)
 		return
@@ -41,7 +47,7 @@ func (s *Session) NextEvent(ctx context.Context) (conversation.Event, error) {
 		if err != nil {
 			return nil, err
 		}
-		v, err := conversation.DecodeEvent(e)
+		v, err := eventcodec.DecodeEvent(e)
 		if err != nil || v != nil {
 			return v, err
 		}
@@ -52,13 +58,19 @@ func (s *Session) NextEvent(ctx context.Context) (conversation.Event, error) {
 // preserved, but further history reads fail. Capture errors do not prevent cleanup.
 func (s *Session) Dispose(ctx context.Context) error {
 	closeErr := s.Close(ctx)
-	if s.State() != Closed {
+	if state := s.State(); state != Closed && state != Disposed {
 		return closeErr
 	}
-	if s.log == nil {
-		return closeErr
+	var disposeErr error
+	if s.log != nil {
+		disposeErr = s.log.Dispose(ctx)
 	}
-	return errors.Join(closeErr, s.log.Dispose(ctx))
+	if disposeErr == nil {
+		s.mu.Lock()
+		s.state = Disposed
+		s.mu.Unlock()
+	}
+	return errors.Join(closeErr, disposeErr)
 }
 
 // Log appends structured host diagnostics to the canonical event sequence.
@@ -75,7 +87,7 @@ func (s *Session) Log(ctx context.Context, entry conversation.DiagnosticEvent) e
 	default:
 		return errors.New("invalid diagnostic level")
 	}
-	d, err := conversation.EncodeEvent(entry)
+	d, err := eventcodec.EncodeEvent(entry)
 	if err != nil {
 		return err
 	}

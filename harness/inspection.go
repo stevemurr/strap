@@ -77,14 +77,22 @@ type Coverage struct {
 	ExternalArtifacts bool `json:"external_artifacts"`
 }
 type Inspection struct {
-	ID       string          `json:"id"`
-	State    State           `json:"state"`
-	Capture  eventlog.Status `json:"capture"`
-	Coverage Coverage        `json:"coverage"`
-	Config   EffectiveConfig `json:"config"`
+	Outcome  *eventlog.Outcome `json:"outcome,omitempty"`
+	ID       string            `json:"id"`
+	State    State             `json:"state"`
+	Capture  eventlog.Status   `json:"capture"`
+	Coverage Coverage          `json:"coverage"`
+	Config   EffectiveConfig   `json:"config"`
 }
 
 // Inspect is a collection of independent snapshots, not a global execution checkpoint.
 func (s *Session) Inspect() Inspection {
-	return Inspection{ID: s.ID(), State: s.State(), Capture: s.Capture(), Coverage: Coverage{DomainEvents: true, ToolDiagnostics: true}, Config: s.Configuration()}
+	s.mu.Lock()
+	var outcome *eventlog.Outcome
+	if s.outcome != nil {
+		v := *s.outcome
+		outcome = &v
+	}
+	s.mu.Unlock()
+	return Inspection{Outcome: outcome, ID: s.ID(), State: s.State(), Capture: s.Capture(), Coverage: Coverage{DomainEvents: true, ToolDiagnostics: true}, Config: s.Configuration()}
 }
