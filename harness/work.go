@@ -1,0 +1,47 @@
+package harness
+
+import (
+	"context"
+
+	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/work"
+)
+
+// These are trusted host operations. Actor IDs select existing work authority;
+// a remote adapter must authorize access to the session before calling them.
+func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work.PlanUpdate) (work.Plan, error) {
+	return s.workflow.UpdatePlan(ctx, actor, u)
+}
+func (s *Session) UpdateProgress(ctx context.Context, actor identity.ActorID, u work.ProgressUpdate) (work.Work, error) {
+	return s.workflow.UpdateProgress(ctx, actor, u)
+}
+func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
+	return s.workflow.CancelWork(ctx, actor, r)
+}
+func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.Submission, error) {
+	return s.workflow.SubmitWork(ctx, actor, r)
+}
+func (s *Session) SubmitAudit(ctx context.Context, actor identity.ActorID, r work.AuditRequest) (work.Audit, error) {
+	return s.workflow.SubmitAudit(ctx, actor, r)
+}
+func (s *Session) GetPlan(ctx context.Context, actor identity.ActorID, id work.PlanID) (work.Plan, error) {
+	return s.workflow.GetPlan(ctx, actor, id)
+}
+func (s *Session) GetWork(ctx context.Context, actor identity.ActorID, id work.ID) (work.Work, error) {
+	return s.workflow.GetWork(ctx, actor, id)
+}
+func (s *Session) GetSubmission(ctx context.Context, actor identity.ActorID, id work.SubmissionID) (work.Submission, error) {
+	return s.workflow.GetSubmission(ctx, actor, id)
+}
+func (s *Session) GetAudit(ctx context.Context, actor identity.ActorID, id work.AuditID) (work.Audit, error) {
+	return s.workflow.GetAudit(ctx, actor, id)
+}
+func (s *Session) InspectWork(ctx context.Context, actor identity.ActorID, id work.ID) (work.Inspection, error) {
+	return s.workflow.InspectWork(ctx, actor, id)
+}
+func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r work.ReassignRequest) (work.Work, error) {
+	return s.workflow.ReassignWork(ctx, actor, r)
+}
+func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, a work.AssignmentRequest) (work.Work, error) {
+	return s.workflow.AssignWork(ctx, actor, a)
+}

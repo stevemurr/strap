@@ -1,4 +1,4 @@
-package main
+package harness
 
 import (
 	"context"
@@ -93,5 +93,25 @@ func TestApplicationManagementTools(t *testing.T) {
 	var agents []conversation.AgentInfo
 	if err := json.Unmarshal([]byte(result.Content.Text()), &agents); err != nil || len(agents) != 2 {
 		t.Fatalf("list: %+v %v", agents, err)
+	}
+}
+
+func TestUnknownAgentErrors(t *testing.T) {
+	c := conversation.New(context.Background())
+	defer c.Close(context.Background())
+	for _, op := range managementTools(c) {
+		if op.Definition().Name == "list_agents" {
+			continue
+		}
+		if _, err := op.Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing"}`)}); err == nil {
+			t.Fatal("unknown agent accepted")
+		}
+	}
+}
+func TestInspectionPagingOptionsReachController(t *testing.T) {
+	c := conversation.New(context.Background())
+	defer c.Close(context.Background())
+	if _, err := inspectTool(c).Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing","limit":3,"before":2}`)}); err == nil {
+		t.Fatal("unknown agent accepted")
 	}
 }

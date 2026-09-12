@@ -1,8 +1,8 @@
 # Public harness session: audited foundation
 
-Status: implementation started from repository baseline `88373f7`. Stage 1's
-shared workflow operations are implemented; the public `harness` package and the
-remaining stages are pending. Contracts below describe the intended end state
+Status: implementation started from repository baseline `88373f7`. Stages 1 and 2
+are implemented: shared workflow operations, public session assembly, owned
+resources, and private provider transport. Remaining stages are pending. Contracts below describe the intended end state
 unless marked implemented.
 
 Planning audit: 2026-09-12. Incorporates agent-bound tools, independent lifecycle
@@ -523,7 +523,7 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    Root-only plan editing is enforced at the operation boundary as well as by tool
    selection. Empty replacement assignees serialize as omitted, matching automatic
    provisioning. Session-wide admission/close coordination remains stage 3.
-2. **Public session assembly.** Move role prompts, provider resolution, local-tool
+2. **Public session assembly — implemented.** Move role prompts, provider resolution, local-tool
    assembly, management/inspection adapters, and cleanup into `harness`. Change
    the CLI to use it. Check exact effective role configurations, partial startup
    cleanup, distinct session resources, and a headless scripted audit/repair cycle.
@@ -531,7 +531,9 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    Check connection reuse within a session, independent pools across sessions,
    cancellation/body cleanup, rejection after close, repeated close, and that
    closing one session leaves another session and borrowed transports usable.
-   Keep any transitional single-reader bridge private to the adapter integration.
+   `Session.NextEvent` is a transitional single-reader adapter for the existing TUI;
+   independent subscriptions replace it in stage 4. The controller/store remain
+   private, and external-package tests exercise construction and audited work.
 3. **Lifecycle finalization.** Add the admission gate, separate cancellation and
    draining, and stable closing outcome. Check send/assignment racing close,
    timeout followed by another close, parent cancellation, cleanup failure,
@@ -592,7 +594,7 @@ milestones and do not block the Go session, memory store, or JSONL diagnostics.
 
 ## Foundation scope
 
-The first implementation slice establishes shared typed workflow operations and
-their tool adapters. It does not yet introduce `harness.Session`, change lifecycle
-or event retention, or implement the transport, recording, or HTTP server. The
-next slice is public session assembly, resources, and dedicated provider transport.
+The first two slices establish shared typed workflow operations, their tool
+adapters, and public `harness.Session` assembly with owned resources and transport.
+Lifecycle finalization, bounded event retention, recording, and HTTP remain
+subsequent slices. The next slice is coordinated shutdown and command admission.

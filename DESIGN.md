@@ -84,8 +84,9 @@ interface or separate worker type.
 
 ## Terminal host
 
-`cmd/strap` configures the HTTP provider, creates one conversation, runs the UI,
-and cancels and joins agents on exit. `internal/tui` owns only terminal state: the
+`cmd/strap` translates flags into `harness.Config` and runs the UI against a public
+session. `harness` owns prompts, provider/tool assembly, the private HTTP transport,
+and execution cleanup. `internal/tui` owns only terminal state: the
 input draft, input history, displayed transcript, scroll position, and activity
 indicators derived from events.
 

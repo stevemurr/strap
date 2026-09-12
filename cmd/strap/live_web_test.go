@@ -11,6 +11,7 @@ import (
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider/vllm"
 	"github.com/stevemurr/strap/tool"
@@ -51,7 +52,7 @@ func TestLiveWebResearch(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: rootPrompt, Tools: w.Tools()})
+	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: harness.DefaultConfig().Root.Prompt, Tools: w.Tools()})
 	if err != nil {
 		t.Fatal(err)
 	}

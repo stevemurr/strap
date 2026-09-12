@@ -1,4 +1,4 @@
-package main
+package harness
 
 import "github.com/stevemurr/strap/prompt"
 

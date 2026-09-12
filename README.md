@@ -245,6 +245,27 @@ updates its context without initiating a model call by itself.
 
 ## Library setup
 
+`harness.New` assembles the same prompts, role tools, providers, and audited work
+used by the CLI. Each session owns its HTTP connection pool and local resources:
+
+```go
+cfg := harness.DefaultConfig()
+cfg.Dir = projectDir
+cfg.Model.BaseURL = "http://localhost:8000"
+session, err := harness.New(ctx, cfg, harness.Dependencies{})
+if err != nil {
+    return err
+}
+defer session.Close(context.Background())
+_, err = session.Send(session.Root(), "Inspect this project.")
+```
+
+Import `github.com/stevemurr/strap/harness`. `Dependencies` accepts borrowed
+providers/tools for tests and explicit owned resources. `StartupError` retains a
+retryable cleanup handle if construction rollback fails. The current `NextEvent`
+stream has one reader; independent subscriptions and complete event finalization
+are upcoming stages described in [the harness design](HARNESS_DESIGN.md).
+
 The public `work` package can be used independently of agents and transport:
 
 ```go
@@ -321,7 +342,7 @@ shortened entries are marked `truncated`, and images are labeled as metadata.
 The underlying transcript remains intact, including prior inspection results.
 
 `ListAgents` accepts `func(context.Context, tool.Call) (tool.Result, error)`.
-See [cmd/strap/agents.go](cmd/strap/agents.go) for application wiring. These tools
+See [harness/agents.go](harness/agents.go) for application wiring. These tools
 are selected only for the CLI root. Execution agents still have local and messaging
 tools. Host controls are available for every agent, including a paused root.
 
@@ -635,7 +656,9 @@ sandbox against concurrent filesystem changes, and shell access remains unrestri
 
 The public session API and adapter-independent architecture are tracked in
 [the audited harness design](HARNESS_DESIGN.md). Shared typed workflow operations
-now back the model tools; the `harness.Session` API is not implemented yet.
+back both the model tools and the public `harness.Session` API. Session assembly
+and resource ownership are implemented; event storage and lifecycle changes are
+being introduced in separate stages.
 
 This is an executable design scaffold. Messages, receipts, and history are in
 memory; persistence, deduplication, streaming, context compaction, and admission

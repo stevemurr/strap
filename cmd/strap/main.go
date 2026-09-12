@@ -7,18 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
-	"slices"
 	"syscall"
 	"time"
 
-	"github.com/stevemurr/strap/agent"
-	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/tui"
-	"github.com/stevemurr/strap/internal/workflow"
-	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/tool"
 )
 
@@ -46,72 +41,24 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	if *timeout <= 0 {
 		return fmt.Errorf("timeout must be positive")
 	}
-	p, err := modelOptions.newProvider(*baseURL, *model, &http.Client{Timeout: *timeout})
-	if err != nil {
-		return err
-	}
-	local, err := localTools(*dir)
-	if err != nil {
-		return err
-	}
+	cfg := harness.DefaultConfig()
+	cfg.Dir = *dir
+	cfg.Model = modelOptions.config(*baseURL, *model)
+	cfg.Model.Timeout = *timeout
+	cfg.Web = nil
 	if *webEnabled {
-		web, webErr := tool.NewWeb(tool.WebConfig{WKRenderPath: *wkPath, AgentBrowserPath: *abPath, BrowserExecutablePath: *browserPath})
-		if webErr != nil {
-			return webErr
-		}
-		local = append(local, web.Tools()...)
-		// Registered before the conversation cleanup so agents stop first.
-		defer func() {
-			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			err = errors.Join(err, web.Close(cleanup))
-		}()
+		cfg.Web = &tool.WebConfig{WKRenderPath: *wkPath, AgentBrowserPath: *abPath, BrowserExecutablePath: *browserPath}
 	}
-	c := conversation.New(ctx)
-	// Tool order is what the model sees: agent.New walks Spec.Tools in order.
-	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
-	// Auditors keep shell access with host permissions; only the writers go.
-	withoutFileWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool {
-		name := t.Definition().Name
-		return name == "write_file" || name == "edit_file"
-	})
-	executionSpec := agent.Spec{
-		Provider: p,
-		Prompt:   executionPrompt,
-		Tools:    slices.Concat(local, messaging),
-	}.Clone()
-	session := workflow.New(ctx, c, executionSpec, agent.Spec{Provider: p, Prompt: auditorPrompt, Tools: slices.Concat(messaging, withoutFileWrites)})
-	rootTools := slices.Concat(local, session.RootTools(), messaging, managementTools(c))
+	session, err := harness.New(ctx, cfg, harness.Dependencies{})
+	if err != nil {
+		return err
+	}
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		err = errors.Join(err, session.Close(cleanup))
 	}()
-	_, err = c.CreateAgent(message.User, agent.Spec{
-		Provider: p,
-		Prompt:   rootPrompt,
-		Tools:    rootTools,
-	})
-	if err != nil {
-		return err
-	}
 	return tui.Run(ctx, session, tui.Options{Model: *model, Endpoint: *baseURL})
-}
-
-func localTools(dir string) ([]tool.Tool, error) {
-	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir})
-	if err != nil {
-		return nil, err
-	}
-	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir})
-	if err != nil {
-		return nil, err
-	}
-	pdf, err := tool.NewPDF(tool.PDFConfig{Dir: dir})
-	if err != nil {
-		return nil, err
-	}
-	return append([]tool.Tool{shell, pdf}, files.Tools()...), nil
 }
 
 func main() {
