@@ -3,7 +3,9 @@ package eventlog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"unicode/utf8"
 )
 
 type Cursor struct {
@@ -70,7 +72,7 @@ func (s *storeState) head() Head {
 	h := Head{Cursor: Cursor{s.session, s.latest}, State: Writable}
 	if s.failed != nil {
 		h.State = Failed
-		h.Failure = &Problem{Code: "storage_failed", Message: s.failed.Error()}
+		h.Failure = &Problem{Code: "storage_failed", Message: Summary(s.failed.Error())}
 	} else if s.outcome != nil {
 		h.State = Sealed
 	}
@@ -87,16 +89,14 @@ func (s *storeState) Head(ctx context.Context) (Head, error) {
 	}
 	return s.head(), nil
 }
-func (s *storeState) Fail(err error) {
-	if err == nil {
-		return
-	}
+func (s *storeState) Fail(err error) Head {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.failed == nil && !s.disposed && s.outcome == nil {
+	if err != nil && s.failed == nil && !s.disposed && s.outcome == nil {
 		s.failed = errors.Join(ErrCapture, err)
 		s.signal()
 	}
+	return s.head()
 }
 func (s *storeState) Wait(ctx context.Context, after Cursor) (Head, error) {
 	for {
@@ -128,3 +128,26 @@ func (s *storeState) Wait(ctx context.Context, after Cursor) (Head, error) {
 		}
 	}
 }
+
+// Summary bounds control-plane error text; detailed facts remain in the log.
+func Summary(s string) string {
+	if len(s) <= 4096 {
+		return s
+	}
+	n := 4093
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "..."
+}
+
+// PageBudgetError tells a finite reader how large the next whole record is.
+type PageBudgetError struct {
+	Required int
+	Budget   int
+}
+
+func (e *PageBudgetError) Error() string {
+	return fmt.Sprintf("%v: need %d bytes, budget %d", ErrPageSize, e.Required, e.Budget)
+}
+func (e *PageBudgetError) Unwrap() error { return ErrPageSize }

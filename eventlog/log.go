@@ -82,8 +82,11 @@ func (l *Log) fail(err error) {
 	if err == nil || l.err != nil {
 		return
 	}
-	l.err = fmt.Errorf("%w: %v", ErrCapture, err)
-	l.store.Fail(l.err)
+	failure := errors.Join(ErrCapture, err)
+	if head := l.store.Fail(failure); head.State == Sealed {
+		return
+	}
+	l.err = failure
 	l.cancelWrite()
 	for j := range l.jobs {
 		j.err = l.err
@@ -352,9 +355,22 @@ type Subscription struct {
 	once     sync.Once
 }
 
-func (l *Log) Subscribe(after uint64) *Subscription {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Subscription{log: l, after: after, detached: make(chan struct{}), ctx: ctx, cancel: cancel}
+func (l *Log) Subscribe(ctx context.Context, after Cursor) (*Subscription, error) {
+	head, err := l.Head(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if after == (Cursor{}) {
+		after.Session = head.Cursor.Session
+	}
+	if after.Session != head.Cursor.Session {
+		return nil, ErrSession
+	}
+	if after.Sequence > head.Cursor.Sequence {
+		return nil, ErrFuture
+	}
+	run, cancel := context.WithCancel(ctx)
+	return &Subscription{log: l, after: after.Sequence, detached: make(chan struct{}), ctx: run, cancel: cancel}, nil
 }
 func (s *Subscription) Close() { s.once.Do(func() { close(s.detached); s.cancel() }) }
 
@@ -364,6 +380,9 @@ func (s *Subscription) Next(ctx context.Context) (Event, error) {
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer func() { stop(); cancel() }()
 	for {
+		if s.ctx.Err() != nil {
+			return Event{}, ErrDetached
+		}
 		if err := ctx.Err(); err != nil {
 			return Event{}, err
 		}
@@ -403,7 +422,7 @@ func (s *Subscription) Next(ctx context.Context) (Event, error) {
 		}
 		waitCtx, done, err := l.reads.Begin(run)
 		if err != nil {
-			return Event{}, ErrDisposed
+			return Event{}, readError(err)
 		}
 		_, err = l.store.Wait(waitCtx, Cursor{Session: p.Head.Cursor.Session, Sequence: s.after})
 		done()
@@ -421,7 +440,7 @@ func (s *Subscription) Next(ctx context.Context) (Event, error) {
 func (l *Log) Head(ctx context.Context) (Head, error) {
 	run, done, err := l.reads.Begin(ctx)
 	if err != nil {
-		return Head{}, ErrDisposed
+		return Head{}, readError(err)
 	}
 	defer done()
 	return l.store.Head(run)
@@ -429,8 +448,15 @@ func (l *Log) Head(ctx context.Context) (Head, error) {
 func (l *Log) Wait(ctx context.Context, after Cursor) (Head, error) {
 	run, done, err := l.reads.Begin(ctx)
 	if err != nil {
-		return Head{}, ErrDisposed
+		return Head{}, readError(err)
 	}
 	defer done()
 	return l.store.Wait(run, after)
+}
+
+func readError(err error) error {
+	if errors.Is(err, admission.ErrClosed) {
+		return ErrDisposed
+	}
+	return err
 }

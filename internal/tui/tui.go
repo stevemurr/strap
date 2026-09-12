@@ -20,7 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
-	"github.com/stevemurr/strap/inbox"
+	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 )
 
@@ -62,6 +62,8 @@ type received struct {
 }
 
 type entry struct {
+	output            *identity.OutputID
+	message           identity.MessageID
 	label, meta, body string
 	at                time.Time
 	renderWidth       int
@@ -177,10 +179,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case received:
 		if msg.err != nil {
-			m.closed = errors.Is(msg.err, inbox.ErrClosed) || errors.Is(msg.err, context.Canceled)
+			m.closed = true
+			for id := range m.working {
+				delete(m.working, id)
+			}
+			for id := range m.pending {
+				delete(m.pending, id)
+			}
 			m.refreshActivity()
 			if !errors.Is(msg.err, context.Canceled) {
-				m.add("System", "Event observation stopped: "+msg.err.Error()+". Use /agents to refresh state; controls remain available while the session is open.", false)
+				m.add("System", "Event observation stopped: "+msg.err.Error()+".", false)
 			}
 			return m, nil
 		}
@@ -377,12 +385,15 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 	m.draft = ""
 	m.input.Reset()
 	m.addDetail("You", fmt.Sprintf("user → %s · %s", m.session.Root(), receipt.MessageID), text, true)
+	m.entries[len(m.entries)-1].message = receipt.MessageID
 	return m, nil
 }
 
 func (m *model) observe(event conversation.Event) {
 	defer m.refreshActivity()
 	switch e := event.(type) {
+	case conversation.AgentEvent:
+		m.observeOutput(e.Event)
 	case conversation.ToolBatchEvent:
 		m.observeToolBatch(e)
 	case conversation.ContextTokensEvent:
@@ -392,6 +403,16 @@ func (m *model) observe(event conversation.Event) {
 			m.add("Diagnostic", e.Message, false)
 		}
 	case conversation.CommentaryEvent:
+		if e.Output != nil {
+			if row := m.outputEntry(*e.Output); row != nil {
+				row.meta = string(e.Agent) + " · progress"
+				row.renderWidth = 0
+				if !m.selecting {
+					m.renderTranscript(false)
+				}
+				return
+			}
+		}
 		label := "Message"
 		if e.Agent == m.session.Root() {
 			label = "Strap"
@@ -460,8 +481,31 @@ func (m *model) observe(event conversation.Event) {
 			delete(m.working, msg.From)
 		}
 		if msg.From == message.User {
+			for i := range m.entries {
+				if msg.ID != "" && m.entries[i].message == msg.ID {
+					m.entries[i].body = safeText(msg.Content)
+					m.entries[i].renderWidth = 0
+					if !m.selecting {
+						m.renderTranscript(false)
+					}
+					return
+				}
+			}
+			m.addDetail("You", fmt.Sprintf("user → %s · %s", msg.To, msg.ID), msg.Content, false)
+			m.entries[len(m.entries)-1].message = msg.ID
 			return
-		} // The submit path already displayed this input.
+		}
+		if msg.Output != nil {
+			if row := m.outputEntry(*msg.Output); row != nil {
+				row.meta = fmt.Sprintf("%s → %s · %s", msg.From, msg.To, msg.ID)
+				row.message = msg.ID
+				row.renderWidth = 0
+				if !m.selecting {
+					m.renderTranscript(false)
+				}
+				return
+			}
+		}
 		meta := fmt.Sprintf("%s → %s · %s · %s", msg.From, msg.To, msg.Kind, msg.ID)
 		if msg.ReplyTo != "" {
 			meta += " · reply to " + string(msg.ReplyTo)

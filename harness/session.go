@@ -12,11 +12,14 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
+	"github.com/stevemurr/strap/harness/eventcodec"
+	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/internal/resource"
@@ -55,7 +58,7 @@ func DefaultConfig() Config {
 
 type EventConfig struct {
 	JSONLPath string          `json:"jsonl_path,omitempty"` // Empty uses memory; nonempty exclusively creates a durable trace file.
-	Retention eventlog.Limits `json:"retention"`
+	Retention eventlog.Limits `json:"retention"`            // Optional hard memory-store quota; zero retains without a quota.
 	Queue     eventlog.Limits `json:"queue"`
 }
 
@@ -81,6 +84,11 @@ type Dependencies struct {
 }
 
 type Session struct {
+	hostMessage      atomic.Uint64
+	encoder          *eventcodec.Publisher
+	projectionGate   chan struct{}
+	projection       *projection.Projector
+	projectionError  error
 	workflowAfter    uint64
 	workflowReadLife context.Context
 	executionError   error
@@ -121,7 +129,7 @@ func (e *StartupError) Close(ctx context.Context) error { return e.cleanup.Close
 
 func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err error) {
 	execution, cancelExecution := context.WithCancel(context.WithoutCancel(ctx))
-	s := &Session{config: cloneConfig(cfg), resources: resource.New(), state: Open, cancelExecution: cancelExecution, admission: admission.New(execution)}
+	s := &Session{projectionGate: make(chan struct{}, 1), config: cloneConfig(cfg), resources: resource.New(), state: Open, cancelExecution: cancelExecution, admission: admission.New(execution)}
 	defer func() {
 		if err == nil {
 			return
@@ -153,6 +161,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	s.id = hex.EncodeToString(id[:])
+	s.projection = projection.New(identity.SessionID(s.id))
 	if err = s.config.Telemetry.defaults(); err != nil {
 		return nil, err
 	}
@@ -176,7 +185,13 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	var store eventlog.Store
 	if deps.EventStore != nil {
 		store, err = deps.EventStore(s.id)
+		if err == nil && store == nil {
+			err = errors.New("event store factory returned nil")
+		}
 		if err != nil {
+			if store != nil {
+				s.resources.Add("event store", store)
+			}
 			return nil, err
 		}
 	}
@@ -204,6 +219,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err != nil {
 		return nil, err
 	}
+	s.encoder = eventcodec.NewPublisher(s.log, s.config.Events.Queue.Bytes)
 	data, _ := json.Marshal(struct {
 		ID string `json:"id"`
 	}{s.id})
@@ -277,8 +293,8 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	implSpec, auditSpec := s.workflow.Specs()
 	s.effective = EffectiveConfig{Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil)}
-	configured, _ := json.Marshal(s.Configuration())
-	if err = s.log.Publish(eventlog.Data{Kind: "session_configured", Payload: configured}); err != nil {
+	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
+		s.log.Fail(err)
 		return nil, err
 	}
 	s.mu.Lock()
@@ -297,7 +313,10 @@ func (s *Session) Send(to identity.ActorID, text string) (message.Receipt, error
 	defer done()
 	return s.controller.Send(to, text)
 }
-func (s *Session) Agents() []conversation.AgentInfo { return s.controller.Agents() }
+func (s *Session) Agents() []conversation.AgentInfo {
+	_ = s.project(context.Background())
+	return s.projection.Agents()
+}
 func (s *Session) CreateAgent(parent identity.ActorID, spec agent.Spec) (conversation.Creation, error) {
 	_, done, err := s.admission.Begin(context.Background())
 	if err != nil {
@@ -307,7 +326,7 @@ func (s *Session) CreateAgent(parent identity.ActorID, spec agent.Spec) (convers
 	return s.controller.CreateAgent(parent, spec)
 }
 func (s *Session) InspectAgent(id identity.ActorID, opts conversation.InspectOptions) (conversation.AgentInspection, error) {
-	return s.controller.InspectAgent(id, opts)
+	return s.InspectAgentContext(context.Background(), id, opts)
 }
 func (s *Session) PauseAgent(id identity.ActorID) (conversation.AgentInfo, error) {
 	_, done, err := s.admission.Begin(context.Background())
@@ -334,7 +353,8 @@ func (s *Session) StopAgent(id identity.ActorID) (conversation.AgentInfo, error)
 	return s.controller.StopAgent(id)
 }
 func (s *Session) Receipt(id message.MessageID) (message.Receipt, bool) {
-	return s.controller.Receipt(id)
+	_ = s.project(context.Background())
+	return s.projection.Receipt(id)
 }
 func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, revision uint64) (int64, error) {
 	run, done, err := s.admission.Begin(ctx)

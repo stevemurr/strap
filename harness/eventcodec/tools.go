@@ -26,8 +26,8 @@ type toolActivityWire struct {
 	Diagnostic   *tool.Diagnostic `json:"diagnostic,omitempty"`
 }
 type toolRecord struct {
-	Agent    message.ActorID
-	Activity toolActivityWire
+	Agent    message.ActorID  `json:"agent"`
+	Activity toolActivityWire `json:"activity"`
 }
 
 func encodeTool(a agent.ToolActivity) toolActivityWire {

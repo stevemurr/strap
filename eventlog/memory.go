@@ -81,7 +81,7 @@ func (m *Memory) Read(ctx context.Context, q Query) (Page, error) {
 	for _, e := range m.events[int(q.After):] {
 		if q.MaxBytes > 0 && bytes+e.Size() > q.MaxBytes {
 			if len(p.Events) == 0 {
-				return p, ErrPageSize
+				return p, &PageBudgetError{Required: e.Size(), Budget: q.MaxBytes}
 			}
 			break
 		}

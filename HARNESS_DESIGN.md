@@ -1,10 +1,15 @@
+# Historical foundation design
+
+This document records the earlier foundation stages. Required recording and retention
+are superseded by [the implemented recovery contract](harness/RECOVERY.md).
+
 # Public harness session: audited foundation
 
-The proposed successor for streaming and full view reconstruction is
+The implemented successor for streaming and full view reconstruction is
 [Streaming and recoverable session views](STREAMING_DESIGN.md), with its revision
 audit and [ADR-002](docs/architecture/ADR-002-recoverable-session-log.md).
 That design is not implemented yet. It supersedes this foundation's lossy
-observation-retention policy for required session records; the implemented
+observation-retention policy for required session records; the original
 foundation and its original audit remain documented below.
 
 Status: all seven foundation stages are implemented and committed in sequence

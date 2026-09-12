@@ -13,7 +13,8 @@ import (
 
 func TestSessionSubscribersSeeStartupAndFinalEvents(t *testing.T) {
 	s := newLifecycleSession(t, context.Background(), idle{})
-	a, b := s.Subscribe(0), s.Subscribe(0)
+	a, _ := s.Subscribe(context.Background(), harness.SubscribeOptions{})
+	b, _ := s.Subscribe(context.Background(), harness.SubscribeOptions{})
 	defer a.Close()
 	defer b.Close()
 	if err := s.Close(context.Background()); err != nil {

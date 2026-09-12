@@ -52,7 +52,7 @@ func TestJSONLSealedReopenAndCorruptTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.Seal(ctx, Outcome{Omitted: 3}); err != nil {
+	if err = s.Seal(ctx, Outcome{Reason: "requested"}); err != nil {
 		t.Fatal(err)
 	}
 	s.Close(ctx)
@@ -61,7 +61,7 @@ func TestJSONLSealedReopenAndCorruptTail(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := r.Read(ctx, Query{Limit: 1})
-	if err != nil || !p.Sealed || p.Outcome.Omitted != 3 {
+	if err != nil || !p.Sealed || p.Outcome.Reason != "requested" {
 		t.Fatal(p, err)
 	}
 	r.Close(ctx)
@@ -121,4 +121,14 @@ func TestFailedSealDoesNotExposeTerminalRecord(t *testing.T) {
 	if err != nil || p.Latest != 1 || len(p.Events) != 1 || p.Sealed {
 		t.Fatal(p, err)
 	}
+	reopened, err := OpenJSONL(context.Background(), s.file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close(context.Background())
+	archived, err := reopened.Read(context.Background(), Query{Limit: 10})
+	if err != nil || archived.Sealed || archived.Latest != 1 || archived.Head.State != Failed {
+		t.Fatal(archived, err)
+	}
+
 }

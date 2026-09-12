@@ -45,7 +45,7 @@ func TestLiveModelHTTP(t *testing.T) {
 	cfg.Web = nil
 	cfg.Dir = t.TempDir()
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
-	cfg.Root.Prompt = prompt.Prompt{Role: "Follow the user's smoke-test instructions precisely. Keep responses short. Do not delegate work, change files, or run shell commands. Use read_file only when explicitly requested."}
+	cfg.Root.Prompt = prompt.Prompt{Role: "Follow the user's smoke-test instructions precisely. Keep responses short. You have a callable read_file tool. Use it when the current user message requests a file read. Each user message is a separate step: a no-tool instruction in an earlier step does not prohibit tool use in a later step. Do not delegate work, change files, or run shell commands."}
 	var entropy [16]byte
 	if _, err := rand.Read(entropy[:]); err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestLiveModelHTTP(t *testing.T) {
 			}
 		}
 	}
-	send("Reply with HTTP_SMOKE_OK only. Do not call any tools.")
+	send("For this first step only, reply with HTTP_SMOKE_OK. No tools are needed for this step.")
 	waitReply("HTTP_SMOKE_OK")
 	if toolFinishes != 0 {
 		t.Fatal("plain reply unexpectedly used tools")
@@ -246,7 +246,7 @@ func TestLiveModelHTTP(t *testing.T) {
 	}
 	t.Logf("disconnected observer at sequence=%d; session remains open", cursor)
 	attach()
-	receipt := send("Call read_file once to read smoke.txt. Then reply with only the exact value stored in that file, without line numbers or extra text. Do not use any other tools.")
+	receipt := send("The first step is complete. For this separate step, call read_file once to read smoke.txt. Then reply with only the exact value stored in that file, without line numbers or extra text. Do not use any other tools.")
 	waitReply(fileValue)
 	for tokenCounts == 0 {
 		_, end := next()

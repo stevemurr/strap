@@ -4,6 +4,7 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -23,7 +24,9 @@ type AgentInfo struct {
 // and therefore cannot generate acknowledgment/reply loops.
 type Event interface{ isEvent() }
 
-type MessageEvent struct{ Message message.Message }
+type MessageEvent struct {
+	Message message.Message `json:"message"`
+}
 
 func (MessageEvent) isEvent() {}
 
@@ -31,44 +34,52 @@ func (MessageEvent) isEvent() {}
 // It is never routed to an agent inbox or treated as a completed reply.
 type CommentaryEvent struct {
 	Output  *identity.OutputID `json:"output,omitempty"`
-	Agent   message.ActorID
-	Content string
+	Agent   message.ActorID    `json:"agent"`
+	Content string             `json:"content"`
 }
 
 func (CommentaryEvent) isEvent() {}
 
-type AckEvent struct{ Receipt message.Receipt }
+type AckEvent struct {
+	Receipt message.Receipt `json:"receipt"`
+}
 
 func (AckEvent) isEvent() {}
 
-type AgentStarted struct{ Agent AgentInfo }
+type AgentStarted struct {
+	Agent            AgentInfo                 `json:"agent"`
+	Tools            []provider.ToolDefinition `json:"tools"`
+	OutputTokenLimit *int64                    `json:"output_token_limit,omitempty"`
+}
 
 func (AgentStarted) isEvent() {}
 
 type AgentExited struct {
-	Agent message.ActorID
-	Err   error
+	Agent message.ActorID `json:"agent"`
+	Err   error           `json:"err"`
 }
 
 func (AgentExited) isEvent() {}
 
 // AgentStateChanged distinguishes a requested control from its acknowledged state.
 type AgentStateChanged struct {
-	Revision uint64 `json:"state_revision"`
-	Agent    message.ActorID
-	State    agent.State
+	Revision uint64          `json:"state_revision"`
+	Agent    message.ActorID `json:"agent"`
+	State    agent.State     `json:"state"`
 }
 
 func (AgentStateChanged) isEvent() {}
 
 // ToolEvent is host-only execution telemetry. It never enters an agent inbox.
 type ToolEvent struct {
-	Agent    message.ActorID
-	Activity agent.ToolActivity
+	Agent    message.ActorID    `json:"agent"`
+	Activity agent.ToolActivity `json:"activity"`
 }
 
 // WorkEvent is a host view supplied by application work orchestration.
-type WorkEvent struct{ Event work.Event }
+type WorkEvent struct {
+	Event work.Event `json:"event"`
+}
 
 func (WorkEvent) isEvent() {}
 
@@ -77,16 +88,16 @@ func (ToolEvent) isEvent() {}
 // ToolBatchEvent marks a complete batch's immutable context boundary. Hosts may
 // request a token count asynchronously without delaying the agent loop.
 type ToolBatchEvent struct {
-	Agent message.ActorID
-	Batch agent.ToolBatch
+	Agent message.ActorID `json:"agent"`
+	Batch agent.ToolBatch `json:"batch"`
 }
 
 func (ToolBatchEvent) isEvent() {}
 
 // UsageEvent reports per-call accounting to the host, never to model inboxes.
 type UsageEvent struct {
-	Agent       message.ActorID
-	Observation agent.UsageObservation
+	Agent       message.ActorID        `json:"agent"`
+	Observation agent.UsageObservation `json:"observation"`
 }
 
 func (UsageEvent) isEvent() {}
@@ -112,8 +123,8 @@ func (ContextTokensEvent) isEvent() {}
 
 // AgentEvent carries typed runtime output and history facts.
 type AgentEvent struct {
-	Agent identity.ActorID
-	Event agent.Event
+	Agent identity.ActorID `json:"agent"`
+	Event agent.Event      `json:"event"`
 }
 
 func (AgentEvent) isEvent() {}

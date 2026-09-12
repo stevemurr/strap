@@ -18,37 +18,37 @@ type Provider interface {
 }
 
 type Request struct {
-	Agent    message.ActorID
-	Messages []Message
-	Tools    []ToolDefinition
+	Agent    message.ActorID  `json:"agent"`
+	Messages []Message        `json:"messages"`
+	Tools    []ToolDefinition `json:"tools"`
 }
 
 // Message is model history. Envelope preserves who actually sent inbox input.
 // Role is system, user, assistant, or tool.
 type Message struct {
-	Role       string
-	Content    content.Content
-	Envelope   *message.Message
-	ToolCalls  []ToolCall
-	ToolCallID string
+	Role       string           `json:"role"`
+	Content    content.Content  `json:"content"`
+	Envelope   *message.Message `json:"envelope"`
+	ToolCalls  []ToolCall       `json:"tool_calls"`
+	ToolCallID string           `json:"tool_call_id"`
 }
 
 type Response struct {
-	Content   string
-	ToolCalls []ToolCall
-	Usage     *Usage
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls"`
+	Usage     *Usage     `json:"usage"`
 }
 
 type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments json.RawMessage
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 type ToolDefinition struct {
-	Name        string
-	Description string
-	Parameters  json.RawMessage
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 func CopyMessages(in []Message) []Message {
@@ -73,7 +73,9 @@ func CopyCalls(in []ToolCall) []ToolCall {
 }
 
 // Delta is an append-only, valid UTF-8 text prefix. Callbacks are serial.
-type Delta struct{ Text string }
+type Delta struct {
+	Text string `json:"text"`
+}
 type Observer interface{ OnDelta(Delta) error }
 type ObserverFunc func(Delta) error
 

@@ -117,7 +117,8 @@ func logFor(t *testing.T, s eventlog.Store, entries int) *eventlog.Log {
 }
 func TestIndependentReadersReconnectDetachAndEOF(t *testing.T) {
 	l := logFor(t, memory(t, 100, 16384), 100)
-	a, b := l.Subscribe(0), l.Subscribe(0)
+	a, _ := l.Subscribe(ctx, eventlog.Cursor{})
+	b, _ := l.Subscribe(ctx, eventlog.Cursor{})
 	defer a.Close()
 	defer b.Close()
 	for i := 0; i < 5; i++ {
@@ -144,7 +145,7 @@ func TestIndependentReadersReconnectDetachAndEOF(t *testing.T) {
 	if err := <-waiting; !errors.Is(err, eventlog.ErrDetached) {
 		t.Fatal(err)
 	}
-	c := l.Subscribe(5)
+	c, _ := l.Subscribe(ctx, eventlog.Cursor{Session: "test", Sequence: 5})
 	defer c.Close()
 	short, cancel := context.WithCancel(ctx)
 	cancel()
@@ -265,7 +266,7 @@ func (s *readRace) Read(ctx context.Context, q eventlog.Query) (eventlog.Page, e
 func TestReadAppendHandoffDoesNotLoseWake(t *testing.T) {
 	s := &readRace{Store: memory(t, 10, 4096), read: make(chan struct{}), release: make(chan struct{})}
 	l := logFor(t, s, 10)
-	sub := l.Subscribe(0)
+	sub, _ := l.Subscribe(ctx, eventlog.Cursor{})
 	defer sub.Close()
 	result := make(chan error, 1)
 	go func() { _, err := sub.Next(ctx); result <- err }()
@@ -289,7 +290,7 @@ func TestReadAppendHandoffDoesNotLoseWake(t *testing.T) {
 func TestDetachCancelsBackendRead(t *testing.T) {
 	s := &readRace{Store: memory(t, 10, 4096), read: make(chan struct{}), release: make(chan struct{})}
 	l := logFor(t, s, 10)
-	sub := l.Subscribe(0)
+	sub, _ := l.Subscribe(ctx, eventlog.Cursor{})
 	result := make(chan error, 1)
 	go func() { _, err := sub.Next(ctx); result <- err }()
 	<-s.read

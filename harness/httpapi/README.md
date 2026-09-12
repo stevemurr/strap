@@ -51,7 +51,10 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /plans/{plan}?actor=...` | Plan snapshot |
 | `GET /submissions/{submission}?actor=...` | Submission snapshot |
 | `GET /audits/{audit}?actor=...` | Audit snapshot |
-| `GET /events?after=N&limit=N` | Finite retained page, bounds, cursor and seal outcome |
+| `GET /events?after=N&limit=N&max_bytes=N` | Finite retained page, accepted head, exclusive cursor and seal outcome |
+| `GET /outputs/{agent}/{call}` | Output metadata, applied cursor and source health |
+| `GET /outputs/{agent}/{call}/text?through=N&offset=N&max_bytes=N` | UTF-8 text page at a fixed session prefix; `through` is required |
+| `GET /contents/{id}?offset=N&max_bytes=N` | Immutable content byte page; JSON data uses base64 |
 | `GET /events/stream?after=N` | Independent NDJSON subscription |
 | `POST /logs` | `{ "level": "info", "message": "...", "fields": {"key":"value"} }` |
 | `POST /flush` | Ordered publication barrier; does not sync disk |
@@ -73,16 +76,26 @@ checks reject stale transitions. A timeout/disconnect may occur after mutation:
 inspect state or receipts before deciding whether to send another request.
 
 Event cursors are exclusive and start at zero. Pages default to 100 entries, with
-a maximum of 1,000; transcript pages have a maximum of 100. Expired cursors return
-410, future cursors return 400, work revision conflicts return 409, and capture
+a maximum of 1,000 and a default 4 MiB byte budget; transcript pages have a maximum
+of 100. History does not expire while the session is retained. Disposed storage
+returns 410, future/invalid cursors return 400, work revision conflicts return 409, and capture
 failure returns 503. Errors have `{"error":{"code":"...","message":"..."}}`.
+HTTP admission defaults to 256 simultaneous requests (including streams), configurable
+through `Options.MaxRequests`; excess admission returns 429 `busy`.
 Request JSON is limited to 1 MiB, rejects unknown fields, and contains one value.
 
 A stream emits `{"type":"event","event":...}` records, then `{"type":"end"}`
 after a clean seal. A failure after headers emits `{"type":"error","error":...}`.
-Reconnect using the last event sequence received. Closing the connection only
-detaches that reader. Capture failure is not a clean end and does not disable
-session commands. Retention gaps remain explicit even after session closure.
+Reconnect after the last event successfully applied by the view. The session ID
+in the route scopes the cursor. Closing the connection only detaches that reader.
+Capture failure drains the readable prefix, reports an error, and cancels execution.
+Output/content reads require the same named-session read authorization as events.
+They default to 64 KiB pages and allow at most 1 MiB.
+
+Schema 2 adds `output_started`, `output_delta`, `output_finished`,
+`history_appended`, and `content_chunk`. Text offsets and terminal byte counts use
+UTF-8 bytes. Full payload framing, correlation, cancellation, archive compatibility,
+and Go subscription examples are specified in [the recovery contract](../RECOVERY.md).
 
 Run `go test -race ./harness/httpapi` for the direct/HTTP audit-repair parity,
 authorization, revision, paging and real connection disconnect/reconnect tests.

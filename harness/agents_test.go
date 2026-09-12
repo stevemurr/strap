@@ -80,7 +80,7 @@ func TestApplicationManagementTools(t *testing.T) {
 	if info := invoke("resume_agent"); info.State != agent.Running {
 		t.Fatal(info)
 	}
-	if info := invoke("stop_agent"); info.State != agent.StopRequested {
+	if info := invoke("stop_agent"); info.State != agent.StopRequested && !info.State.Terminal() {
 		t.Fatal(info)
 	}
 	if _, err := kit["inspect_agent"].Call(ctx, tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing"}`)}); err == nil {

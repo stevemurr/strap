@@ -9,24 +9,30 @@ import (
 )
 
 var ErrClosed = errors.New("session is closing or closed")
+var ErrBusy = errors.New("concurrent operation limit reached")
 
 type Gate struct {
 	mu     sync.Mutex
 	sealed bool
 	active int
+	limit  int
 	done   chan struct{}
 	ctx    context.Context
 }
 
-func New(ctx context.Context) *Gate { return &Gate{ctx: ctx, done: make(chan struct{})} }
+func New(ctx context.Context) *Gate { return &Gate{ctx: ctx, done: make(chan struct{}), limit: 256} }
 func (g *Gate) Begin(ctx context.Context) (context.Context, func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
 	g.mu.Lock()
-	if g.sealed {
+	if g.sealed || g.ctx.Err() != nil {
 		g.mu.Unlock()
 		return nil, nil, ErrClosed
+	}
+	if g.active >= g.limit {
+		g.mu.Unlock()
+		return nil, nil, ErrBusy
 	}
 	g.active++
 	g.mu.Unlock()

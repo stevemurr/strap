@@ -12,7 +12,7 @@ import (
 	"github.com/stevemurr/strap/identity"
 )
 
-func encodeAgent(v conversation.AgentEvent) (eventlog.Data, error) {
+func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
 	var kind string
 	var payload any = v.Event
 	var output *identity.OutputID
@@ -41,14 +41,14 @@ func encodeAgent(v conversation.AgentEvent) (eventlog.Data, error) {
 		}
 		payload = p
 	default:
-		return eventlog.Data{}, fmt.Errorf("unknown agent fact %T", v.Event)
+		return eventlog.Data{}, nil, fmt.Errorf("unknown agent fact %T", v.Event)
 	}
-	raw, err := json.Marshal(payload)
-	d := eventlog.Data{Kind: kind, Agent: string(v.Agent), Payload: raw, Output: output}
+
+	d := eventlog.Data{Kind: kind, Agent: string(v.Agent), Output: output}
 	if output != nil {
 		d.Correlation = fmt.Sprintf("%s/output-%d", output.Agent, output.Call)
 	}
-	return d, err
+	return d, payload, nil
 }
 func decodeAgent(e eventlog.Event) (conversation.Event, error) {
 	var fact agent.Event

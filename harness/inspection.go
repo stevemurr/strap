@@ -70,6 +70,8 @@ func (s *Session) Configuration() EffectiveConfig {
 
 // Coverage describes instrumentation, independently of storage retention or health.
 type Coverage struct {
+	ModelHistory      bool `json:"model_history"`
+	StreamingOutput   bool `json:"streaming_output"`
 	DomainEvents      bool `json:"domain_events"`
 	ToolDiagnostics   bool `json:"tool_diagnostics"`
 	ModelRequests     bool `json:"model_requests"`
@@ -94,5 +96,5 @@ func (s *Session) Inspect() Inspection {
 		outcome = &v
 	}
 	s.mu.Unlock()
-	return Inspection{Outcome: outcome, ID: s.ID(), State: s.State(), Capture: s.Capture(), Coverage: Coverage{DomainEvents: true, ToolDiagnostics: true}, Config: s.Configuration()}
+	return Inspection{Outcome: outcome, ID: s.ID(), State: s.State(), Capture: s.Capture(), Coverage: Coverage{DomainEvents: true, ToolDiagnostics: true, ModelHistory: true, StreamingOutput: true}, Config: s.Configuration()}
 }

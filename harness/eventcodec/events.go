@@ -8,23 +8,24 @@ import (
 
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
+	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/message"
 )
 
 type exitedRecord struct {
-	Agent message.ActorID
-	Error string
+	Agent message.ActorID `json:"agent"`
+	Error string          `json:"error"`
 }
 
 // EncodeEvent snapshots host events into the versioned storage envelope. Errors
 // are stored as text; they cannot be reconstructed as original Go error values.
-func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
+func describe(e conversation.Event) (eventlog.Data, any, error) {
 	var kind, correlation string
 	var actor message.ActorID
 	var payload any = e
 	switch v := e.(type) {
 	case conversation.AgentEvent:
-		return encodeAgent(v)
+		return describeAgent(v)
 	case conversation.ContextTokensEvent:
 		kind = "context_tokens"
 		actor = v.Agent
@@ -67,10 +68,10 @@ func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
 		kind = "usage"
 		actor = v.Agent
 	default:
-		return eventlog.Data{}, fmt.Errorf("unsupported event %T", e)
+		return eventlog.Data{}, nil, fmt.Errorf("unsupported event %T", e)
 	}
-	raw, err := json.Marshal(payload)
-	d := eventlog.Data{Kind: kind, Correlation: correlation, Agent: string(actor), Payload: raw}
+
+	d := eventlog.Data{Kind: kind, Correlation: correlation, Agent: string(actor)}
 	switch v := e.(type) {
 	case conversation.MessageEvent:
 		d.Message = v.Message.ID
@@ -80,7 +81,7 @@ func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
 	case conversation.AckEvent:
 		d.Message = v.Receipt.MessageID
 	}
-	return d, err
+	return d, payload, nil
 }
 func decode[T conversation.Event](data []byte) (conversation.Event, error) {
 	var v T
@@ -91,6 +92,12 @@ func decode[T conversation.Event](data []byte) (conversation.Event, error) {
 // DecodeEvent returns nil for log control records, which callers may inspect
 // directly. Domain event payloads are independent from the stored bytes.
 func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
+	if e.Schema != eventlog.SchemaVersion {
+		return nil, fmt.Errorf("unsupported event schema %d", e.Schema)
+	}
+	if _, ok := record.Frame(e.Payload); ok {
+		return nil, errors.New("record requires content resolution")
+	}
 	switch e.Kind {
 	case "output_started", "output_delta", "output_finished", "history_appended":
 		return decodeAgent(e)
@@ -132,11 +139,20 @@ func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 		return decode[conversation.ToolBatchEvent](e.Payload)
 	case "usage":
 		return decode[conversation.UsageEvent](e.Payload)
-	case "session_closed", "session_started", "session_configured":
+	case "content_chunk", "session_closed", "session_started", "session_configured":
 		return nil, nil
 	case "omitted":
 		return nil, fmt.Errorf("event %d payload omitted: %s", e.Sequence, e.Payload)
 	default:
 		return nil, fmt.Errorf("unknown event kind %q", e.Kind)
 	}
+}
+
+func EncodeEvent(e conversation.Event) (eventlog.Data, error) {
+	d, p, err := describe(e)
+	if err != nil {
+		return d, err
+	}
+	d.Payload, err = json.Marshal(p)
+	return d, err
 }

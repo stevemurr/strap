@@ -163,7 +163,7 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	}
 	c.agents[id] = owned
 	c.order = append(c.order, id)
-	if err := c.emitLocked(AgentStarted{Agent: owned.info}); err != nil {
+	if err := c.emitLocked(AgentStarted{Agent: owned.info, Tools: runner.Definitions(), OutputTokenLimit: runner.OutputTokenLimit()}); err != nil {
 		cancel()
 		return Creation{}, err
 	}
@@ -398,10 +398,10 @@ func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	}
 	c.mu.Unlock()
 	owned.cancel()
-	state := owned.agent.RequestStopSnapshot()
+	state, err := owned.agent.RequestStopSnapshot()
 	info := owned.info
 	info.State, info.StateRevision = state.State, state.Revision
-	return info, nil
+	return info, err
 }
 
 // Close cancels every owned agent and waits for its loop to exit. Cancellation is

@@ -16,6 +16,7 @@ type Store struct {
 	reporter      Reporter
 	change        Change
 	visibleEvents int
+	failure       error
 	mu            sync.Mutex
 	next          uint64
 	plans         map[PlanID]Plan
@@ -74,8 +75,15 @@ func (s *Store) AcknowledgeEvent(id EventID) error {
 	defer s.emission.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = slices.DeleteFunc(s.events, func(event Event) bool { return event.ID == id })
-	s.visibleEvents = len(s.events)
+	for i, e := range s.events {
+		if e.ID == id {
+			if i < s.visibleEvents {
+				s.visibleEvents--
+			}
+			s.events = append(s.events[:i], s.events[i+1:]...)
+			break
+		}
+	}
 	return nil
 }
 func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, error) {
@@ -96,7 +104,9 @@ func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, 
 	return w.Clone(), nil
 }
 func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	if blank(string(actor)) {
 		return Plan{}, ErrForbidden
@@ -208,7 +218,9 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 	return p.Clone(), nil
 }
 func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	if blank(string(actor)) || blank(string(r.Assignee)) || blank(r.Task) {
 		return Work{}, invalid("actor, assignee and task required")
@@ -253,7 +265,9 @@ func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work
 	return w.Clone(), nil
 }
 func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (result Work, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	w, err := s.target(actor, u.WorkTarget, false)
 	if err != nil {

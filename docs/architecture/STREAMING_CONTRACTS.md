@@ -1,6 +1,7 @@
 # Recoverable session log: types and interfaces
 
-Status: proposed contracts, not implementation. This refines
+Implementation: the architecture is now implemented. See [harness/RECOVERY.md](../../harness/RECOVERY.md) for the concrete API, migration notes, and implementation refinements. The sketches below preserve the design discussion.
+Status: implemented, with concrete refinements linked above. This refines
 [STREAMING_DESIGN.md](../../STREAMING_DESIGN.md) and
 [ADR-002](ADR-002-recoverable-session-log.md). Go fragments show package-level
 shapes; they are not standalone source files. Existing domain requests and

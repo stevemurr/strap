@@ -109,3 +109,12 @@ func (a *Agent) appendHistory(m provider.Message, output *identity.OutputID) (ui
 	position := a.thread.append(m)
 	return position, a.report(HistoryAppended{Position: position, Message: provider.CopyMessages([]provider.Message{m})[0], Output: output})
 }
+
+// Definitions describes this agent's bound tool schema without exposing tools.
+func (a *Agent) Definitions() []provider.ToolDefinition {
+	out := append([]provider.ToolDefinition(nil), a.definitions...)
+	for i := range out {
+		out[i].Parameters = append([]byte(nil), out[i].Parameters...)
+	}
+	return out
+}

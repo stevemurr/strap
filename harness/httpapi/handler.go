@@ -14,6 +14,7 @@ import (
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/work"
@@ -59,9 +60,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func classify(err error) (int, Error) {
 	status, code := http.StatusInternalServerError, "internal"
 	switch {
+	case errors.Is(err, harness.ErrBusy):
+		status, code = 429, "busy"
 	case errors.Is(err, ErrUnauthorized), errors.Is(err, work.ErrForbidden):
 		status, code = 403, "forbidden"
-	case errors.Is(err, ErrNotFound), errors.Is(err, work.ErrNotFound), errors.Is(err, conversation.ErrAgentNotFound):
+	case errors.Is(err, ErrNotFound), errors.Is(err, work.ErrNotFound), errors.Is(err, conversation.ErrAgentNotFound), errors.Is(err, projection.ErrNotFound):
 		status, code = 404, "not_found"
 	case errors.Is(err, harness.ErrClosed), errors.Is(err, conversation.ErrClosed), errors.Is(err, conversation.ErrAgentStopped):
 		status, code = 409, "closed"
@@ -71,7 +74,7 @@ func classify(err error) (int, Error) {
 		status, code = 410, "cursor_expired"
 	case errors.Is(err, eventlog.ErrDisposed):
 		status, code = 410, "disposed"
-	case errors.Is(err, eventlog.ErrFuture), errors.Is(err, work.ErrInvalid), errors.Is(err, agent.ErrInvalidQuery):
+	case errors.Is(err, eventlog.ErrSession), errors.Is(err, eventlog.ErrPageSize), errors.Is(err, harness.ErrReadQuery), errors.Is(err, eventlog.ErrFuture), errors.Is(err, work.ErrInvalid), errors.Is(err, agent.ErrInvalidQuery):
 		status, code = 400, "invalid"
 	case errors.Is(err, agent.ErrTokenCountingUnsupported):
 		status, code = 501, "unsupported"
@@ -106,7 +109,7 @@ func decodeBody[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	return v, nil
 }
 func query(r *http.Request) (eventlog.Query, error) {
-	q := eventlog.Query{Limit: 100}
+	q := eventlog.Query{Limit: 100, MaxBytes: 4 << 20}
 	var err error
 	if value := r.URL.Query().Get("after"); value != "" {
 		q.After, err = strconv.ParseUint(value, 10, 64)
@@ -120,12 +123,25 @@ func query(r *http.Request) (eventlog.Query, error) {
 			return q, fmt.Errorf("%w: limit", work.ErrInvalid)
 		}
 	}
+	if value := r.URL.Query().Get("max_bytes"); value != "" {
+		q.MaxBytes, err = strconv.Atoi(value)
+		if err != nil || q.MaxBytes < 1 || q.MaxBytes > 8<<20 {
+			return q, fmt.Errorf("%w: max_bytes", work.ErrInvalid)
+		}
+	}
 	if err = q.Validate(); err != nil {
 		return q, fmt.Errorf("%w: %v", work.ErrInvalid, err)
 	}
 	return q, nil
 }
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	select {
+	case s.requests <- struct{}{}:
+		defer func() { <-s.requests }()
+	default:
+		respond(w, nil, harness.ErrBusy)
+		return
+	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 1 || parts[0] != "sessions" {
 		http.NotFound(w, r)
@@ -269,6 +285,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if serveRecovery(w, r, session, path) {
+		return
+	}
 	if path[0] == "events" && len(path) == 2 && path[1] == "stream" && r.Method == "GET" {
 		s.stream(w, r, session)
 		return
@@ -409,7 +428,11 @@ func (s *Service) stream(w http.ResponseWriter, r *http.Request, session *harnes
 		respond(w, nil, errors.New("streaming unsupported"))
 		return
 	}
-	sub := session.Subscribe(q.After)
+	sub, err := session.Subscribe(r.Context(), harness.SubscribeOptions{After: eventlog.Cursor{Session: session.ID(), Sequence: q.After}})
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
 	defer sub.Close()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")

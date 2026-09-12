@@ -11,20 +11,20 @@ import (
 // FinishedAt is zero for the start notification. Each notification owns its
 // arguments and result content; host observers cannot mutate agent history.
 type ToolActivity struct {
-	InvocationID string
-	Diagnostic   *tool.Diagnostic
-	Call         provider.ToolCall
-	StartedAt    time.Time
-	FinishedAt   time.Time
-	Result       tool.Result
-	Err          error
+	InvocationID string            `json:"invocation_id"`
+	Diagnostic   *tool.Diagnostic  `json:"diagnostic"`
+	Call         provider.ToolCall `json:"call"`
+	StartedAt    time.Time         `json:"started_at"`
+	FinishedAt   time.Time         `json:"finished_at"`
+	Result       tool.Result       `json:"result"`
+	Err          error             `json:"err"`
 }
 
 // ToolBatch identifies the history after all results from one model response
 // have been appended. A complete batch is a valid boundary for tokenization.
 type ToolBatch struct {
-	Calls           []string
-	ContextRevision uint64
+	Calls           []string `json:"calls"`
+	ContextRevision uint64   `json:"context_revision"`
 }
 
 func (a *Agent) reportTool(activity ToolActivity) error {

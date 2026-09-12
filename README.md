@@ -86,8 +86,9 @@ progress paragraph before that batch's tool rows. Agents are prompted to explain
 their first action and meaningful findings between batches. These host-only
 updates do not enter agent inboxes or mark work complete; the original text stays
 in the generating agent's assistant history without an additional message.
-Replies and progress text appear when each model response completes; token
-streaming is not implemented.
+Replies and progress text stream into a single row as the model generates them.
+Failed partial output remains visible. A reattached view can replay the entire
+session and recover active output; see [streaming and recovery](harness/RECOVERY.md).
 
 After a tool batch finishes, its tool line shows the agent's context size, for
 example `agent-1 · Read file ×2 · 12,345 context tokens`. The TUI counts that exact
@@ -263,7 +264,7 @@ _, err = session.Send(session.Root(), "Inspect this project.")
 Import `github.com/stevemurr/strap/harness`. `Dependencies` accepts borrowed
 providers/tools for tests and explicit owned resources. `StartupError` retains a
 retryable cleanup handle if construction rollback fails. The current `NextEvent`
-stream is available through independent `session.Subscribe(after)` readers and
+stream is available through independent `session.Subscribe(ctx, harness.SubscribeOptions{After: cursor})` readers and
 finite `session.Events(ctx, query)` pages, as described in
 [the harness design](HARNESS_DESIGN.md). `Close(ctx)` rejects new commands,
 cancels execution, drains final events, then closes owned resources. Its context
@@ -276,10 +277,10 @@ injected providers as opaque. `Inspect()` includes capture coverage and health.
 
 For evals, choose a completion rule explicitly: a root reply, idle agent, consumed
 receipt, accepted work, and closed session are different facts. Grade the domain
-result, call `Close` to finalize evidence, inspect capture errors/omissions and
-retained cursor bounds, then `Dispose` after reading. Current capture includes
-domain events and tool diagnostics; it does not include full model requests,
-responses, or external artifacts. Compare causal events rather than assuming
+result, call `Close` to finalize evidence, inspect capture health and
+the accepted head, then `Dispose` after reading. Current capture includes
+domain events, model history, streamed output and tool diagnostics; it does not
+include raw provider protocol traffic or external artifact files. Compare causal events rather than assuming
 identical total ordering across concurrent runs.
 
 The [HTTP adapter](harness/httpapi/README.md) exposes these same operations. Run
@@ -293,8 +294,8 @@ results, errors, and exact edit-failure snapshots. Traces contain task/file data
 resuming execution. Successful session closure syncs a JSONL trace.
 
 Call `Dispose(ctx)` when finished reading to release event storage. `Capture()`
-reports omissions and capture failures separately from execution state. Memory
-retention is bounded; an expired cursor is an explicit error. Lifecycle state
+reports capture failures separately from execution state. Memory retention keeps
+the full session; configured quotas fail recording instead of evicting history. Lifecycle state
 revisions are separate from model history revisions. Final inspection preserves
 the shutdown reason, execution errors, and cleanup outcome after state advances
 to `disposed`. Resolved configuration is included in recorded session events.
@@ -337,7 +338,7 @@ configures auditors independently from implementors.
 
 See [the CLI wiring](cmd/strap/main.go), [the application dispatcher](internal/workflow/session.go),
 and [the work contract](WORK_DESIGN.md). The dispatcher consumes the controller's
-single event stream and relays it to the UI, so work continues without a UI reader.
+accepted session log for delivery observations, so work continues without a UI reader.
 `conversation.Deliver` is a trusted host operation; model-facing messaging still
 uses the runtime-bound `Sender`.
 
@@ -687,24 +688,25 @@ sandbox against concurrent filesystem changes, and shell access remains unrestri
 
 ## Current scope
 
-The next design revision, [streaming and recoverable session views](STREAMING_DESIGN.md),
-is audited but not implemented. It specifies one retained session log, subscriptions
-that replay then follow, and views reconstructed from that log.
+[Streaming and recoverable session views](harness/RECOVERY.md) are implemented:
+one retained session log, subscriptions that replay then follow, and passive views
+reconstructed from accepted records.
 
 The public session API and adapter-independent architecture are tracked in
 [the audited harness design](HARNESS_DESIGN.md). Shared typed workflow operations
-back both the model tools and the public `harness.Session` API. Session assembly, coordinated shutdown, bounded event storage, JSONL diagnostics,
+back both the model tools and the public `harness.Session` API. Session assembly, coordinated shutdown, bounded publication, JSONL recording,
 independent observation, automatic telemetry, and the HTTP adapter are implemented.
 
 Agent messages, receipts, work state, and model history remain in memory. Event
 persistence does not restore running execution. Mutation deduplication, model
-response streaming, context compaction, and runtime memory/backpressure budgets
+context compaction and broader runtime memory budgets
 are deferred. There is no behavior framework, permission stack, workspace
 model, or configurable workflow engine. Work revisions validate ledger mutations;
 they do not gate general model responses or local-tool execution.
 
 The root's delegation role is expressed through its instructions and supplied
-tools. Queues and histories are unbounded in this first core. Models and tools must
+tools. Publication and storage read buffers are bounded; agent histories and
+outstanding domain work remain in memory. Models and tools must
 honor cancellation and be safe for concurrent use if shared between agents.
 
 See [DESIGN.md](DESIGN.md) for the complete flow and interface boundaries, and

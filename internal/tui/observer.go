@@ -7,22 +7,30 @@ import (
 
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/eventcodec"
+	"github.com/stevemurr/strap/harness/projection"
+	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/inbox"
 	"github.com/stevemurr/strap/message"
 )
 
 type observedSession struct {
 	Session
-	sub *eventlog.Subscription
+	sub        *eventlog.Subscription
+	projection *projection.Projector
 }
 
 func observeSession(s Session) (Session, func()) {
 	if source, ok := s.(interface {
-		Subscribe(uint64) *eventlog.Subscription
+		Subscribe(context.Context, harness.SubscribeOptions) (*eventlog.Subscription, error)
+		ID() string
 	}); ok {
-		sub := source.Subscribe(0)
-		return &observedSession{Session: s, sub: sub}, sub.Close
+		sub, err := source.Subscribe(context.Background(), harness.SubscribeOptions{})
+		if err != nil {
+			return &failedSession{Session: s, err: err}, func() {}
+		}
+		return &observedSession{Session: s, sub: sub, projection: projection.New(identity.SessionID(source.ID()))}, sub.Close
 	}
 	return s, func() {}
 }
@@ -34,6 +42,20 @@ func (s *observedSession) NextEvent(ctx context.Context) (conversation.Event, er
 		}
 		if err != nil {
 			return nil, err
+		}
+		if err := s.projection.Apply(e); err != nil {
+			return nil, err
+		}
+		if e.Kind == "content_chunk" {
+			continue
+		}
+		if resolver, ok := s.Session.(interface {
+			ResolveRecord(context.Context, eventlog.Record) (eventlog.Record, error)
+		}); ok {
+			e, err = resolver.ResolveRecord(ctx, e)
+			if err != nil {
+				return nil, err
+			}
 		}
 		v, err := eventcodec.DecodeEvent(e)
 		if err != nil || v != nil {
@@ -56,3 +78,10 @@ func (s *observedSession) AutomaticContextTokens() bool {
 	}
 	return false
 }
+
+type failedSession struct {
+	Session
+	err error
+}
+
+func (s *failedSession) NextEvent(context.Context) (conversation.Event, error) { return nil, s.err }

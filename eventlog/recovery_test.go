@@ -99,3 +99,35 @@ func TestFailureWakesPublicationBeforePhysicalIOCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type sealedStore struct {
+	eventlog.Store
+	committed, release chan struct{}
+}
+
+func (s *sealedStore) Seal(ctx context.Context, o eventlog.Outcome) error {
+	if err := s.Store.Seal(ctx, o); err != nil {
+		return err
+	}
+	close(s.committed)
+	<-s.release
+	return nil
+}
+func TestFailureAfterSealCommitCannotRewriteOutcome(t *testing.T) {
+	s := &sealedStore{Store: memory(t, 10, 4096), committed: make(chan struct{}), release: make(chan struct{})}
+	l, err := eventlog.New(s, eventlog.Limits{Entries: 1, Bytes: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- l.Finish(ctx, eventlog.Outcome{}) }()
+	<-s.committed
+	l.Fail(errors.New("late timeout"))
+	close(s.release)
+	if err := <-done; err != nil || !l.Status().Sealed {
+		t.Fatal(err, l.Status())
+	}
+	if err := l.Dispose(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -8,7 +8,9 @@ import (
 )
 
 func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Submission, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, false)
 	if err != nil {
@@ -70,7 +72,9 @@ func (s *Store) contributor(actor identity.ActorID, id SubmissionID) bool {
 	return false
 }
 func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (result Work, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	original, err := s.target(actor, r.WorkTarget, true)
 	if err != nil {
@@ -91,7 +95,9 @@ func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (resul
 	return w.Clone(), nil
 }
 func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (result Audit, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, false)
 	if err != nil {
@@ -179,7 +185,9 @@ func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (result Audi
 	return a.Clone(), nil
 }
 func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (result Work, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, true)
 	if err != nil {
@@ -232,7 +240,9 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 // Cancelling repair cancels its implementation cycle. Cancelling an audit alone
 // returns the unchanged submission to needs_check so another auditor can review it.
 func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, err error) {
-	s.beginMutation()
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
 	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, true)
 	if err != nil {

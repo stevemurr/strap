@@ -31,6 +31,7 @@ var ErrUnauthorized = errors.New("HTTP access denied")
 var ErrNotFound = errors.New("session not found")
 
 type Options struct {
+	MaxRequests   int // Concurrent HTTP requests, including open streams; zero defaults to 256.
 	DefaultConfig harness.Config
 	// Authorize is required. A command capability grants trusted host operations,
 	// including selecting work actors; it is not model-tool authority.
@@ -60,6 +61,7 @@ func BearerToken(token string) func(*http.Request, Capability, string) error {
 // session. Close cancels service admission and disposes owned sessions; a caller
 // timeout retains ownership so another Close can finish cleanup.
 type Service struct {
+	requests  chan struct{}
 	cleanup   *resource.Group
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -71,6 +73,12 @@ type Service struct {
 }
 
 func New(ctx context.Context, options Options) (*Service, error) {
+	if options.MaxRequests == 0 {
+		options.MaxRequests = 256
+	}
+	if options.MaxRequests < 1 {
+		return nil, errors.New("MaxRequests must be positive")
+	}
 	if options.Authorize == nil {
 		return nil, errors.New("HTTP authorization callback is required")
 	}
@@ -81,7 +89,7 @@ func New(ctx context.Context, options Options) (*Service, error) {
 	}
 	options.DefaultConfig = options.DefaultConfig.Clone()
 	run, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	s := &Service{cleanup: resource.New(), ctx: run, cancel: cancel, options: options, sessions: make(map[string]*harness.Session), gate: admission.New(run)}
+	s := &Service{requests: make(chan struct{}, options.MaxRequests), cleanup: resource.New(), ctx: run, cancel: cancel, options: options, sessions: make(map[string]*harness.Session), gate: admission.New(run)}
 	s.mu.Lock()
 	s.stopOwner = context.AfterFunc(ctx, func() { _ = s.Close(context.Background()) })
 	s.mu.Unlock()

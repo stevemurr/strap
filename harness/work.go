@@ -25,19 +25,39 @@ func (s *Session) SubmitAudit(ctx context.Context, actor identity.ActorID, r wor
 	return s.workflow.SubmitAudit(ctx, actor, r)
 }
 func (s *Session) GetPlan(ctx context.Context, actor identity.ActorID, id work.PlanID) (work.Plan, error) {
-	return s.workflow.GetPlan(ctx, actor, id)
+	view, err := s.workView(ctx)
+	if err != nil {
+		return work.Plan{}, err
+	}
+	return view.GetPlan(actor, id)
 }
 func (s *Session) GetWork(ctx context.Context, actor identity.ActorID, id work.ID) (work.Work, error) {
-	return s.workflow.GetWork(ctx, actor, id)
+	view, err := s.workView(ctx)
+	if err != nil {
+		return work.Work{}, err
+	}
+	return view.GetWork(actor, id)
 }
 func (s *Session) GetSubmission(ctx context.Context, actor identity.ActorID, id work.SubmissionID) (work.Submission, error) {
-	return s.workflow.GetSubmission(ctx, actor, id)
+	view, err := s.workView(ctx)
+	if err != nil {
+		return work.Submission{}, err
+	}
+	return view.GetSubmission(actor, id)
 }
 func (s *Session) GetAudit(ctx context.Context, actor identity.ActorID, id work.AuditID) (work.Audit, error) {
-	return s.workflow.GetAudit(ctx, actor, id)
+	view, err := s.workView(ctx)
+	if err != nil {
+		return work.Audit{}, err
+	}
+	return view.GetAudit(actor, id)
 }
 func (s *Session) InspectWork(ctx context.Context, actor identity.ActorID, id work.ID) (work.Inspection, error) {
-	return s.workflow.InspectWork(ctx, actor, id)
+	view, err := s.workView(ctx)
+	if err != nil {
+		return work.Inspection{}, err
+	}
+	return view.InspectWork(actor, id)
 }
 func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r work.ReassignRequest) (work.Work, error) {
 	return s.workflow.ReassignWork(ctx, actor, r)

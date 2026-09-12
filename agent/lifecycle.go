@@ -47,8 +47,8 @@ func (a *Agent) State() State {
 	return a.control.state
 }
 
-// setStateLocked publishes ordered transitions. OnState must only enqueue the
-// notification; it must not call back into this agent or block on a consumer.
+// setStateLocked stages a transition under the control lock. The emission owner
+// releases that lock before publishing the immutable state/revision pair.
 func (a *Agent) setStateLocked(state State) {
 	if a.control.state == state {
 		return
@@ -114,7 +114,7 @@ func (a *Agent) ResumeSnapshot() (StateSnapshot, error) {
 	return s, a.reportError()
 }
 func (a *Agent) Resume() (State, error) { s, e := a.ResumeSnapshot(); return s.State, e }
-func (a *Agent) RequestStopSnapshot() StateSnapshot {
+func (a *Agent) RequestStopSnapshot() (StateSnapshot, error) {
 	// This short control boundary also fences successful response commitment.
 	a.control.mu.Lock()
 	a.stopRequested.Store(true)
@@ -135,9 +135,9 @@ func (a *Agent) RequestStopSnapshot() StateSnapshot {
 	}
 	s := StateSnapshot{a.control.state, a.control.revision}
 	a.unlockAndReportState()
-	return s
+	return s, a.reportError()
 }
-func (a *Agent) RequestStop() State { return a.RequestStopSnapshot().State }
+func (a *Agent) RequestStop() State { s, _ := a.RequestStopSnapshot(); return s.State }
 func (a *Agent) checkpoint(ctx context.Context) error {
 	for {
 		if err := a.reportError(); err != nil {

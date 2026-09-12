@@ -44,7 +44,7 @@ func (d Data) Size() int {
 	return len(d.Kind) + len(d.Agent) + len(d.Correlation) + len(d.Payload) + 128
 }
 func (d Data) Validate() error {
-	if d.Kind == "" || len(d.Kind) > 128 || len(d.Agent) > 256 || len(d.Correlation) > 256 || !json.Valid(d.Payload) {
+	if d.Kind == "" || len(d.Kind) > 128 || len(d.Agent) > 256 || len(d.Correlation) > 256 || len(d.Message) > 256 || d.Output != nil && (len(d.Output.Agent) > 256 || d.Output.Agent == "" || d.Output.Call == 0) || !json.Valid(d.Payload) {
 		return errors.New("invalid event data")
 	}
 	return nil
@@ -98,7 +98,7 @@ type Page struct {
 type Store interface {
 	Head(context.Context) (Head, error)
 	Wait(context.Context, Cursor) (Head, error)
-	Fail(error)
+	Fail(error) Head
 	Append(context.Context, Data) (Event, error)
 	Read(context.Context, Query) (Page, error)
 	Seal(context.Context, Outcome) error

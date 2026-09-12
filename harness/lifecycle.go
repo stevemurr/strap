@@ -20,6 +20,7 @@ const (
 )
 
 var ErrClosed = admission.ErrClosed
+var ErrBusy = admission.ErrBusy
 
 type closeAttempt struct {
 	done chan struct{}
@@ -88,13 +89,13 @@ func (s *Session) finalize(a *closeAttempt) {
 	s.mu.Lock()
 	s.outcome.CleanupError = ""
 	if err != nil {
-		s.outcome.CleanupError = err.Error()
+		s.outcome.CleanupError = eventlog.Summary(err.Error())
 	}
 	if s.executionError != nil {
-		s.outcome.Error = s.executionError.Error()
+		s.outcome.Error = eventlog.Summary(s.executionError.Error())
 	}
 	if s.startupError != "" {
-		s.outcome.Error = s.startupError
+		s.outcome.Error = eventlog.Summary(s.startupError)
 	}
 	outcome := *s.outcome
 	s.mu.Unlock()

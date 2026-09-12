@@ -113,8 +113,8 @@ func OpenJSONL(ctx context.Context, path string) (*JSONL, error) {
 	if err != nil {
 		return nil, err
 	}
-	if stat.Size() != s.end {
-		s.outcome = nil
+	if stat.Size() != s.end && s.outcome != nil {
+		return nil, errors.New("unconfirmed bytes after terminal record")
 	}
 	if s.outcome == nil {
 		s.failed = errors.New("interrupted archive: no confirmed terminal record")
@@ -220,19 +220,18 @@ func (s *JSONL) write(ctx context.Context, d Data, outcome *Outcome) (Event, err
 		err = s.syncFile()
 	}
 	if err != nil {
-		s.Fail(err)
-		return Event{}, err
+		return Event{}, s.discardTail(offset, err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.writable(); err != nil {
-		return Event{}, err
+		s.mu.Unlock()
+		return Event{}, s.discardTail(offset, err)
 	}
 	if err := ctx.Err(); err != nil {
-		s.failed = errors.Join(ErrCapture, err)
-		s.signal()
-		return Event{}, s.failed
+		s.mu.Unlock()
+		return Event{}, s.discardTail(offset, err)
 	}
+	defer s.mu.Unlock()
 	s.latest = seq
 	s.end = offset + int64(n)
 	if outcome != nil {
@@ -241,6 +240,16 @@ func (s *JSONL) write(ctx context.Context, d Data, outcome *Outcome) (Event, err
 	}
 	s.signal()
 	return e, nil
+}
+
+// Failed, uncommitted physical bytes are removed when the backend remains
+// writable. Failure status is visible before this cleanup I/O begins.
+func (s *JSONL) discardTail(offset int64, err error) error {
+	s.Fail(err)
+	if cleanup := s.file.Truncate(offset); cleanup != nil {
+		return errors.Join(err, fmt.Errorf("discard uncommitted tail: %w", cleanup))
+	}
+	return err
 }
 func (s *JSONL) Read(ctx context.Context, q Query) (Page, error) {
 	if err := q.Validate(); err != nil {
@@ -297,7 +306,7 @@ func (s *JSONL) Read(ctx context.Context, q Query) (Page, error) {
 		}
 		if q.MaxBytes > 0 && bytes+e.Size() > q.MaxBytes {
 			if len(p.Events) == 0 {
-				return p, ErrPageSize
+				return p, &PageBudgetError{Required: e.Size(), Budget: q.MaxBytes}
 			}
 			break
 		}

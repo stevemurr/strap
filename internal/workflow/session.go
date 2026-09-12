@@ -24,8 +24,8 @@ type binding struct {
 	recipient, owner identity.ActorID
 }
 
-// Session is the application's single consumer of controller events. It publishes
-// to the configured callback or a separate host relay, without waiting for a UI reader.
+// Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
+// those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
 	publish   func(conversation.Event) error
 	closing   atomic.Bool

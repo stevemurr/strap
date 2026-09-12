@@ -41,7 +41,18 @@ func (f ReporterFunc) Publish(ctx context.Context, e Event) error { return f(ctx
 type Option func(*Store)
 
 func WithReporter(r Reporter) Option { return func(s *Store) { s.reporter = r } }
-func (s *Store) beginMutation()      { s.emission.Lock(); s.mu.Lock(); s.change = Change{} }
+func (s *Store) beginMutation() error {
+	s.emission.Lock()
+	s.mu.Lock()
+	if s.failure != nil {
+		err := s.failure
+		s.mu.Unlock()
+		s.emission.Unlock()
+		return err
+	}
+	s.change = Change{}
+	return nil
+}
 func (s *Store) endMutation(err *error) {
 	start := s.visibleEvents
 	if len(s.events) > start {
@@ -62,6 +73,9 @@ func (s *Store) endMutation(err *error) {
 		}
 	}
 	s.mu.Lock()
+	if publishErr != nil {
+		s.failure = publishErr
+	}
 	if publishErr == nil {
 		s.visibleEvents = len(s.events)
 		if len(events) > 0 {
@@ -71,6 +85,7 @@ func (s *Store) endMutation(err *error) {
 			}
 		}
 	}
+	s.change = Change{}
 	s.mu.Unlock()
 	s.emission.Unlock()
 	*err = errors.Join(*err, publishErr)

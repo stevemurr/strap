@@ -57,7 +57,7 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 		}
 		var detached chan struct{}
 		if attached {
-			sub := s.Subscribe(0)
+			sub, _ := s.Subscribe(context.Background(), harness.SubscribeOptions{})
 			detached = make(chan struct{})
 			go func() {
 				defer close(detached)

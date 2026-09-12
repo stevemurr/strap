@@ -1,7 +1,8 @@
 # Streaming and recoverable session views
 
-Status: revised design, not implemented. Audited 2026-09-12 against repository
-state `094885f`. This is the proposed successor to the observation contracts in
+Implementation: the architecture is now implemented. See [harness/RECOVERY.md](harness/RECOVERY.md) for the concrete API, migration notes, and implementation refinements. The sketches below preserve the design discussion.
+Status: implemented; this document preserves the revised design. Audited 2026-09-12 against repository
+state `094885f`. This is the successor to the observation contracts in
 [HARNESS_DESIGN.md](HARNESS_DESIGN.md), recorded in
 [ADR-002](docs/architecture/ADR-002-recoverable-session-log.md).
 

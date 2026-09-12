@@ -119,3 +119,19 @@ func TestStopCancelsProviderWhileDeltaPublicationIsBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStopAcknowledgmentReportsRecordingFailure(t *testing.T) {
+	c := config()
+	sentinel := errors.New("stop record failed")
+	c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+		if s, ok := e.(agent.StateSnapshot); ok && s.State == agent.StopRequested {
+			return sentinel
+		}
+		return nil
+	})
+	a := mustAgent(t, c)
+	state, err := a.RequestStopSnapshot()
+	if state.State != agent.StopRequested || !errors.Is(err, sentinel) {
+		t.Fatal(state, err)
+	}
+}
