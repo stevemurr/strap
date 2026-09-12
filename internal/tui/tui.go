@@ -12,7 +12,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -74,7 +74,7 @@ type model struct {
 	cancel         context.CancelFunc
 	session        Session
 	options        Options
-	input          textinput.Model
+	input          textarea.Model
 	viewport       viewport.Model
 	entries        []entry
 	working        map[message.ActorID]bool
@@ -111,13 +111,7 @@ var (
 )
 
 func newModel(ctx context.Context, cancel context.CancelFunc, session Session, options Options) *model {
-	input := textinput.New()
-	input.Prompt = "› "
-	input.PromptStyle = titleStyle
-	input.PlaceholderStyle = dimStyle
-	input.Placeholder = "Send a message…"
-	input.CharLimit = 0
-	input.Focus()
+	input := newInput()
 	m := &model{
 		ctx: ctx, cancel: cancel, session: session, options: options,
 		input: input, viewport: viewport.New(80, 17), width: 80, height: 24,
@@ -131,7 +125,7 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 	return m
 }
 
-func (m *model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.spinner.Tick, m.listen()) }
+func (m *model) Init() tea.Cmd { return tea.Batch(textarea.Blink, m.spinner.Tick, m.listen()) }
 
 func (m *model) listen() tea.Cmd {
 	return func() tea.Msg {
@@ -161,6 +155,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case agentTableCount:
 		m.finishAgentTableCount(msg)
+		return m, nil
+	case inputPaste:
+		if !m.selecting {
+			if msg.err != nil {
+				m.add("Error", "Paste failed: "+msg.err.Error(), false)
+			} else {
+				m.input.InsertString(normalizeInput(msg.text))
+			}
+		}
 		return m, nil
 	case clipboardResult:
 		if m.mouseSelection == msg.selection {
@@ -241,17 +244,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.submit()
-		case "up":
+		case "alt+up", "alt+down":
 			if m.selecting {
 				return m, nil
 			}
-			m.recall(-1)
+			direction := 1
+			if msg.String() == "alt+up" {
+				direction = -1
+			}
+			m.recall(direction)
 			return m, nil
-		case "down":
+		case "up", "down":
 			if m.selecting {
 				return m, nil
 			}
-			m.recall(1)
+			if m.input.LineCount() == 1 && m.input.LineInfo().Height == 1 {
+				direction := 1
+				if msg.String() == "up" {
+					direction = -1
+				}
+				m.recall(direction)
+				return m, nil
+			}
+		case "ctrl+v":
+			if !m.selecting {
+				return m, pasteInput
+			}
+			return m, nil
+		case "tab":
+			if !m.selecting {
+				m.input.InsertString("    ")
+			}
 			return m, nil
 		case "pgup", "pgdown":
 			var cmd tea.Cmd
@@ -272,24 +295,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyRunes {
+		key.Runes = []rune(normalizeInput(string(key.Runes)))
+		msg = key
+	}
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
 
 func (m *model) submit() (tea.Model, tea.Cmd) {
 	defer m.refreshActivity()
-	text := strings.TrimSpace(m.input.Value())
-	if text == "" {
+	text := m.input.Value()
+	if strings.TrimSpace(text) == "" {
 		return m, nil
 	}
-	if strings.HasPrefix(text, "/") {
+	if !strings.Contains(text, "\n") && strings.HasPrefix(strings.TrimSpace(text), "/") {
 		m.input.Reset()
 		fields := strings.Fields(text)
 		switch fields[0] {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling.", true)
+			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling.", true)
 		case "/clear":
 			m.entries = nil
 			m.renderTranscript(true)
@@ -491,9 +518,11 @@ func (m *model) quit() (tea.Model, tea.Cmd) {
 
 func (m *model) resize(width, height int) {
 	m.width, m.height = max(1, width), max(1, height)
-	m.input.Width = max(1, m.width-5)
+	// Keep two text columns internally so wide runes remain navigable even
+	// when the terminal is smaller; renderView clips each displayed row.
+	m.input.SetWidth(max(4, m.width-2))
 	m.viewport.Width = max(1, m.width-2)
-	m.viewport.Height = max(1, m.height-6-m.completionHeight())
+	m.syncCompletion()
 	m.renderTranscript(false)
 	if m.transcript != nil {
 		m.resizeAgentTranscript()
@@ -611,7 +640,11 @@ func (m *model) renderView() string {
 	}
 	line := func(s string) string { return ansi.Truncate(" "+s, m.width, "") }
 	if m.height < 8 {
-		return line(m.input.View())
+		var rows []string
+		for _, row := range strings.Split(m.input.View(), "\n") {
+			rows = append(rows, line(row))
+		}
+		return strings.Join(rows, "\n")
 	}
 	lines := []string{
 		line(m.header()),
@@ -620,8 +653,11 @@ func (m *model) renderView() string {
 	for _, suggestion := range m.completionView() {
 		lines = append(lines, line(suggestion))
 	}
+	lines = append(lines, line(dimStyle.Render(strings.Repeat("─", max(1, m.width-2)))))
+	for _, row := range strings.Split(m.input.View(), "\n") {
+		lines = append(lines, line(row))
+	}
 	lines = append(lines,
-		line(dimStyle.Render(strings.Repeat("─", max(1, m.width-2)))), line(m.input.View()),
 		line(m.activityLine()),
 		line(dimStyle.Render(m.footer())),
 	)
@@ -659,5 +695,5 @@ func (m *model) footer() string {
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter send · Scroll history · Drag copy · F2 freeze · /help"
+	return "Enter send · Alt+Enter / Ctrl+J newline · /help"
 }

@@ -301,6 +301,51 @@ and work-level reporting to auditors. The work store still enforces ownership,
 scope, revisions and legal transitions under its lock. Tool contracts do not confer
 authority or replace those checks.
 
+## Web tool ownership
+
+`tool.Web` owns web research resources for one host session. It exposes two typed
+tools shared across root, implementation, and audit agents. Browser resources
+are lazy; unavailable executables fail only their respective tool calls. The CLI
+owns construction and closes Web after stopping the conversation. Tool results
+use the existing content/history path and ToolEvent/OnCommentary presentation.
+
+`internal/webkit` implements wkrender worker protocol 1 with a single lazy
+process, correlated replies, four admission slots, bounded JSON/diagnostic I/O,
+and independent cancellation. Cancellation retains a slot until acknowledged;
+an unresponsive worker is stopped. Protocol failures/crashes fail outstanding
+requests; the next call starts a replacement. Search requests use search readiness
+and the DuckDuckGo HTML endpoint. Parsing preserves rank, unwraps redirects and
+deduplicates destinations. A challenge or unfamiliar markup cannot masquerade
+as a successful empty search. The HTTP fallback from harness is not included.
+
+`internal/agentbrowser` targets native agent-browser 0.37.1. Each page operation
+gets a unique namespace, explicit empty configuration, temporary profile and
+private socket directory. Fixed argv calls open the URL, check rendered readiness,
+read the active DOM, and collect bounded title/link metadata. Readable text can
+omit URLs, so links are returned separately. No model argument becomes shell
+code or a page-evaluation script. Ambient agent-browser settings are excluded,
+and daemon configuration stays constant across the operation (changing it can
+restart the backend). New navigation during extraction is an error.
+
+The runtime admits two page reads concurrently. The operation deadline includes
+queueing and backend startup. Cleanup uses an independent five-second context.
+In the pinned release, close is serialized behind navigation; if it stalls, the
+Unix adapter locates the daemon via its private PID file, verifies its identity,
+and stops only its descendant browser groups and the daemon. It never selects
+the user's browser or another operation. Profile and socket files belong to the
+operation's temporary directory. Failures to clean up remain visible errors.
+
+Page chunks reference immutable, actor/URL-scoped snapshots, not browser tabs.
+The bounded expiring cache stores extracted Unicode text and metadata; reading a
+cursor never reloads the site. More cached text (`truncated`/`next_cursor`) is
+distinct from discarded source text (`document_truncated`). The browser closes
+before the first chunk returns. Cache eviction/expiry produces an explicit error;
+callers can reopen the URL. No persistence or shared browser login state is added.
+
+See the README's Web research section for executable setup, defaults, and live
+validation. The implementation draws on harness's search parser and wkrender
+worker, while page reads use agent-browser as the requested backend.
+
 ## Message and acknowledgment contract
 
 ```text

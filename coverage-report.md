@@ -1,4 +1,37 @@
-# Package coverage
+# Web tool coverage
+
+Measured on 2026-09-11 with Go 1.27.0 on macOS/arm64. The complete compiled Go
+path for `web_search` and `open_url` has **100% statement coverage: 680 / 680**.
+
+| Source | Covered / total statements |
+| --- | ---: |
+| `tool/web_search.go` | 90 / 90 |
+| `tool/open_url.go` | 109 / 109 |
+| `tool/web.go` | 72 / 72 |
+| `internal/agentbrowser/client.go` | 103 / 103 |
+| `internal/agentbrowser/cleanup_unix.go` | 63 / 63 |
+| `internal/webkit/worker.go` | 197 / 197 |
+| `internal/webprocess/process.go` | 37 / 37 |
+| `internal/webprocess/process_unix.go` | 9 / 9 |
+
+Run `sh scripts/check-web-coverage.sh` to repeat the offline tests with the race
+detector and fail on any uncovered statement in these tool files or backend
+packages. The check includes every source file compiled for the host platform
+in those backend packages; it does not round percentages to decide whether to
+pass. The complete repository also passed `go test -race ./...`.
+
+Tests exercise argument and response limits, rendered-page validation, snapshot
+continuation and eviction, worker protocol failures, startup and queue
+cancellation, and cleanup failures. OS operations can be replaced per client or
+cleanup call so error tests never signal a real browser. These Go coverage
+numbers do not measure the embedded DOM JavaScript, external browser binaries,
+or other platforms. Live browser and model checks remain opt-in; see the web
+tools section of [README.md](README.md).
+
+# Historical package coverage
+
+The following snapshot predates the web tool coverage work and is retained for
+comparison. Its package percentages are not the current repository totals.
 
 Measured on 2026-09-11 (macOS/arm64), using Go statement coverage.
 

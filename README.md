@@ -53,6 +53,10 @@ Shell and file tools run in the current directory, or the directory selected wit
 prompt and omit the write/edit-file tools; shell access still has host permissions.
 The CLI also provides `read_pdf`; see the PDF example below for its image-model
 and Poppler requirements.
+`web_search` and `open_url` are enabled for all three agent roles; see
+[Web research](#web-research) for their browser dependencies. Use `-web=false`
+to omit them. Missing backends produce a tool error when called; startup does not
+launch a browser.
 Commands run with host permissions, without a sandbox or approval prompt.
 
 Type a message and press Enter. Input stays available while agents work. The
@@ -124,10 +128,22 @@ to select and Tab to complete. Enter on a partial command fills it in; Enter on
 a complete command runs it. Escape dismisses suggestions. Commands that accept
 an agent ID leave space to type the argument after completion.
 
+Enter sends the entire draft. Alt+Enter or Ctrl+J inserts a newline; multiline
+paste stays in the draft until you send it. The input grows up to six visible
+rows and scrolls to keep the cursor visible. Up / Down moves within multiline
+or wrapped drafts; Alt+Up / Alt+Down recalls message history and restores your
+unfinished draft. Single-line drafts also retain Up / Down history navigation.
+Tab inserts four spaces outside slash completion. Slash commands run only from
+a single-line draft, so pasted multiline text beginning with `/` is sent as a
+message. Leading indentation and trailing newlines are preserved when sending.
+
 | Key or command | Action |
 |---|---|
-| Up / Down | Select a slash suggestion, or recall input history |
-| Tab / Escape | Complete / dismiss slash suggestions |
+| Enter | Send the draft, or complete / run a slash command |
+| Alt+Enter / Ctrl+J | Insert a newline |
+| Up / Down | Select a suggestion, move within multiline input, or recall single-line history |
+| Alt+Up / Alt+Down | Recall history / restore the unfinished draft |
+| Tab / Escape | Complete / dismiss suggestions; Tab otherwise inserts four spaces |
 | Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |
 | Ctrl-Home / Ctrl-End | Jump to the beginning / end |
 | F2 | Freeze / resume display updates for copying |
@@ -381,6 +397,119 @@ pause. Stop is terminal; it does not undo completed side effects. `AgentExited`
 confirms loop exit and follows reporting of unconsumed messages. Repeated stop
 requests are harmless; stopped/failed agents cannot resume. Stopping a parent
 does not stop its children; conversation close cancels and joins every agent.
+
+## Web research
+
+`web_search` searches DuckDuckGo through **wkrender**, the native macOS WebKit
+renderer. It returns ranked titles, destination URLs and snippets. `open_url`
+uses **agent-browser 0.37.1** to load a page in its own headless Chrome session
+and read the rendered DOM. It returns readable text and a separate list of link
+destinations. Both use ordinary tool activity and agent commentary in the console.
+
+Install wkrender from the neighboring checkout on macOS (Swift/Xcode required):
+
+```sh
+make -C ../wkrender install
+```
+
+The default location is `~/.harness/bin/wkrender`. Strap requires worker protocol
+1, four concurrent slots, and search readiness. It keeps the worker warm and
+cancels individual searches independently. Search challenges and unknown result
+markup are errors; only an explicit no-results page produces an empty list.
+There is no HTTP search fallback.
+
+Install the pinned agent-browser package in an isolated directory:
+
+```sh
+npm install --prefix "$HOME/.local/share/strap/agent-browser" --save-exact agent-browser@0.37.1
+```
+
+Strap discovers the packaged native executable there if `agent-browser` is not
+on PATH. The package's installer declares Node 24+; the native browser runtime
+does not need Node. On macOS, Strap uses the installed Google Chrome executable
+when present. Otherwise install Chrome through agent-browser (`agent-browser
+install` using your installed executable), or provide a path explicitly. See the
+[upstream installation instructions](https://agent-browser.dev/installation).
+
+```sh
+go run ./cmd/strap -wkrender /path/to/wkrender -agent-browser /path/to/agent-browser
+go run ./cmd/strap -browser-executable /path/to/chrome
+go run ./cmd/strap -web=false
+```
+
+Executable paths and backend selection belong to the host. The model sees only:
+
+```json
+{"query":"Go context package documentation","max_results":8}
+```
+
+```json
+{"url":"https://pkg.go.dev/context","max_chars":20000}
+```
+
+Search returns `query` and `results: [{title, url, snippet}]`, with at most ten
+hits. Page reads return `url`, `final_url`, `title`, `content_type`, `content`,
+`links`, `truncated`, and `document_truncated`. A `links_truncated` flag marks
+omitted link metadata. The page reader supports HTML and text, not PDF/image
+extraction or interactive browser actions.
+
+When `truncated` is true, continue with the returned `next_cursor`:
+
+```json
+{"url":"https://pkg.go.dev/context","cursor":"<next_cursor>","max_chars":20000}
+```
+
+Continuation reads an immutable cached text snapshot without another navigation.
+The cursor belongs to the calling agent and the original requested URL. Snapshots
+expire after ten minutes or are evicted for space; an unavailable cursor requires
+reopening the URL without it. Share URLs, not cursors, with other agents.
+`document_truncated` separately means the backend or retention limit discarded
+the document's tail; a continuation cannot recover that tail.
+
+Defaults are a 20-second search budget, a 30-second page-read budget (both include
+queuing/startup), four concurrent searches, two concurrent browser reads, 20,000
+characters per page chunk (200–50,000 allowed), one million retained characters
+per document, and a 16 MiB/64-snapshot cache. Returned link metadata is bounded to
+16 KiB. Browser cleanup has a separate five-second budget.
+
+Browser reads use fresh profiles and private socket directories, with no user
+profile restoration or ambient agent-browser configuration. The adapter uses
+`open <url>` then bare `read`; `read <url>` would fetch directly rather than read
+the rendered page. A bounded readiness check handles initially empty/loading
+pages. Temporary browser sessions close after extraction, including on failure
+or cancellation. The pinned Unix adapter can stop its owned browser/daemon
+processes if a stuck navigation prevents normal close. WebKit requires macOS;
+the agent-browser adapter is exercised on macOS and has Unix cleanup for Linux.
+These tools have host network access, including local development URLs.
+
+Library hosts construct `tool.NewWeb(tool.WebConfig{...})`, share `web.Tools()`
+with their agents, and call `web.Close(cleanupCtx)` after stopping those agents.
+The CLI performs that cleanup. Browser state and snapshots stay outside model
+history; returned search/page text enters history as ordinary tool results.
+Agent prompts direct the model to read primary sources, cite actual source URLs,
+and treat retrieved content as evidence rather than instructions.
+
+Offline fixtures cover worker failures, cancellation, browser command isolation,
+result parsing, cache bounds, Unicode continuation, and cursor ownership. Real
+browser checks are opt-in:
+
+```sh
+go test -race ./...
+sh scripts/check-web-coverage.sh
+STRAP_LIVE_WEB=1 go test -race ./tool -run TestLiveWeb -count=1 -v
+STRAP_LIVE_WEB=1 STRAP_LIVE_BASE_URL=http://localhost:8000 go test ./cmd/strap -run TestLiveWebResearch -count=1 -v
+```
+
+The coverage check requires 100% Go statement coverage for `web_search.go`,
+`open_url.go`, the shared `web.go` runtime, and all compiled files in
+`internal/agentbrowser`, `internal/webkit`, and `internal/webprocess`. It runs
+offline tests with the race detector; live browser behavior and embedded DOM
+scripts are validated by the separate opt-in checks below.
+
+Backend live checks use a local JavaScript page, redirects, long text, concurrent
+readers, cancelled navigation, and two external searches. The model check asks
+the configured server to search, read, and cite an official source. Optional executable overrides
+are `STRAP_WKRENDER`, `STRAP_AGENT_BROWSER`, and `STRAP_BROWSER_EXECUTABLE`.
 
 ## PDF reading and image results
 

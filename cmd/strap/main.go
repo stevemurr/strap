@@ -29,6 +29,10 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	model := flags.String("model", "qwen3.6", "Model served by the local endpoint")
 	timeout := flags.Duration("timeout", 60*time.Minute, "Timeout for each model HTTP request")
 	dir := flags.String("C", ".", "Working directory for shell and file tools")
+	webEnabled := flags.Bool("web", true, "Enable web_search and open_url (backends start lazily)")
+	wkPath := flags.String("wkrender", "", "Path to wkrender (default PATH or ~/.harness/bin/wkrender)")
+	abPath := flags.String("agent-browser", "", "Path to agent-browser 0.37.1 (default PATH or Strap's isolated installation)")
+	browserPath := flags.String("browser-executable", "", "Chrome executable for open_url (default installed Chrome on macOS or agent-browser discovery)")
 	modelOptions := modelFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -49,6 +53,19 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	local, err := localTools(*dir)
 	if err != nil {
 		return err
+	}
+	if *webEnabled {
+		web, webErr := tool.NewWeb(tool.WebConfig{WKRenderPath: *wkPath, AgentBrowserPath: *abPath, BrowserExecutablePath: *browserPath})
+		if webErr != nil {
+			return webErr
+		}
+		local = append(local, web.Tools()...)
+		// Registered before the conversation cleanup so agents stop first.
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err = errors.Join(err, web.Close(cleanup))
+		}()
 	}
 	c := conversation.New(ctx)
 	// Tool order is what the model sees: agent.New walks Spec.Tools in order.

@@ -13,7 +13,7 @@ func TestHelpDoesNotOpenTerminalOrModel(t *testing.T) {
 	if err := run(context.Background(), []string{"-help"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"-base-url", "-model", "-timeout", "-C", "-backend", "-preset", "-temperature", "-thinking"} {
+	for _, flag := range []string{"-base-url", "-model", "-timeout", "-C", "-backend", "-preset", "-temperature", "-thinking", "-web", "-wkrender", "-agent-browser", "-browser-executable"} {
 		if !strings.Contains(out.String(), flag) {
 			t.Fatal(out.String())
 		}

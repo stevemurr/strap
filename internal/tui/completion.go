@@ -34,7 +34,7 @@ type completionState struct {
 func (m *model) completionMatches() []slashCommand {
 	text := m.input.Value()
 	if m.completion.dismissed || !strings.HasPrefix(text, "/") ||
-		strings.ContainsFunc(text, unicode.IsSpace) || m.input.Position() != utf8.RuneCountInString(text) {
+		strings.ContainsFunc(text, unicode.IsSpace) || m.input.LineInfo().StartColumn+m.input.LineInfo().ColumnOffset != utf8.RuneCountInString(text) {
 		return nil
 	}
 	var matches []slashCommand
@@ -47,7 +47,7 @@ func (m *model) completionMatches() []slashCommand {
 }
 
 func (m *model) completionHeight() int {
-	return min(5, len(m.completionMatches()), max(0, m.height-8))
+	return min(5, len(m.completionMatches()), max(0, m.height-7-m.input.Height()))
 }
 
 func (m *model) syncCompletion() {
@@ -55,7 +55,8 @@ func (m *model) syncCompletion() {
 		m.completion = completionState{query: m.input.Value()}
 	}
 	m.completion.selected = min(m.completion.selected, max(0, len(m.completionMatches())-1))
-	height := max(1, m.height-6-m.completionHeight())
+	m.syncInputHeight()
+	height := max(1, m.height-5-m.input.Height()-m.completionHeight())
 	if m.viewport.Height != height {
 		bottom, offset := m.viewport.AtBottom(), m.viewport.YOffset
 		m.viewport.Height = height
