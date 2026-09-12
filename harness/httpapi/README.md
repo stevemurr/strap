@@ -86,3 +86,18 @@ session commands. Retention gaps remain explicit even after session closure.
 
 Run `go test -race ./harness/httpapi` for the direct/HTTP audit-repair parity,
 authorization, revision, paging and real connection disconnect/reconnect tests.
+
+Run the opt-in smoke test against a live vLLM model with:
+
+```sh
+STRAP_LIVE_BASE_URL=http://192.168.1.237:8355 \
+  go test -race ./harness/httpapi -run '^TestLiveModelHTTP$' -count=1 -timeout 3m -v
+```
+
+`STRAP_LIVE_MODEL` optionally overrides `qwen3.6`. This starts a real local HTTP
+server using the real provider factory and a temporary workspace. It checks a
+plain reply, observer disconnect/reconnect, a file-read tool round trip, usage and
+automatic context counting, contiguous streamed events, finite-page agreement,
+clean JSONL sealing, and disposal. It uses a short test prompt, disables thinking
+and web tools, and limits each completion to 512 tokens. Ordinary tests skip it
+when `STRAP_LIVE_BASE_URL` is unset.
