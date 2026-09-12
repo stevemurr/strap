@@ -257,8 +257,10 @@ type InspectOptions struct {
 
 type AgentInspection struct {
 	AgentInfo
-	Usage      agent.UsageSnapshot   `json:"usage"`
-	Transcript *agent.TranscriptPage `json:"transcript,omitempty"`
+	ContextRevision  uint64                `json:"context_revision"`
+	OutputTokenLimit *int64                `json:"output_token_limit,omitempty"`
+	Usage            agent.UsageSnapshot   `json:"usage"`
+	Transcript       *agent.TranscriptPage `json:"transcript,omitempty"`
 }
 
 // InspectAgent returns state, usage, and an optional independent transcript.
@@ -273,7 +275,7 @@ func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (A
 	info, runner := owned.info, owned.agent
 	c.mu.Unlock()
 	info.State = runner.State()
-	inspection := AgentInspection{AgentInfo: info, Usage: runner.Usage()}
+	inspection := AgentInspection{AgentInfo: info, Usage: runner.Usage(), ContextRevision: runner.ContextRevision(), OutputTokenLimit: runner.OutputTokenLimit()}
 	if options.Transcript != nil {
 		page, err := runner.Transcript(*options.Transcript)
 		if err != nil {

@@ -16,6 +16,9 @@ func (m *model) renderBody(e *entry) string {
 		return e.rendered
 	}
 	body := e.body
+	if e.agents != nil {
+		body = e.agents.render(width)
+	}
 	if e.label == "Strap" || e.label == "Message" || e.label == "You" {
 		if m.markdown == nil || m.markdownWidth != width {
 			renderer, err := newMarkdownRenderer(width, lipgloss.HasDarkBackground(), lipgloss.ColorProfile())

@@ -65,6 +65,7 @@ type entry struct {
 	rendered          string
 	tool              toolKey
 	tokens            *contextTokens
+	agents            *agentsTable
 }
 
 type model struct {
@@ -99,6 +100,7 @@ type model struct {
 	completion     completionState
 	mouseSelection *mouseSelection
 	copyText       func(string) error
+	nextTableID    uint64
 }
 
 var (
@@ -156,6 +158,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case countedTokens:
 		m.finishTokenCount(msg)
+		return m, nil
+	case agentTableCount:
+		m.finishAgentTableCount(msg)
 		return m, nil
 	case clipboardResult:
 		if m.mouseSelection == msg.selection {
@@ -284,7 +289,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agents and their status\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling.", true)
+			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · ↑/↓ input history · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling.", true)
 		case "/clear":
 			m.entries = nil
 			m.renderTranscript(true)
@@ -326,16 +331,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 				m.add("Agent", fmt.Sprintf("%s · %s · parent %s", info.ID, info.State, info.Parent), true)
 			}
 		case "/agents":
-			var lines []string
-			for _, a := range m.session.Agents() {
-				status := string(a.State)
-				role := ""
-				if a.ID == m.session.Root() {
-					role = " (root)"
-				}
-				lines = append(lines, fmt.Sprintf("%s%s · %s · parent %s", a.ID, role, status, a.Parent))
-			}
-			m.add("Agents", strings.Join(lines, "\n"), true)
+			return m, m.showAgents()
 		default:
 			m.add("System", "Unknown command. Type /help.", true)
 		}

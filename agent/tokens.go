@@ -8,6 +8,25 @@ import (
 	"github.com/stevemurr/strap/provider"
 )
 
+// ContextRevision identifies the current retained history, including replies
+// and tool results. Queued inbox messages have not entered that history yet.
+func (a *Agent) ContextRevision() uint64 {
+	a.thread.mu.RLock()
+	defer a.thread.mu.RUnlock()
+	return a.thread.revision
+}
+
+// OutputTokenLimit reads optional provider metadata without model execution.
+func (a *Agent) OutputTokenLimit() *int64 {
+	if p, ok := a.config.Spec.Provider.(provider.OutputTokenLimiter); ok {
+		if limit := p.OutputTokenLimit(); limit != nil && *limit > 0 {
+			copy := *limit
+			return &copy
+		}
+	}
+	return nil
+}
+
 // CountTokens measures an exact history revision with this agent's provider and
 // tool definitions. It may perform I/O, but never holds the history lock during
 // tokenization or changes usage accounting. It remains available after exit.

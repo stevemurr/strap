@@ -87,6 +87,16 @@ the latest completed batch's count, not a sum or the size of tool output alone.
 Counting runs in the background with a ten-second timeout. Unsupported providers
 and counting failures show `context tokens unavailable`; agents keep running.
 
+`/agents` shows each agent's state, parent, context size, last-call output tokens,
+and configured output cap per model call. Context is counted in the background
+from each agent's history snapshot when you run the command, including ordinary
+replies and completed tool results. Run `/agents` again to refresh. The cap resets
+each call; output from previous calls does not reduce it. `—` means no call has
+returned yet; `unknown` means a count or cap is unavailable, including server
+defaults. Narrow terminals show labeled rows instead of columns. The CLI currently
+shares one provider configuration, so its agents share a cap while their usage
+and context sizes differ.
+
 Scroll with the mouse wheel, trackpad, or Page Up / Page Down to browse conversation
 history. New output preserves your position while you read. The footer shows your
 position in history; Ctrl-End returns to the latest output and resumes following it.
@@ -117,7 +127,7 @@ an agent ID leave space to type the argument after completion.
 | F2 | Freeze / resume display updates for copying |
 | Mouse drag, then release | Select and copy visible text to the clipboard |
 | F2, then mouse drag + terminal Copy | Select and copy visible text |
-| `/agents` | Show agents and their lifecycle state |
+| `/agents` | Show per-agent state, context tokens, last output, and output cap |
 | `/inspect [id]` | Inspect agent state; defaults to root |
 | `/transcript [id]` | Browse an agent’s actual conversation; defaults to root |
 | `/pause [id]` | Pause at an operation boundary; defaults to root |

@@ -26,11 +26,15 @@ func (c *contextTokens) label() string {
 	if c.failed {
 		return "context tokens unavailable"
 	}
-	digits := strconv.FormatInt(c.count, 10)
+	return tokenDigits(c.count) + " context tokens"
+}
+
+func tokenDigits(count int64) string {
+	digits := strconv.FormatInt(count, 10)
 	for i := len(digits) - 3; i > 0; i -= 3 {
 		digits = digits[:i] + "," + digits[i:]
 	}
-	return digits + " context tokens"
+	return digits
 }
 
 type countedTokens struct {

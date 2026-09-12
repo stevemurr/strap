@@ -35,6 +35,16 @@ type Client struct {
 
 var _ provider.Provider = (*Client)(nil)
 var _ provider.TokenCounter = (*Client)(nil)
+var _ provider.OutputTokenLimiter = (*Client)(nil)
+
+// OutputTokenLimit returns an independent copy of the configured per-call cap.
+func (c *Client) OutputTokenLimit() *int64 {
+	if c.generation.MaxTokens == nil {
+		return nil
+	}
+	limit := int64(*c.generation.MaxTokens)
+	return &limit
+}
 
 func New(config Config) (*Client, error) {
 	wire, err := chatwire.New(config.BaseURL, config.HTTPClient)
