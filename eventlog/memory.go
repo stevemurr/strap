@@ -3,28 +3,27 @@ package eventlog
 import (
 	"context"
 	"errors"
-	"sync"
 )
 
+// Memory retains every accepted record. Limits are quotas, never eviction rules.
+// Zero Limits means unlimited retained history; publication is bounded separately.
 type Memory struct {
-	mu       sync.Mutex
-	session  string
-	limits   Limits
-	events   []Event
-	bytes    int
-	latest   uint64
-	outcome  *Outcome
-	disposed bool
+	*storeState
+	limits Limits
+	events []Event
+	bytes  int
 }
 
 func NewMemory(session string, limits Limits) (*Memory, error) {
 	if session == "" {
 		return nil, errors.New("session identity is required")
 	}
-	if err := limits.Validate(); err != nil {
-		return nil, err
+	if limits != (Limits{}) {
+		if err := limits.Validate(); err != nil {
+			return nil, err
+		}
 	}
-	return &Memory{session: session, limits: limits}, nil
+	return &Memory{storeState: newState(session), limits: limits}, nil
 }
 func (m *Memory) Append(ctx context.Context, d Data) (Event, error) {
 	if err := ctx.Err(); err != nil {
@@ -33,29 +32,27 @@ func (m *Memory) Append(ctx context.Context, d Data) (Event, error) {
 	if err := d.Validate(); err != nil {
 		return Event{}, err
 	}
+	if d.Size() > MaxRecordBytes {
+		return Event{}, ErrRecordSize
+	}
+	d = d.Clone()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.disposed {
-		return Event{}, ErrDisposed
+	if err := m.writable(); err != nil {
+		return Event{}, err
 	}
-	if m.outcome != nil {
-		return Event{}, ErrSealed
-	}
-	return m.append(d), nil
+	return m.append(d)
 }
-func (m *Memory) append(d Data) Event {
-	d, _ = Fit(d, m.limits.Bytes)
-	m.latest++
-	e := Event{Schema: SchemaVersion, Session: m.session, Sequence: m.latest, Data: d.Clone()}
-	for len(m.events) > 0 && (len(m.events) >= m.limits.Entries || m.bytes+e.Size() > m.limits.Bytes) {
-		m.bytes -= m.events[0].Size()
-		copy(m.events, m.events[1:])
-		m.events[len(m.events)-1] = Event{}
-		m.events = m.events[:len(m.events)-1]
+func (m *Memory) append(d Data) (Event, error) {
+	if m.limits.Entries > 0 && len(m.events) >= m.limits.Entries || m.limits.Bytes > 0 && m.bytes+d.Size() > m.limits.Bytes {
+		return Event{}, ErrQuota
 	}
+	m.latest++
+	e := Event{Schema: SchemaVersion, Session: m.session, Sequence: m.latest, Data: d}
 	m.events = append(m.events, e)
 	m.bytes += e.Size()
-	return e.Clone()
+	m.signal()
+	return e.Clone(), nil
 }
 func (m *Memory) Read(ctx context.Context, q Query) (Page, error) {
 	if err := ctx.Err(); err != nil {
@@ -69,24 +66,30 @@ func (m *Memory) Read(ctx context.Context, q Query) (Page, error) {
 	if m.disposed {
 		return Page{}, ErrDisposed
 	}
-	p := Page{Next: q.After, Latest: m.latest, Sealed: m.outcome != nil}
+	p := Page{Latest: m.latest, Next: q.After, Sealed: m.outcome != nil, Head: m.head()}
+	if m.latest > 0 {
+		p.Earliest = 1
+	}
 	if m.outcome != nil {
 		o := *m.outcome
 		p.Outcome = &o
 	}
-	if len(m.events) > 0 {
-		p.Earliest = m.events[0].Sequence
-	}
 	if err := cursor(q, p.Earliest, p.Latest); err != nil {
 		return p, err
 	}
-	for _, e := range m.events {
-		if e.Sequence > q.After {
-			p.Events = append(p.Events, e.Clone())
-			p.Next = e.Sequence
-			if len(p.Events) == q.Limit {
-				break
+	bytes := 0
+	for _, e := range m.events[int(q.After):] {
+		if q.MaxBytes > 0 && bytes+e.Size() > q.MaxBytes {
+			if len(p.Events) == 0 {
+				return p, ErrPageSize
 			}
+			break
+		}
+		p.Events = append(p.Events, e.Clone())
+		p.Next = e.Sequence
+		bytes += e.Size()
+		if len(p.Events) >= q.Limit {
+			break
 		}
 	}
 	return p, nil
@@ -95,22 +98,24 @@ func (m *Memory) Seal(ctx context.Context, o Outcome) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	d := terminal(o)
+	if d.Size() > MaxRecordBytes {
+		return ErrRecordSize
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.disposed {
-		return ErrDisposed
-	}
 	if m.outcome != nil {
 		if *m.outcome != o {
 			return errors.New("conflicting shutdown outcome")
 		}
 		return nil
 	}
-	d := terminal(o)
-	if d.Size() > m.limits.Bytes {
-		return errors.New("shutdown outcome exceeds retained event byte limit")
+	if err := m.writable(); err != nil {
+		return err
 	}
-	m.append(d)
+	if _, err := m.append(d); err != nil {
+		return err
+	}
 	m.outcome = &o
 	return nil
 }
@@ -120,8 +125,11 @@ func (m *Memory) Close(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.disposed = true
-	m.events = nil
-	m.bytes = 0
+	if !m.disposed {
+		m.disposed = true
+		m.events = nil
+		m.bytes = 0
+		m.signal()
+	}
 	return nil
 }

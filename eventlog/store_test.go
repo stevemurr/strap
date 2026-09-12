@@ -88,25 +88,16 @@ func TestMemoryContract(t *testing.T) {
 }
 func TestRetentionAndOversizeAreExplicit(t *testing.T) {
 	m := memory(t, 2, 4096)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		if _, err := m.Append(ctx, data(i)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	p, err := m.Read(ctx, eventlog.Query{Limit: 10})
-	if !errors.Is(err, eventlog.ErrExpired) || p.Earliest != 2 || p.Latest != 3 {
-		t.Fatal(p, err)
-	}
-	raw, _ := json.Marshal(strings.Repeat("x", 5000))
-	e, err := m.Append(ctx, eventlog.Data{Kind: "huge", Agent: "a", Payload: raw})
-	if err != nil || e.Kind != "omitted" || e.Agent != "a" {
-		t.Fatal(e, err)
-	}
-	if err = m.Seal(ctx, eventlog.Outcome{Omitted: 1}); err != nil {
+	if _, err := m.Append(ctx, data(2)); !errors.Is(err, eventlog.ErrQuota) {
 		t.Fatal(err)
 	}
-	p, err = m.Read(ctx, eventlog.Query{After: 3, Limit: 10})
-	if err != nil || len(p.Events) != 2 || p.Outcome.Omitted != 1 {
+	p, err := m.Read(ctx, eventlog.Query{Limit: 10})
+	if err != nil || len(p.Events) != 2 || p.Earliest != 1 || p.Latest != 2 {
 		t.Fatal(p, err)
 	}
 }
@@ -189,13 +180,14 @@ type slowStore struct {
 	fail             bool
 	calls            int
 	mu               sync.Mutex
+	once             sync.Once
 }
 
 func (s *slowStore) Append(ctx context.Context, d eventlog.Data) (eventlog.Event, error) {
 	s.mu.Lock()
 	s.calls++
 	s.mu.Unlock()
-	close(s.entered)
+	s.once.Do(func() { close(s.entered) })
 	select {
 	case <-ctx.Done():
 		return eventlog.Event{}, ctx.Err()
@@ -206,40 +198,50 @@ func (s *slowStore) Append(ctx context.Context, d eventlog.Data) (eventlog.Event
 	}
 	return s.Store.Append(ctx, d)
 }
-func TestSaturationAndStorageFailuresLatchWithoutRetry(t *testing.T) {
-	for _, saturation := range []bool{true, false} {
-		t.Run(fmt.Sprint(saturation), func(t *testing.T) {
-			s := &slowStore{Store: memory(t, 10, 4096), entered: make(chan struct{}), release: make(chan struct{}), fail: !saturation}
-			l := logFor(t, s, 1)
-			sub := l.Subscribe(0)
-			defer sub.Close()
-			if err := l.Publish(data(1)); err != nil {
-				t.Fatal(err)
-			}
-			<-s.entered
-			if saturation {
-				if err := l.Publish(data(2)); !errors.Is(err, eventlog.ErrCapture) {
-					t.Fatal(err)
-				}
-			} else {
-				close(s.release)
-			}
-			if err := l.Finish(ctx, eventlog.Outcome{}); !errors.Is(err, eventlog.ErrCapture) {
-				t.Fatal(err)
-			}
-			if _, err := sub.Next(ctx); !errors.Is(err, eventlog.ErrCapture) {
-				t.Fatal(err)
-			}
-			if err := l.Publish(data(3)); !errors.Is(err, eventlog.ErrCapture) {
-				t.Fatal(err)
-			}
-			if err := l.Flush(ctx); !errors.Is(err, eventlog.ErrCapture) {
-				t.Fatal(err)
-			}
-			if s.calls != 1 || l.Status().Sealed {
-				t.Fatal(s.calls, l.Status())
-			}
-		})
+func TestPublicationAcknowledgesStorageAndBackpressures(t *testing.T) {
+	s := &slowStore{Store: memory(t, 10, 4096), entered: make(chan struct{}), release: make(chan struct{})}
+	l := logFor(t, s, 1)
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- l.Publish(data(1)) }()
+	<-s.entered
+	select {
+	case err := <-first:
+		t.Fatalf("acknowledged blocked append: %v", err)
+	default:
+	}
+	go func() { second <- l.Publish(data(2)) }()
+	select {
+	case err := <-second:
+		t.Fatalf("did not backpressure: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(s.release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-second; err != nil {
+		t.Fatal(err)
+	}
+	p, err := l.Read(ctx, eventlog.Query{Limit: 10})
+	if err != nil || len(p.Events) != 2 {
+		t.Fatal(p, err)
+	}
+}
+func TestStorageFailuresLatchWithoutRetry(t *testing.T) {
+	s := &slowStore{Store: memory(t, 10, 4096), entered: make(chan struct{}), release: make(chan struct{}), fail: true}
+	close(s.release)
+	l := logFor(t, s, 1)
+	if err := l.Publish(data(1)); !errors.Is(err, eventlog.ErrCapture) {
+		t.Fatal(err)
+	}
+	if err := l.Finish(ctx, eventlog.Outcome{}); !errors.Is(err, eventlog.ErrCapture) {
+		t.Fatal(err)
+	}
+	if err := l.Publish(data(2)); !errors.Is(err, eventlog.ErrCapture) {
+		t.Fatal(err)
+	}
+	if s.calls != 1 || l.Status().Sealed {
+		t.Fatal(s.calls, l.Status())
 	}
 }
 
@@ -319,33 +321,23 @@ func TestDisposalCancelsReadAndRejectsNewReads(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestByteRetentionAndCaptureOmissionMetadata(t *testing.T) {
-	m := memory(t, 100, 4096)
-	l := logFor(t, m, 10)
+func TestOversizePublicationIsRejectedWithoutOmission(t *testing.T) {
+	l := logFor(t, memory(t, 100, 16384), 10)
 	raw, _ := json.Marshal(strings.Repeat("x", 6000))
-	if err := l.Publish(eventlog.Data{Kind: "large", Payload: raw}); err != nil {
+	if err := l.Publish(eventlog.Data{Kind: "large", Payload: raw}); !errors.Is(err, eventlog.ErrRecordSize) {
+		t.Fatal(err)
+	}
+	if err := l.Publish(data(1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Finish(ctx, eventlog.Outcome{}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := l.Read(ctx, eventlog.Query{Limit: 10})
-	if err != nil || p.Events[0].Kind != "omitted" || l.Status().Omitted != 1 || p.Outcome.Omitted != 1 {
-		t.Fatal(p, err, l.Status())
-	}
-	m = memory(t, 100, 4096)
-	raw, _ = json.Marshal(strings.Repeat("x", 2000))
-	for i := 0; i < 3; i++ {
-		if _, err = m.Append(ctx, eventlog.Data{Kind: "large", Payload: raw}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	p, err = m.Read(ctx, eventlog.Query{Limit: 10})
-	if !errors.Is(err, eventlog.ErrExpired) || p.Earliest != 3 {
+	if err != nil || len(p.Events) != 2 || p.Events[0].Kind != "test" {
 		t.Fatal(p, err)
 	}
 }
-
 func TestJSONLContract(t *testing.T) {
 	storeContract(t, func() eventlog.Store {
 		s, err := eventlog.NewJSONL(t.TempDir()+"/trace.jsonl", "test")
@@ -364,7 +356,7 @@ func TestCaptureFailureUsesIndependentSinkOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = l.Publish(data(1)); err != nil {
+	if err = l.Publish(data(1)); !errors.Is(err, eventlog.ErrCapture) {
 		t.Fatal(err)
 	}
 	if err = l.Finish(ctx, eventlog.Outcome{}); !errors.Is(err, eventlog.ErrCapture) {
@@ -382,18 +374,16 @@ func TestCaptureFailureUsesIndependentSinkOnce(t *testing.T) {
 	}
 }
 
-func TestOversizeOmissionPreservesInvocationAndTerminalFailureIsExplicit(t *testing.T) {
+func TestTerminalQuotaFailureIsExplicit(t *testing.T) {
 	m := memory(t, 10, 4096)
-	raw, _ := json.Marshal(strings.Repeat("x", 5000))
-	e, err := m.Append(ctx, eventlog.Data{Kind: "tool", Agent: "agent-1", Correlation: "agent-1/tool-2", Payload: raw})
-	if err != nil || e.Kind != "omitted" || e.Correlation != "agent-1/tool-2" {
-		t.Fatal(e, err)
+	if _, err := m.Append(ctx, data(1)); err != nil {
+		t.Fatal(err)
 	}
-	if err = m.Seal(ctx, eventlog.Outcome{Error: strings.Repeat("x", 5000)}); err == nil {
-		t.Fatal("oversized terminal outcome silently omitted")
+	if err := m.Seal(ctx, eventlog.Outcome{Error: strings.Repeat("x", 5000)}); !errors.Is(err, eventlog.ErrQuota) {
+		t.Fatal(err)
 	}
 	p, err := m.Read(ctx, eventlog.Query{Limit: 10})
-	if err != nil || p.Sealed {
+	if err != nil || p.Sealed || p.Latest != 1 {
 		t.Fatal(p, err)
 	}
 }

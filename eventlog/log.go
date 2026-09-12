@@ -11,17 +11,25 @@ import (
 	"github.com/stevemurr/strap/internal/admission"
 )
 
-// Log owns the single publisher and shared wakeup generation. Queue limits bound
-// admitted payloads, including the write in progress; observers have no queues.
+type publication struct {
+	data   Data
+	done   chan struct{}
+	cursor Cursor
+	err    error
+}
+
+// Log acknowledges readable storage and owns one bounded writer. Failure signaling
+// is independent of that writer; callers never wait for a client to consume data.
 type Log struct {
 	failureSink         func(error)
 	store               Store
 	limits              Limits
 	mu                  sync.Mutex
-	queue               []Data
+	queue               []*publication
+	jobs                map[*publication]struct{}
 	pending, bytes      int
+	producers           chan struct{}
 	accepted, completed uint64
-	omitted             uint64
 	err                 error
 	finishing           bool
 	outcome             Outcome
@@ -29,23 +37,25 @@ type Log struct {
 	done                chan struct{}
 	writeCtx            context.Context
 	cancelWrite         context.CancelFunc
+	writeTimeout        time.Duration
 	reads               *admission.Gate
 	cancelReads         context.CancelFunc
 	disposeGate         chan struct{}
 	disposed            bool
 }
+
 type Status struct {
 	CaptureError string `json:"capture_error,omitempty"`
-	Omitted      uint64 `json:"omitted"`
+	Omitted      uint64 `json:"omitted"` // Always zero for a recoverable log.
 	Sealed       bool   `json:"sealed"`
 	Disposed     bool   `json:"disposed"`
 }
-
 type Option func(*Log)
 
-// WithFailureSink runs once on the publisher after capture fails. The sink must
-// return promptly and must not wait for this log to finish or dispose.
-func WithFailureSink(sink func(error)) Option { return func(l *Log) { l.failureSink = sink } }
+// WithFailureSink runs once independently of blocked backend I/O. It must return
+// promptly and must not synchronously wait for session/log finalization.
+func WithFailureSink(f func(error)) Option    { return func(l *Log) { l.failureSink = f } }
+func WithWriteTimeout(d time.Duration) Option { return func(l *Log) { l.writeTimeout = d } }
 func New(store Store, limits Limits, options ...Option) (*Log, error) {
 	if store == nil {
 		return nil, errors.New("event store is required")
@@ -55,99 +65,159 @@ func New(store Store, limits Limits, options ...Option) (*Log, error) {
 	}
 	w, cw := context.WithCancel(context.Background())
 	r, cr := context.WithCancel(context.Background())
-	l := &Log{store: store, limits: limits, wake: make(chan struct{}), done: make(chan struct{}), writeCtx: w, cancelWrite: cw, reads: admission.New(r), cancelReads: cr, disposeGate: make(chan struct{}, 1)}
+	l := &Log{store: store, limits: limits, jobs: make(map[*publication]struct{}), producers: make(chan struct{}, limits.Entries+1), wake: make(chan struct{}), done: make(chan struct{}), writeCtx: w, cancelWrite: cw, writeTimeout: 15 * time.Second, reads: admission.New(r), cancelReads: cr, disposeGate: make(chan struct{}, 1)}
 	for _, option := range options {
 		option(l)
+	}
+	if l.writeTimeout <= 0 {
+		cw()
+		cr()
+		return nil, errors.New("write timeout must be positive")
 	}
 	go l.run()
 	return l, nil
 }
 func (l *Log) signal() { close(l.wake); l.wake = make(chan struct{}) }
 func (l *Log) fail(err error) {
-	if l.err == nil {
-		l.err = fmt.Errorf("%w: %v", ErrCapture, err)
-		l.cancelWrite()
-		l.signal()
+	if err == nil || l.err != nil {
+		return
+	}
+	l.err = fmt.Errorf("%w: %v", ErrCapture, err)
+	l.store.Fail(l.err)
+	l.cancelWrite()
+	for j := range l.jobs {
+		j.err = l.err
+		close(j.done)
+		delete(l.jobs, j)
+	}
+	l.queue = nil
+	l.pending = 0
+	l.bytes = 0
+	l.signal()
+	if l.failureSink != nil {
+		go l.failureSink(l.err)
 	}
 }
-func (l *Log) Fail(err error) { l.mu.Lock(); defer l.mu.Unlock(); l.fail(err) }
-func (l *Log) Publish(d Data) error {
+func (l *Log) Fail(err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	select {
+	case <-l.done:
+		return
+	default:
+	}
+	l.fail(err)
+}
+
+// Publish is the short form of PublishContext, with the same readable-write acknowledgment.
+func (l *Log) Publish(d Data) error { _, err := l.PublishContext(context.Background(), d); return err }
+func (l *Log) PublishContext(ctx context.Context, d Data) (Cursor, error) {
+	if err := ctx.Err(); err != nil {
+		return Cursor{}, err
+	}
 	if err := d.Validate(); err != nil {
 		l.Fail(err)
-		return err
+		return Cursor{}, err
 	}
 	if d.Time.IsZero() {
 		d.Time = time.Now().UTC()
 	}
-	d, omitted := Fit(d, l.limits.Bytes)
-	d = d.Clone()
+	size := d.Size()
+	if size > MaxRecordBytes || size > l.limits.Bytes {
+		return Cursor{}, ErrRecordSize
+	}
+	select {
+	case l.producers <- struct{}{}:
+		defer func() { <-l.producers }()
+	default:
+		return Cursor{}, ErrQuota
+	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.err != nil {
-		return l.err
+	for {
+		if l.err != nil {
+			err := l.err
+			l.mu.Unlock()
+			return Cursor{}, err
+		}
+		if l.finishing {
+			l.mu.Unlock()
+			return Cursor{}, ErrSealed
+		}
+		if err := ctx.Err(); err != nil {
+			l.mu.Unlock()
+			return Cursor{}, err
+		}
+		if l.pending < l.limits.Entries && l.bytes+size <= l.limits.Bytes {
+			break
+		}
+		wake := l.wake
+		l.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return Cursor{}, ctx.Err()
+		case <-wake:
+		}
+		l.mu.Lock()
 	}
-	if l.finishing {
-		return ErrSealed
-	}
-	if l.pending >= l.limits.Entries || l.bytes+d.Size() > l.limits.Bytes {
-		l.fail(errors.New("publication queue capacity exceeded"))
-		return l.err
-	}
-	l.queue = append(l.queue, d)
+	j := &publication{data: d.Clone(), done: make(chan struct{})}
+	l.queue = append(l.queue, j)
+	l.jobs[j] = struct{}{}
 	l.pending++
-	l.bytes += d.Size()
+	l.bytes += size
 	l.accepted++
-	if omitted {
-		l.omitted++
-	}
 	l.signal()
-	return nil
+	l.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return Cursor{}, ctx.Err()
+	case <-j.done:
+		return j.cursor, j.err
+	}
 }
 func (l *Log) run() {
 	defer close(l.done)
-	defer func() {
-		l.mu.Lock()
-		err := l.err
-		l.mu.Unlock()
-		if err != nil && l.failureSink != nil {
-			l.failureSink(err)
-		}
-	}()
 	defer l.cancelWrite()
 	for {
 		l.mu.Lock()
 		if l.err != nil {
-			l.queue = nil
 			l.mu.Unlock()
 			return
 		}
 		if len(l.queue) > 0 {
-			d := l.queue[0]
-			l.queue[0] = Data{}
+			j := l.queue[0]
+			l.queue[0] = nil
 			l.queue = l.queue[1:]
 			l.mu.Unlock()
-			e, err := l.store.Append(l.writeCtx, d)
+			run, cancel := context.WithTimeout(l.writeCtx, l.writeTimeout)
+			stop := context.AfterFunc(run, func() { l.Fail(run.Err()) })
+			e, err := l.store.Append(run, j.data)
+			stop()
+			cancel()
 			l.mu.Lock()
 			if err != nil {
 				l.fail(err)
-				l.mu.Unlock()
-				continue
 			}
-			if e.Kind == "omitted" && d.Kind != "omitted" {
-				l.omitted++
+			if _, ok := l.jobs[j]; ok {
+				j.cursor = e.Cursor()
+				j.err = err
+				close(j.done)
+				delete(l.jobs, j)
+				l.completed++
+				l.pending--
+				l.bytes -= j.data.Size()
+				l.signal()
 			}
-			l.completed++
-			l.pending--
-			l.bytes -= d.Size()
-			l.signal()
 			l.mu.Unlock()
 			continue
 		}
 		if l.finishing {
 			o := l.outcome
-			o.Omitted = l.omitted
 			l.mu.Unlock()
-			err := l.store.Seal(l.writeCtx, o)
+			run, cancel := context.WithTimeout(l.writeCtx, l.writeTimeout)
+			stop := context.AfterFunc(run, func() { l.Fail(run.Err()) })
+			err := l.store.Seal(run, o)
+			stop()
+			cancel()
 			l.mu.Lock()
 			if err != nil {
 				l.fail(err)
@@ -212,7 +282,7 @@ func (l *Log) Finish(ctx context.Context, o Outcome) error {
 func (l *Log) Status() Status {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	s := Status{Omitted: l.omitted, Disposed: l.disposed}
+	s := Status{Disposed: l.disposed}
 	if l.err != nil {
 		s.CaptureError = l.err.Error()
 	}
@@ -303,12 +373,6 @@ func (s *Subscription) Next(ctx context.Context) (Event, error) {
 		default:
 		}
 		l := s.log
-		l.mu.Lock()
-		wake, err := l.wake, l.err
-		l.mu.Unlock()
-		if err != nil {
-			return Event{}, err
-		}
 		p, err := l.Read(run, Query{After: s.after, Limit: 1})
 		select {
 		case <-s.detached:
@@ -331,15 +395,25 @@ func (s *Subscription) Next(ctx context.Context) (Event, error) {
 			s.after = p.Next
 			return p.Events[0], nil
 		}
+		if p.Head.State == Failed {
+			return Event{}, fmt.Errorf("%w: %s", ErrCapture, p.Head.Failure.Message)
+		}
 		if p.Sealed {
 			return Event{}, io.EOF
 		}
-		select {
-		case <-ctx.Done():
-			return Event{}, ctx.Err()
-		case <-s.detached:
-			return Event{}, ErrDetached
-		case <-wake:
+		waitCtx, done, err := l.reads.Begin(run)
+		if err != nil {
+			return Event{}, ErrDisposed
+		}
+		_, err = l.store.Wait(waitCtx, Cursor{Session: p.Head.Cursor.Session, Sequence: s.after})
+		done()
+		if err != nil {
+			select {
+			case <-s.detached:
+				return Event{}, ErrDetached
+			default:
+			}
+			return Event{}, err
 		}
 	}
 }

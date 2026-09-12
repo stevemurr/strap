@@ -46,15 +46,20 @@ type Event struct {
 	Data
 }
 
+type Record = Event
+
+func (e Event) Cursor() Cursor { return Cursor{Session: e.Session, Sequence: e.Sequence} }
+
 func (e Event) Clone() Event { e.Data = e.Data.Clone(); return e }
 
 type Query struct {
-	After uint64 `json:"after"`
-	Limit int    `json:"limit"`
+	MaxBytes int    `json:"max_bytes,omitempty"`
+	After    uint64 `json:"after"`
+	Limit    int    `json:"limit"`
 }
 
 func (q Query) Validate() error {
-	if q.Limit < 1 || q.Limit > 1000 {
+	if q.Limit < 1 || q.Limit > 1000 || q.MaxBytes < 0 {
 		return errors.New("event page limit must be between 1 and 1000")
 	}
 	return nil
@@ -70,6 +75,7 @@ type Outcome struct {
 }
 
 type Page struct {
+	Head     Head     `json:"head"`
 	Events   []Event  `json:"events"`
 	Next     uint64   `json:"next"`
 	Earliest uint64   `json:"earliest"`
@@ -79,6 +85,9 @@ type Page struct {
 }
 
 type Store interface {
+	Head(context.Context) (Head, error)
+	Wait(context.Context, Cursor) (Head, error)
+	Fail(error)
 	Append(context.Context, Data) (Event, error)
 	Read(context.Context, Query) (Page, error)
 	Seal(context.Context, Outcome) error

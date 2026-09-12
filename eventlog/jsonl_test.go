@@ -103,3 +103,22 @@ func TestJSONLWriteAndSyncFailuresAreNotRetried(t *testing.T) {
 		s.Close(ctx)
 	}
 }
+
+func TestFailedSealDoesNotExposeTerminalRecord(t *testing.T) {
+	s, err := NewJSONL(filepath.Join(t.TempDir(), "trace.jsonl"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(context.Background())
+	if _, err = s.Append(context.Background(), Data{Kind: "test", Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	s.syncFile = func() error { return errors.New("disk sync failed") }
+	if err = s.Seal(context.Background(), Outcome{}); err == nil {
+		t.Fatal("seal succeeded")
+	}
+	p, err := s.Read(context.Background(), Query{Limit: 10})
+	if err != nil || p.Latest != 1 || len(p.Events) != 1 || p.Sealed {
+		t.Fatal(p, err)
+	}
+}
