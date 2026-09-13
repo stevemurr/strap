@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/work"
 	"strings"
 	"testing"
 	"time"
@@ -11,49 +13,50 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 )
 
 type agentTableSession struct {
 	*fakeSession
-	inspections []conversation.AgentInspection
+	inspections []harness.AgentInspection
 	count       func(context.Context, message.ActorID, uint64) (int64, error)
 }
 
-func (s *agentTableSession) Agents() []conversation.AgentInfo {
-	var infos []conversation.AgentInfo
+func (s *agentTableSession) Agents() []harness.AgentInfo {
+	var infos []harness.AgentInfo
 	for _, in := range s.inspections {
-		infos = append(infos, in.AgentInfo)
+		infos = append(infos, in.Info())
 	}
 	return infos
 }
 
-func (s *agentTableSession) InspectAgent(id message.ActorID, _ conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *agentTableSession) InspectAgent(id message.ActorID, _ conversation.InspectOptions) (harness.AgentInspection, error) {
 	for _, in := range s.inspections {
 		if in.ID == id {
 			return in, nil
 		}
 	}
-	return conversation.AgentInspection{}, errors.New("unknown agent")
+	return harness.AgentInspection{}, errors.New("unknown agent")
 }
 
 func (s *agentTableSession) CountAgentTokens(ctx context.Context, id message.ActorID, revision uint64) (int64, error) {
 	return s.count(ctx, id, revision)
 }
 
-func tableInspection(id message.ActorID, revision uint64, output, limit int64) conversation.AgentInspection {
-	return conversation.AgentInspection{
+func tableInspection(id message.ActorID, revision uint64, output, limit int64) harness.AgentInspection {
+	return harness.AgentInspection{AgentInspection: conversation.AgentInspection{
 		AgentInfo:       conversation.AgentInfo{ID: id, Parent: "root", State: agent.Idle},
 		ContextRevision: revision, OutputTokenLimit: &limit,
 		Usage: agent.UsageSnapshot{OutputTokens: output * 2, Latest: &agent.UsageObservation{Usage: &provider.Usage{OutputTokens: &output}}},
-	}
+	}}
 }
 
 func TestAgentsCommandCountsSnapshotAndShowsPerAgentLimits(t *testing.T) {
 	m, fake := setup(t)
 	calls := 0
-	m.session = &agentTableSession{fakeSession: fake, inspections: []conversation.AgentInspection{
+	m.session = &agentTableSession{fakeSession: fake, inspections: []harness.AgentInspection{
 		tableInspection("root", 3, 1482, 32768), tableInspection("agent-1", 7, 624, 8192),
 	}, count: func(ctx context.Context, id message.ActorID, revision uint64) (int64, error) {
 		calls++
@@ -116,7 +119,7 @@ func TestAgentsUnknownAndZeroCounts(t *testing.T) {
 	missing.Usage.Latest.Usage = nil
 	uncalled := tableInspection("uncalled", 1, 0, 100)
 	uncalled.Usage = agent.UsageSnapshot{}
-	m.session = &agentTableSession{fakeSession: fake, inspections: []conversation.AgentInspection{zero, missing, uncalled}, count: func(_ context.Context, id message.ActorID, _ uint64) (int64, error) {
+	m.session = &agentTableSession{fakeSession: fake, inspections: []harness.AgentInspection{zero, missing, uncalled}, count: func(_ context.Context, id message.ActorID, _ uint64) (int64, error) {
 		if id == "zero" {
 			return 0, nil
 		}
@@ -145,7 +148,7 @@ func TestAgentsUnknownAndZeroCounts(t *testing.T) {
 
 func TestAgentsCountsRespectFreezeClearAndSeparateTables(t *testing.T) {
 	m, fake := setup(t)
-	m.session = &agentTableSession{fakeSession: fake, inspections: []conversation.AgentInspection{tableInspection("root", 3, 20, 100)}, count: func(context.Context, message.ActorID, uint64) (int64, error) { return 42, nil }}
+	m.session = &agentTableSession{fakeSession: fake, inspections: []harness.AgentInspection{tableInspection("root", 3, 20, 100)}, count: func(context.Context, message.ActorID, uint64) (int64, error) { return 42, nil }}
 	first := m.showAgents()
 	second := m.showAgents()
 	// A single-command Batch returns the command directly.
@@ -178,7 +181,7 @@ func TestAgentsCountsRespectFreezeClearAndSeparateTables(t *testing.T) {
 func TestQuitCancelsAgentTableCount(t *testing.T) {
 	m, fake := setup(t)
 	started := make(chan struct{})
-	m.session = &agentTableSession{fakeSession: fake, inspections: []conversation.AgentInspection{tableInspection("root", 3, 20, 100)}, count: func(ctx context.Context, _ message.ActorID, _ uint64) (int64, error) {
+	m.session = &agentTableSession{fakeSession: fake, inspections: []harness.AgentInspection{tableInspection("root", 3, 20, 100)}, count: func(ctx context.Context, _ message.ActorID, _ uint64) (int64, error) {
 		close(started)
 		<-ctx.Done()
 		return 0, ctx.Err()
@@ -199,5 +202,25 @@ func TestQuitCancelsAgentTableCount(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("count leaked")
+	}
+}
+
+func TestAgentTableDisplaysRecordedRoleAndActiveWork(t *testing.T) {
+	m, fake := setup(t)
+	in := tableInspection("worker", 0, 0, 0)
+	in.Role = roster.Implementor
+	in.Registered = true
+	in.EligibleWorkKinds = []work.Kind{work.Implementation, work.Repair}
+	in.ActiveWorkIDs = []work.ID{"work-42"}
+	m.session = &agentTableSession{fakeSession: fake, inspections: []harness.AgentInspection{in}}
+	m.showAgents()
+	render := m.entries[len(m.entries)-1].agents.render(0)
+	for _, value := range []string{"Role", "implementor", "implementation, repair", "work-42"} {
+		if !strings.Contains(render, value) {
+			t.Fatal(render)
+		}
+	}
+	if got := workStatus(work.Work{State: work.ChangesRequested}); got != "awaiting repair assignment" {
+		t.Fatal(got)
 	}
 }

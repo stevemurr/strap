@@ -126,11 +126,12 @@ archives are finite failed input; they cannot silently start running again.
 
 ## API migration
 
-This implementation writes schema **3**. Readers also accept schema 2, normalizing
-its output deltas to content-only without rewriting stored records or hashes.
+This implementation writes schema **4**. Readers also accept schemas 2 and 3, normalizing
+schema-2 output deltas to content-only without rewriting stored records or hashes.
 Schema 2 does not establish whether the provider generated reasoning; it did not
-retain that channel. Schema-3 deltas require an explicit valid channel. Older
-readers reject schema 3. Schema-1 archives have narrower coverage
+retain that channel. Schema-3 deltas require an explicit valid channel. Schema 4 adds immutable application `agent_registered` records. Older archives
+without these facts show `role: unknown`, `registered: false`, and no inferred
+eligible kinds. Schema-2/3 readers reject schema 4. Schema-1 archives have narrower coverage
 and are rejected by the new archive reader/reducer rather than being presented as
 fully recoverable sessions. Provider implementations now implement
 `Submit(context.Context, provider.Request, provider.Observer)`. Nil observation
@@ -175,3 +176,10 @@ opens the TUI reasoning inspector. It logs timing and byte counts without loggin
 the reasoning text. Deterministic HTTP tests in `harness/reasoning_test.go` also
 verify that the next outgoing model request excludes reasoning and that replay
 from JSONL recovers the same output.
+
+Agent inspection joins accepted runtime facts with recorded application roles and
+work assignments. `active_work_ids` includes only active execution, not submissions
+waiting for review. Root-only `Reader.ListWork` and `View.ListWork` enumerate all
+work states using bounded summaries and opaque fixed-prefix cursors. Full framed
+work records are resolved before filtering or joining assignees. Repair inspection
+resolves the audit's exact source submission and preserves scope-based access.

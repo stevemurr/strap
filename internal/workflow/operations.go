@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 
+	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -114,94 +114,107 @@ func (s *Session) GetAudit(ctx context.Context, actor identity.ActorID, id work.
 // InspectWork collects scoped work and immutable submission/audit details. The
 // returned fields are independent snapshots, not an atomic execution checkpoint.
 func (s *Session) InspectWork(ctx context.Context, actor identity.ActorID, id work.ID) (work.Inspection, error) {
-	w, err := s.GetWork(ctx, actor, id)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return work.Inspection{}, err
 	}
-	v := work.Inspection{Work: w}
-	if w.Scope != nil {
-		p, e := s.Store.GetPlan(actor, w.Scope.PlanID)
-		if e == nil {
-			for _, step := range p.Steps {
-				if slices.Contains(w.Scope.StepIDs, step.ID) {
-					v.Steps = append(v.Steps, step)
-				}
-			}
-		}
-	}
-	sid := w.LatestSubmissionID
-	if w.Kind == work.AuditWork {
-		sid = w.SubjectSubmissionID
-	}
-	if sid != "" {
-		sub, e := s.Store.GetSubmission(actor, sid)
-		if e != nil {
-			return work.Inspection{}, e
-		}
-		v.Submission = &sub
-	}
-	if w.RequestedByAuditID != "" {
-		a, e := s.Store.GetAudit(actor, w.RequestedByAuditID)
-		if e != nil {
-			return work.Inspection{}, e
-		}
-		v.Audit = &a
-	}
-	return v, nil
+	return s.Store.InspectWork(actor, id)
 }
 
-func (s *Session) eligible(id identity.ActorID, kind work.Kind) error {
+// RegisterRoot records bootstrap identity without exposing root creation to tools.
+func (s *Session) RegisterRoot() error {
+	id := s.Root()
+	if id == "" {
+		return work.ErrForbidden
+	}
 	s.mu.Lock()
-	role, ok := s.roles[id]
+	defer s.mu.Unlock()
+	return s.register(roster.Registration{AgentID: id, Parent: "user", Role: roster.Root})
+}
+
+// register runs under mu. Required publication precedes eligibility; readers
+// attempting assignment while publication completes wait for this commit.
+func (s *Session) register(r roster.Registration) error {
+	if _, ok := s.roles[r.AgentID]; ok {
+		return fmt.Errorf("%w: agent already registered", work.ErrState)
+	}
+	if err := s.emit(conversation.AgentRegistered{Registration: r}); err != nil {
+		return err
+	}
+	s.roles[r.AgentID] = r
+	return nil
+}
+func (s *Session) CreateAgent(ctx context.Context, actor identity.ActorID, r roster.CreateRequest) (roster.Registration, error) {
+	run, done, err := s.begin(ctx)
+	if err != nil {
+		return roster.Registration{}, err
+	}
+	defer done()
+	if actor == "" || actor != s.Root() {
+		return roster.Registration{}, work.ErrForbidden
+	}
+	if !r.Role.Creatable() {
+		return roster.Registration{}, fmt.Errorf("%w: role must be implementor or auditor", work.ErrInvalid)
+	}
+	spec := s.implementor
+	if r.Role == roster.Auditor {
+		spec = s.auditor
+	}
+	if err = run.Err(); err != nil {
+		return roster.Registration{}, err
+	}
+	created, err := s.Controller.CreateAgent(actor, spec)
+	if err != nil {
+		return roster.Registration{}, err
+	}
+	registration := roster.Registration{AgentID: created.AgentID, Parent: actor, Role: r.Role}
+	s.mu.Lock()
+	err = run.Err()
+	if err == nil {
+		err = s.register(registration)
+	}
 	s.mu.Unlock()
-	if !ok || role != kind {
-		return fmt.Errorf("agent %s is not provisioned for %s", id, kind)
+	if err != nil {
+		_, stopErr := s.Controller.StopAgent(created.AgentID)
+		return roster.Registration{}, errors.Join(err, stopErr)
+	}
+	return registration, nil
+}
+func (s *Session) eligible(id identity.ActorID, kind work.Kind) error {
+	if id == "" {
+		return fmt.Errorf("%w: assignee is required", work.ErrInvalid)
+	}
+	s.mu.Lock()
+	registration, ok := s.roles[id]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: agent %s is not registered", work.ErrInvalid, id)
+	}
+	if !registration.Role.Accepts(kind) {
+		return fmt.Errorf("%w: agent %s has role %s, incompatible with %s work", work.ErrInvalid, id, registration.Role, kind)
 	}
 	info, err := s.Controller.InspectAgent(id, conversation.InspectOptions{})
 	if err != nil {
 		return err
 	}
-	if info.State.Terminal() {
-		return fmt.Errorf("agent %s has exited", id)
+	if info.State.Terminal() || info.State == agent.StopRequested {
+		return fmt.Errorf("%w: agent %s is %s", work.ErrState, id, info.State)
 	}
 	return nil
 }
-func (s *Session) provision(parent, requested identity.ActorID, kind work.Kind) (identity.ActorID, bool, error) {
-	if requested != "" {
-		return requested, false, s.eligible(requested, kind)
-	}
-	spec := s.implementor
-	if kind == work.AuditWork {
-		spec = s.auditor
-	}
-	created, err := s.Controller.CreateAgent(parent, spec)
-	if err != nil {
-		return "", false, err
-	}
-	s.mu.Lock()
-	s.roles[created.AgentID] = kind
-	s.mu.Unlock()
-	return created.AgentID, true, nil
-}
 
-// ReassignWork validates the current binding before provisioning a replacement.
-// If the ledger rejects the mutation, a newly created agent is stopped.
+// ReassignWork transfers active work to an explicitly selected existing agent.
 func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r work.ReassignRequest) (work.Work, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.Work{}, admitErr
+	run, done, err := s.begin(ctx)
+	if err != nil {
+		return work.Work{}, err
 	}
 	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.Work{}, err
+	if actor == "" || actor != s.Root() {
+		return work.Work{}, work.ErrForbidden
 	}
 	w, err := s.Store.GetWork(actor, r.ID)
 	if err != nil {
 		return work.Work{}, err
-	}
-	if w.Owner != actor {
-		return work.Work{}, work.ErrForbidden
 	}
 	if w.State != work.Active {
 		return work.Work{}, work.ErrState
@@ -209,73 +222,42 @@ func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r wo
 	if w.Revision != r.ExpectedRevision {
 		return work.Work{}, work.ErrConflict
 	}
-	kind := work.Implementation
-	if w.Kind == work.AuditWork {
-		kind = work.AuditWork
+	if err = s.eligible(r.Assignee, w.Kind); err != nil {
+		return work.Work{}, err
 	}
-	id, created, err := s.provision(actor, r.Assignee, kind)
+	if err = run.Err(); err != nil {
+		return work.Work{}, err
+	}
+	return s.Store.Reassign(actor, r)
+}
+
+// AssignWork registers work for asynchronous dispatch without creating an agent.
+func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, r work.AssignmentRequest) (work.Work, error) {
+	run, done, err := s.begin(ctx)
 	if err != nil {
 		return work.Work{}, err
 	}
-	r.Assignee = id
-	if err = ctx.Err(); err == nil {
-		w, err = s.Store.Reassign(actor, r)
-	}
-	if err != nil && created {
-		_, stopErr := s.Controller.StopAgent(id)
-		err = errors.Join(err, stopErr)
-	}
-	return w, err
-}
-
-// AssignWork provisions the configured role and registers its work for dispatch.
-// It returns ledger state, not a delivery or completion acknowledgment.
-func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, a work.AssignmentRequest) (work.Work, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.Work{}, admitErr
-	}
 	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.Work{}, err
-	}
 	if actor == "" || actor != s.Root() {
 		return work.Work{}, work.ErrForbidden
 	}
-	if a.Kind != work.Implementation && a.Kind != work.AuditWork {
-		return work.Work{}, fmt.Errorf("%w: kind must be implementation or audit", work.ErrInvalid)
-	}
-	if a.Kind == work.Implementation {
-		if strings.TrimSpace(a.Task) == "" || a.WorkID != "" || a.ExpectedRevision != 0 || a.SubmissionID != "" {
-			return work.Work{}, fmt.Errorf("%w: implementation requires task and cannot select an audit submission", work.ErrInvalid)
-		}
-	} else {
-		if a.WorkID == "" || a.ExpectedRevision == 0 || a.SubmissionID == "" || a.Scope != nil || a.Task != "" || a.Context != "" || a.ExpectedOutput != "" {
-			return work.Work{}, fmt.Errorf("%w: audit requires work_id, expected_revision and submission_id; its task and scope are derived", work.ErrInvalid)
-		}
-	}
-	id, created, provisionErr := s.provision(actor, a.Assignee, a.Kind)
-	if provisionErr != nil {
-		return work.Work{}, provisionErr
-	}
-	var w work.Work
-	var err error
-	if e := ctx.Err(); e != nil {
-		err = e
-	} else if a.Kind == work.Implementation {
-		w, err = s.Store.AssignWork(actor, work.AssignRequest{Assignee: id, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput, Scope: a.Scope})
-	} else {
-		w, err = s.Store.AssignAudit(actor, work.AssignAuditRequest{WorkTarget: work.WorkTarget{ID: a.WorkID, ExpectedRevision: a.ExpectedRevision}, SubmissionID: a.SubmissionID, Auditor: id})
-	}
-	if err != nil {
-		if created {
-			_, stopErr := s.Controller.StopAgent(id)
-			err = errors.Join(err, stopErr)
-		}
+	if err = r.Validate(); err != nil {
 		return work.Work{}, err
 	}
-	return w, nil
+	if err = s.eligible(r.Assignee, r.Kind); err != nil {
+		return work.Work{}, err
+	}
+	if err = run.Err(); err != nil {
+		return work.Work{}, err
+	}
+	switch r.Kind {
+	case work.Implementation:
+		return s.Store.AssignWork(actor, work.AssignRequest{Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput, Scope: r.Scope})
+	case work.AuditWork:
+		return s.Store.AssignAudit(actor, work.AssignAuditRequest{WorkTarget: work.WorkTarget{ID: r.WorkID, ExpectedRevision: r.ExpectedRevision}, SubmissionID: r.SubmissionID, Auditor: r.Assignee})
+	default:
+		return s.Store.AssignRepair(actor, work.AssignRepairRequest{WorkTarget: work.WorkTarget{ID: r.WorkID, ExpectedRevision: r.ExpectedRevision}, AuditID: r.AuditID, Assignee: r.Assignee})
+	}
 }
 
 func (s *Session) begin(ctx context.Context) (context.Context, func(), error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/message"
 )
 
@@ -31,8 +32,8 @@ func (s *fakeSession) Send(to message.ActorID, text string) (message.Receipt, er
 	s.sent = append(s.sent, text)
 	return message.Receipt{MessageID: message.MessageID(fmt.Sprint(len(s.sent))), Recipient: to, Status: message.Queued}, nil
 }
-func (s *fakeSession) Agents() []conversation.AgentInfo {
-	return []conversation.AgentInfo{{ID: "root", Parent: message.User}}
+func (s *fakeSession) Agents() []harness.AgentInfo {
+	return []harness.AgentInfo{{AgentInfo: conversation.AgentInfo{ID: "root", Parent: message.User}}}
 }
 func (s *fakeSession) NextEvent(ctx context.Context) (conversation.Event, error) {
 	select {
@@ -196,9 +197,9 @@ func TestRemoteTextCannotEmitTerminalControlSequences(t *testing.T) {
 	}
 }
 
-func (s *fakeSession) InspectAgent(id message.ActorID, options conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *fakeSession) InspectAgent(id message.ActorID, options conversation.InspectOptions) (harness.AgentInspection, error) {
 	s.managed = "inspect:" + string(id)
-	return conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: id, State: agent.Idle}}, s.err
+	return harness.AgentInspection{AgentInspection: conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: id, State: agent.Idle}}}, s.err
 }
 func (s *fakeSession) PauseAgent(id message.ActorID) (conversation.AgentInfo, error) {
 	s.managed = "pause:" + string(id)

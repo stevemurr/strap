@@ -3,6 +3,8 @@ package harness_test
 import (
 	"context"
 	"errors"
+	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/roster"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -60,7 +62,7 @@ func TestHeadlessSessionOwnsAssemblyAndWork(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	w, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.Implementation, Task: "test"})
+	w, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ func TestHeadlessSessionOwnsAssemblyAndWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audit, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	audit, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,11 +129,11 @@ func TestDefaultRoleToolsPreserveCLIOrder(t *testing.T) {
 	for _, tool := range request.Tools {
 		names = append(names, tool.Name)
 	}
-	want := []string{"shell", "read_pdf", "read_file", "write_file", "edit_file", "get_audit", "get_plan", "get_work", "update_plan", "assign_work", "cancel_work", "reassign_work", "send_message", "message_status", "stop_agent", "pause_agent", "resume_agent", "inspect_agent", "list_agents"}
+	want := []string{"shell", "read_pdf", "read_file", "write_file", "edit_file", "get_audit", "get_plan", "get_work", "create_agent", "update_plan", "assign_work", "cancel_work", "reassign_work", "list_work", "send_message", "message_status", "stop_agent", "pause_agent", "resume_agent", "inspect_agent", "list_agents"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatal(names)
 	}
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Task: "do work"})
+	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "do work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,4 +178,13 @@ func TestStartupFailureReturnsRetryableCleanupOwnership(t *testing.T) {
 	if owned.calls.Load() != 2 {
 		t.Fatal(owned.calls.Load())
 	}
+}
+
+func createWorker(t *testing.T, s *harness.Session, role roster.Role) identity.ActorID {
+	t.Helper()
+	r, e := s.CreateAgent(context.Background(), s.Root(), roster.CreateRequest{Role: role})
+	if e != nil {
+		t.Fatal(e)
+	}
+	return r.AgentID
 }

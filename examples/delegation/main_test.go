@@ -46,7 +46,7 @@ func TestScriptValidatesAssignmentsAndWorkerCapabilities(t *testing.T) {
 	for _, mode := range []string{"missing root work", "stale review notification", "unknown worker work", "delegating worker", "implementing auditor"} {
 		t.Run(mode, func(t *testing.T) {
 			store := work.New()
-			p := &cycleProvider{root: "root", assigned: true, reviews: map[work.SubmissionID]bool{}, session: &workflow.Session{Store: store}}
+			p := &cycleProvider{root: "root", implementor: "worker", auditor: "reviewer", assigned: true, reviews: map[work.SubmissionID]bool{}, session: &workflow.Session{Store: store}}
 			w, err := store.AssignWork("root", work.AssignRequest{Assignee: "worker", Task: "task"})
 			if err != nil {
 				t.Fatal(err)

@@ -665,3 +665,21 @@ an apparently successful seal.
 
 Canonical event serialization lives in `harness/eventcodec`, keeping storage/wire
 encoding out of agent execution and conversation routing.
+
+## Explicit agents and work (implemented)
+
+`Session.CreateAgent(ctx, actor, roster.CreateRequest)` is root-only and records an
+idle role registration before returning. The previous raw parent/spec harness API
+and HTTP AgentProfile resolver are removed. Raw controller creation remains below
+the application boundary. Assignment and reassignment require existing eligible
+assignees; neither creates or stops agents. Failed audits record immutable findings;
+the root explicitly starts repair with `assign_work(kind="repair", ...)`.
+
+The application agent views live in `harness/projection`, with aliases exported by
+`harness`, so inspection does not import its parent package. Live, model, HTTP,
+archive, and terminal views use those recorded roles. `Session.ListWork` delegates
+to the read-only inspection reader: root-only, all states by default, fixed-prefix
+pagination, 20 default/100 maximum summaries, and 240 Unicode characters per task
+preview. Creation/assignment/reassignment use shared pure tool decoders in the HTTP
+adapter, keeping presence-sensitive validation separate from typed Go semantics.
+See [the implementation contract](docs/architecture/EXPLICIT_AGENT_WORK_DESIGN.md).

@@ -15,6 +15,7 @@ import (
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 	"hash"
 	"sort"
@@ -64,29 +65,30 @@ type WorkView struct {
 	Record  eventlog.Cursor `json:"record"`
 }
 type Projector struct {
-	workViews  map[work.ID]WorkView
-	toolStates map[string]toolState
-	calls      map[identity.ActorID]uint64
-	messageIDs map[identity.MessageID]MessageView
-	workEvents map[work.EventID]bool
-	usage      map[identity.ActorID]agent.UsageSnapshot
-	limits     map[identity.ActorID]*int64
-	mu         sync.RWMutex
-	session    string
-	cursor     eventlog.Cursor
-	closed     bool
-	outputs    map[identity.OutputID]OutputView
-	agents     map[identity.ActorID]conversation.AgentInfo
-	histories  map[identity.ActorID][]HistoryView
-	messages   []MessageView
-	receipts   map[identity.MessageID]message.Receipt
-	chunks     map[identity.ContentID]*chunkState
-	contents   map[identity.ContentID]eventlog.ContentRef
-	facts      map[string][]eventlog.Cursor
+	registrations map[identity.ActorID]roster.Registration
+	workViews     map[work.ID]WorkView
+	toolStates    map[string]toolState
+	calls         map[identity.ActorID]uint64
+	messageIDs    map[identity.MessageID]MessageView
+	workEvents    map[work.EventID]bool
+	usage         map[identity.ActorID]agent.UsageSnapshot
+	limits        map[identity.ActorID]*int64
+	mu            sync.RWMutex
+	session       string
+	cursor        eventlog.Cursor
+	closed        bool
+	outputs       map[identity.OutputID]OutputView
+	agents        map[identity.ActorID]conversation.AgentInfo
+	histories     map[identity.ActorID][]HistoryView
+	messages      []MessageView
+	receipts      map[identity.MessageID]message.Receipt
+	chunks        map[identity.ContentID]*chunkState
+	contents      map[identity.ContentID]eventlog.ContentRef
+	facts         map[string][]eventlog.Cursor
 }
 
 func New(session identity.SessionID) *Projector {
-	return &Projector{workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
+	return &Projector{registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
 }
 func (p *Projector) Cursor() eventlog.Cursor { p.mu.RLock(); defer p.mu.RUnlock(); return p.cursor }
 func (p *Projector) Apply(e eventlog.Record) error {
@@ -271,6 +273,23 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			o.Error = v.Error
 			p.outputs[v.Output] = o
 		}
+	case "agent_registered":
+		var fact conversation.AgentRegistered
+		if err := json.Unmarshal(e.Payload, &fact); err != nil {
+			return err
+		}
+		reg := fact.Registration
+		a, ok := p.agents[reg.AgentID]
+		if !ok || a.Parent != reg.Parent || actor != reg.AgentID {
+			return errors.New("registration requires matching runtime agent")
+		}
+		if _, exists := p.registrations[reg.AgentID]; exists {
+			return errors.New("duplicate agent registration")
+		}
+		if !(reg.Role.Creatable() && reg.Parent != message.User || reg.Role == roster.Root && reg.Parent == message.User) {
+			return errors.New("invalid agent registration role")
+		}
+		commit = func() { p.registrations[reg.AgentID] = reg }
 	case "agent_started":
 		var v conversation.AgentStarted
 		if err := json.Unmarshal(e.Payload, &v); err != nil {

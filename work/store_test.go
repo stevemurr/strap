@@ -2,6 +2,7 @@ package work
 
 import (
 	"errors"
+	"github.com/stevemurr/strap/identity"
 	"reflect"
 	"sync"
 	"testing"
@@ -99,11 +100,11 @@ func TestAuditRepairAcceptance(t *testing.T) {
 	if len(s.PendingEvents(0)) != n {
 		t.Fatal("duplicate verdict had side effects")
 	}
-	repair, e := s.GetWork("impl", outcome.RepairWorkID)
+	repair, e := assignRepairForTest(t, s, outcome)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if repair.RequestedBy != "reviewer" || repair.Owner != "root" || repair.Assignee != "impl" || !reflect.DeepEqual(repair.Scope.StepIDs, []StepID{p.Steps[0].ID}) {
+	if repair.RequestedBy != "root" || repair.Owner != "root" || repair.Assignee != "impl" || !reflect.DeepEqual(repair.Scope.StepIDs, []StepID{p.Steps[0].ID}) {
 		t.Fatalf("bad repair: %+v", repair)
 	}
 	if _, e = s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(repair), Steps: []StepProgress{{ID: p.Steps[1].ID, Status: ptr(InProgress)}}}); !errors.Is(e, ErrForbidden) {
@@ -286,7 +287,7 @@ func TestStandaloneAuditAndRepairCancellation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	r, _ := s.GetWork("root", outcome.RepairWorkID)
+	r, _ := assignRepairForTest(t, s, outcome)
 	if _, e = s.Cancel("root", CancelRequest{WorkTarget: target(r), Reason: "withdraw task"}); e != nil {
 		t.Fatal(e)
 	}
@@ -305,7 +306,7 @@ func TestRepairReassignmentKeepsReadAndWriteScope(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	repair, _ := s.GetWork("root", outcome.RepairWorkID)
+	repair, _ := assignRepairForTest(t, s, outcome)
 	repair, e = s.Reassign("root", ReassignRequest{WorkTarget: target(repair), Assignee: "replacement"})
 	if e != nil {
 		t.Fatal(e)
@@ -339,8 +340,21 @@ func TestRepairReassignmentKeepsReadAndWriteScope(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	nextRepair, _ := s.GetWork("root", next.RepairWorkID)
+	nextRepair, _ := assignRepairForTest(t, s, next)
 	if nextRepair.Assignee != "replacement" {
 		t.Fatal("repair returned to obsolete implementor", nextRepair)
 	}
+}
+
+func assignRepairForTest(t *testing.T, s *Store, a Audit) (Work, error) {
+	t.Helper()
+	aw, e := s.GetWork("root", a.WorkID)
+	if e != nil {
+		return Work{}, e
+	}
+	original, e := s.GetWork("root", aw.ParentID)
+	if e != nil {
+		return Work{}, e
+	}
+	return s.AssignRepair("root", AssignRepairRequest{WorkTarget: target(original), Assignee: func() identity.ActorID { sub, _ := s.GetSubmission("root", a.SubmissionID); return sub.SubmittedBy }(), AuditID: a.ID})
 }

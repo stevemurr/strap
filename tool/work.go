@@ -81,35 +81,11 @@ func UpdateWork(handle Handler[work.ProgressUpdate]) Tool {
 type AssignWorkArgs = work.AssignmentRequest
 
 func AssignWork(handle Handler[AssignWorkArgs]) Tool {
-	type implementation struct {
-		Kind           work.Kind        `json:"kind"`
-		Assignee       identity.ActorID `json:"assignee,omitempty"`
-		Task           string           `json:"task"`
-		Context        string           `json:"context,omitempty"`
-		ExpectedOutput string           `json:"expected_output,omitempty"`
-		Scope          *work.Scope      `json:"scope,omitempty"`
+	branches := []Tool{}
+	for _, b := range assignmentContracts() {
+		branches = append(branches, b.tool(handle))
 	}
-	type audit struct {
-		Kind             work.Kind         `json:"kind"`
-		Assignee         identity.ActorID  `json:"assignee,omitempty"`
-		WorkID           work.ID           `json:"work_id"`
-		ExpectedRevision work.Revision     `json:"expected_revision"`
-		SubmissionID     work.SubmissionID `json:"submission_id"`
-	}
-	return compose(provider.ToolDefinition{Name: "assign_work", Description: "Assign implementation work or an audit. The application supplies agent configuration. Omit assignee to provision an agent."},
-		// A Compose branch carries no description of its own; compose emits one
-		// into the branch schema only when non-empty.
-		builtin("assign_implementation", "",
-			func(ctx context.Context, c Call, a implementation) (Result, error) {
-				return handle(ctx, c, AssignWorkArgs{Kind: a.Kind, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput, Scope: a.Scope})
-			},
-			Enum("kind", "implementation"), MinLength("task", 1), MinLength("assignee", 1), MinLength("scope.plan_id", 1), MinItems("scope.step_ids", 1), UniqueItems("scope.step_ids"), MinLength("scope.step_ids[]", 1)),
-		builtin("assign_audit", "",
-			func(ctx context.Context, c Call, a audit) (Result, error) {
-				return handle(ctx, c, AssignWorkArgs{Kind: a.Kind, Assignee: a.Assignee, WorkID: a.WorkID, ExpectedRevision: a.ExpectedRevision, SubmissionID: a.SubmissionID})
-			},
-			Enum("kind", "audit"), MinLength("assignee", 1), MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("submission_id", 1)),
-	)
+	return compose(provider.ToolDefinition{Name: "assign_work", Description: "Create NEW tracked implementation, audit, or repair work for a required existing assignee. To transfer an existing work item to a replacement agent, use reassign_work. Use create_agent first to create one. Implementation requires task; scope is optional. Omit work_id, expected_revision, submission_id, and audit_id for implementation, including when reusing an agent. Audit and repair use the original implementation work_id and its current expected_revision. Audit requires submission_id; repair requires the failing verdict audit_id. For audit/repair, omit task, context, expected_output, and scope: the server derives them. Returns work registration, not delivery or completion."}, branches...)
 }
 func SubmitWork(handle Handler[work.SubmitRequest]) Tool {
 	return builtin("submit_work",
@@ -126,7 +102,7 @@ func SubmitAudit(handle Handler[work.AuditRequest]) Tool {
 		Summary      string            `json:"summary"`
 		Findings     []work.Finding    `json:"findings"`
 	}
-	return compose(provider.ToolDefinition{Name: "submit_audit", Description: "Record pass or fail for your assigned submission. Pass permits omitted or empty findings. Fail requires nonempty findings and issues scoped repairs. If unable to verify, report your work blocker instead."},
+	return compose(provider.ToolDefinition{Name: "submit_audit", Description: "Record pass or fail for your assigned submission. Pass permits omitted or empty findings. Fail requires nonempty findings and requests changes. The owner must explicitly assign repairs. If unable to verify, report your work blocker instead."},
 		// The wrapper is load-bearing: compose validates branches eagerly, so a
 		// composed branch needs a non-nil Invoke even when handle is nil. Passing
 		// handle directly panics at construction (tool/work_test.go:162).
@@ -173,14 +149,25 @@ func CancelWork(handle Handler[work.CancelRequest]) Tool {
 		handle, MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("reason", 1))
 }
 func ReassignWork(handle Handler[work.ReassignRequest]) Tool {
-	type args struct {
-		work.WorkTarget
+	return Func[work.ReassignRequest]{Spec: Definition[work.ReassignRequest]{Name: "reassign_work", Description: "Replace the worker on an existing active work item. Supply only work_id, expected_revision, and the required existing assignee. Create a replacement explicitly with create_agent if needed. Uses this work item's revision. Does not create, resume, or stop agents. Old assignment updates are rejected.", Parameters: reassignmentParameters}, Invoke: func(ctx context.Context, c Call, r work.ReassignRequest) (Result, error) { return handle(ctx, c, r) }}
+}
+
+func ListWork(handle Handler[work.ListQuery]) Tool {
+	type first struct {
 		Assignee identity.ActorID `json:"assignee,omitempty"`
+		Kind     work.Kind        `json:"kind,omitempty"`
+		State    work.State       `json:"state,omitempty"`
+		Limit    int              `json:"limit,omitempty"`
 	}
-	return builtin("reassign_work",
-		"Owner reassigns active work. Omit assignee to provision a replacement. Old assignment updates are rejected.",
-		func(ctx context.Context, c Call, a args) (Result, error) {
-			return handle(ctx, c, work.ReassignRequest{WorkTarget: a.WorkTarget, Assignee: a.Assignee})
-		},
-		MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("assignee", 1))
+	type next struct {
+		Cursor string `json:"cursor"`
+		Limit  int    `json:"limit,omitempty"`
+	}
+	return compose(provider.ToolDefinition{Name: "list_work", Description: "Discover tracked work, including closed and cancelled work. Root only. Start with optional assignee, kind and state filters; continue with cursor and optional limit only. Results describe a fixed recorded snapshot. Use get_work for current details before mutations. Discovery does not guarantee exactly-once retries."},
+		builtin("first_work_page", "", func(ctx context.Context, c Call, q first) (Result, error) {
+			return handle(ctx, c, work.ListQuery{Assignee: q.Assignee, Kind: q.Kind, State: q.State, Limit: q.Limit})
+		}, Enum("kind", "implementation", "audit", "repair"), Enum("state", "active", "needs_check", "checking", "changes_requested", "accepted", "closed", "cancelled"), Minimum("limit", 1), Maximum("limit", 100)),
+		builtin("next_work_page", "", func(ctx context.Context, c Call, q next) (Result, error) {
+			return handle(ctx, c, work.ListQuery{Cursor: q.Cursor, Limit: q.Limit})
+		}, MinLength("cursor", 1), Minimum("limit", 1), Maximum("limit", 100)))
 }

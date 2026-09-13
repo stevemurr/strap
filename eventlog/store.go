@@ -19,10 +19,10 @@ var (
 	ErrDetached = errors.New("subscription detached")
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // SupportedSchema includes finite content-only archives written before reasoning.
-func SupportedSchema(schema int) bool { return schema == 2 || schema == SchemaVersion }
+func SupportedSchema(schema int) bool { return schema == 2 || schema == 3 || schema == SchemaVersion }
 
 type Data struct {
 	Output      *identity.OutputID `json:"output,omitempty"`

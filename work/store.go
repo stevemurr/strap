@@ -361,36 +361,64 @@ func (s *Store) GetPlan(actor identity.ActorID, id PlanID) (Plan, error) {
 	p.Steps = slices.DeleteFunc(p.Steps, func(step Step) bool { return !allowed[step.ID] })
 	return p, nil
 }
-func (s *Store) canReadSubmission(actor identity.ActorID, sub Submission) bool {
+
+// repairSource matches the immutable input, never the latest parent submission.
+func (s *Store) repairSource(w Work, actor identity.ActorID, sub SubmissionID) bool {
+	return actor != "" && w.Kind == Repair && w.Assignee == actor && w.State != Cancelled && w.RequestedByAuditID != "" && s.audits[w.RequestedByAuditID].SubmissionID == sub
+}
+func (s *Store) canReadSubmissionIndependently(actor identity.ActorID, sub Submission) bool {
+	if actor == "" {
+		return false
+	}
 	w := s.works[sub.WorkID]
-	if actor != "" && (w.Owner == actor || w.Assignee == actor || sub.SubmittedBy == actor) {
+	if w.Owner == actor || w.Assignee == actor || sub.SubmittedBy == actor {
 		return true
 	}
-	for _, audit := range s.works {
-		if audit.Kind == AuditWork && audit.Assignee == actor && audit.State != Cancelled && audit.SubjectSubmissionID == sub.ID {
+	for _, child := range s.works {
+		if child.Kind == AuditWork && child.Assignee == actor && child.State != Cancelled && child.SubjectSubmissionID == sub.ID {
+			return true
+		}
+	}
+	return false
+}
+func (s *Store) canReadSubmission(actor identity.ActorID, sub Submission) bool {
+	if s.canReadSubmissionIndependently(actor, sub) {
+		return true
+	}
+	for _, child := range s.works {
+		if s.repairSource(child, actor, sub.ID) {
 			return true
 		}
 	}
 	return false
 }
 
-// A reassigned repair actor may submit a full-scope outcome, but only sees the
-// step snapshots it was authorized to repair. The canonical submission stays full.
+// Source reads filter by the repair scope, not the source submitter's wider scope.
 func (s *Store) submissionView(actor identity.ActorID, sub Submission) Submission {
 	view := sub.Clone()
 	original := s.works[sub.WorkID]
 	if actor == original.Owner || actor == original.Assignee {
 		return view
 	}
-	for _, w := range s.works {
-		if w.Kind == AuditWork && w.Assignee == actor && w.State != Cancelled && w.SubjectSubmissionID == sub.ID {
+	allowed := map[StepID]bool{}
+	for _, child := range s.works {
+		if child.Kind == AuditWork && child.Assignee == actor && child.State != Cancelled && child.SubjectSubmissionID == sub.ID {
 			return view
 		}
+		if s.repairSource(child, actor, sub.ID) && child.Scope != nil {
+			for _, id := range child.Scope.StepIDs {
+				allowed[id] = true
+			}
+		}
 	}
-	via := s.works[sub.SubmittedVia]
-	if via.Scope != nil {
-		view.Steps = slices.DeleteFunc(view.Steps, func(step Step) bool { return !slices.Contains(via.Scope.StepIDs, step.ID) })
+	if sub.SubmittedBy == actor {
+		if via := s.works[sub.SubmittedVia]; via.Scope != nil {
+			for _, id := range via.Scope.StepIDs {
+				allowed[id] = true
+			}
+		}
 	}
+	view.Steps = slices.DeleteFunc(view.Steps, func(step Step) bool { return !allowed[step.ID] })
 	return view
 }
 func (s *Store) GetSubmission(actor identity.ActorID, id SubmissionID) (Submission, error) {
@@ -412,11 +440,13 @@ func (s *Store) GetAudit(actor identity.ActorID, id AuditID) (Audit, error) {
 	if !ok {
 		return Audit{}, ErrNotFound
 	}
-	if !s.canReadSubmission(actor, s.submissions[a.SubmissionID]) {
-		r := s.works[a.RepairWorkID]
-		if actor == "" || r.Assignee != actor {
-			return Audit{}, ErrForbidden
+	if s.canReadSubmissionIndependently(actor, s.submissions[a.SubmissionID]) {
+		return a.Clone(), nil
+	}
+	for _, child := range s.works {
+		if child.RequestedByAuditID == a.ID && s.repairSource(child, actor, a.SubmissionID) {
+			return a.Clone(), nil
 		}
 	}
-	return a.Clone(), nil
+	return Audit{}, ErrForbidden
 }

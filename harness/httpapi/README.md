@@ -39,14 +39,15 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /sessions` | List registered session IDs |
 | `POST /sessions` | Create; `{}` uses host defaults, `{"config": ...}` supplies a complete `harness.Config` |
 | `GET /sessions/{id}` | State, root ID, capture health/coverage and effective configuration |
-| `GET /agents` | Agent state snapshots and lifecycle revisions |
-| `POST /agents` | `{ "parent": "agent-1", "profile": "name" }`; requires a host `AgentProfile` resolver |
+| `GET /agents` | Agent state, lifecycle revision, role, registration, eligible work kinds, and active work IDs |
+| `POST /agents` | `{ "actor": "agent-1", "request": {"role":"implementor"} }`; root only; `implementor` or `auditor`, returns idle registration |
 | `GET /agents/{agent}` | Inspect; `?transcript=true&before=N&limit=N` requests history |
 | `POST /agents/{agent}/pause`, `/resume`, `/stop` | Lifecycle controls |
 | `POST /agents/{agent}/tokens` | `{ "revision": N }`; explicit provider I/O (`measure` capability) |
 | `POST /messages` | `{ "to": "agent-1", "content": "..." }` |
 | `GET /receipts/{message}` | Delivery receipt |
 | `POST /work/assign`, `/reassign`, `/cancel`, `/progress`, `/plan`, `/submit`, `/audit` | `{ "actor": "agent-1", "request": ... }`; request is the corresponding public `work` type |
+| `GET /work?actor=...` | Root-only work discovery across all states; optional assignee/kind/state, limit 1–100 (default 20), or cursor plus optional limit |
 | `GET /work/{work}?actor=...` | Work inspection, including related submission/audit evidence |
 | `GET /plans/{plan}?actor=...` | Plan snapshot |
 | `GET /submissions/{submission}?actor=...` | Submission snapshot |
@@ -118,3 +119,17 @@ automatic context counting, contiguous streamed events, finite-page agreement,
 clean JSONL sealing, and disposal. It uses a short test prompt, disables thinking
 and web tools, and limits each completion to 512 tokens. Ordinary tests skip it
 when `STRAP_LIVE_BASE_URL` is unset.
+
+Agent creation and assignment are separate operations. Every assignment/reassignment
+requires an existing `assignee`. Assignment is a strict union: implementation accepts
+task/context/expected_output/scope; audit requires original work_id/expected_revision/
+submission_id; repair requires original work_id/expected_revision/audit_id. Fields
+from another branch are rejected even when empty or null. Creation, assignment,
+and reassignment retain raw request JSON for the same pure decoder used by tools.
+The old parent/profile creation envelope and AgentProfile callback are removed.
+
+`submit_audit` records a verdict without creating repairs. On failure the root
+explicitly assigns repair work. `GET /trace/work?actor=...` and the standalone
+inspection handler offer the same fixed-prefix listing. Continuations must use
+only cursor and optional limit (plus actor); filters are preserved by the cursor.
+Unavailable prefixes fail explicitly. Listing is discovery, not deduplication.

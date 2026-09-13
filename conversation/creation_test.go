@@ -106,7 +106,20 @@ func (canceledSender) Send(ctx context.Context, _ message.Draft) (message.Receip
 // The library tool knows only the callback, never the controller or agent spec.
 func creationTool(c *conversation.Controller, spec agent.Spec) tool.Tool {
 	spec = spec.Clone()
-	return tool.CreateAgent(func(ctx context.Context, call tool.Call, assignment work.Work) (tool.Result, error) {
+	type args struct {
+		Task           string `json:"task"`
+		Context        string `json:"context,omitempty"`
+		ExpectedOutput string `json:"expected_output,omitempty"`
+	}
+	params, err := tool.NewParameters[args](tool.MinLength("task", 1))
+	if err != nil {
+		panic(err)
+	}
+	return tool.Func[args]{Spec: tool.Definition[args]{Name: "create_test_agent", Parameters: params}, Invoke: func(ctx context.Context, call tool.Call, a args) (tool.Result, error) {
+		if strings.TrimSpace(a.Task) == "" {
+			return tool.Result{}, errors.New("task is required")
+		}
+		assignment := work.Work{Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput}
 		created, err := c.CreateAgent(call.Actor, spec)
 		if err != nil {
 			return tool.Result{}, err
@@ -125,7 +138,7 @@ func creationTool(c *conversation.Controller, spec agent.Spec) tool.Tool {
 			Instruction message.Receipt `json:"instruction"`
 		}{Creation: created, Instruction: receipt})
 		return tool.Text(string(encoded)), err
-	})
+	}}
 }
 
 func TestInvalidTypedToolRejectedBeforeAgentRegistration(t *testing.T) {

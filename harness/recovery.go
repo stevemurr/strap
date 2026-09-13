@@ -129,10 +129,10 @@ func (s *Session) decodeRecord(ctx context.Context, e eventlog.Record) (conversa
 	}
 	return eventcodec.DecodeEvent(resolved)
 }
-func (s *Session) InspectAgentContext(ctx context.Context, id identity.ActorID, opts conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *Session) InspectAgentContext(ctx context.Context, id identity.ActorID, opts conversation.InspectOptions) (AgentInspection, error) {
 	r, v, err := s.traceView(ctx, eventlog.Cursor{})
 	if err != nil {
-		return conversation.AgentInspection{}, err
+		return AgentInspection{}, err
 	}
 	defer r.Close(context.Background())
 	return v.InspectAgentContext(ctx, id, opts)

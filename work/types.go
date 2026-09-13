@@ -95,6 +95,8 @@ type Work struct {
 	ParentID            ID               `json:"parent_id,omitempty"`
 	SubjectSubmissionID SubmissionID     `json:"subject_submission_id,omitempty"`
 	RequestedByAuditID  AuditID          `json:"requested_by_audit_id,omitempty"`
+	LatestAuditID       AuditID          `json:"latest_audit_id,omitempty"`
+	ActiveRepairID      ID               `json:"active_repair_id,omitempty"`
 	LatestSubmissionID  SubmissionID     `json:"latest_submission_id,omitempty"`
 }
 type WorkTarget struct {
@@ -115,7 +117,7 @@ type StepEdit struct {
 	AcceptanceCriteria *[]string `json:"acceptance_criteria,omitempty"`
 }
 type AssignRequest struct {
-	Assignee       identity.ActorID `json:"assignee,omitempty"`
+	Assignee       identity.ActorID `json:"assignee"`
 	Scope          *Scope           `json:"scope,omitempty"`
 	Task           string           `json:"task"`
 	Context        string           `json:"context,omitempty"`
@@ -147,11 +149,15 @@ type AssignAuditRequest struct {
 	SubmissionID SubmissionID     `json:"submission_id"`
 	Auditor      identity.ActorID `json:"auditor"`
 }
+type AssignRepairRequest struct {
+	WorkTarget
+	Assignee identity.ActorID `json:"assignee"`
+	AuditID  AuditID          `json:"audit_id"`
+}
 type ReassignRequest struct {
 	WorkTarget
-	// Applications may provision a replacement when omitted. Store.Reassign
-	// still requires a resolved assignee.
-	Assignee identity.ActorID `json:"assignee,omitempty"`
+	// An existing eligible replacement is required.
+	Assignee identity.ActorID `json:"assignee"`
 }
 type CancelRequest struct {
 	WorkTarget
@@ -191,7 +197,8 @@ type Audit struct {
 	Verdict      Verdict          `json:"verdict"`
 	Summary      string           `json:"summary"`
 	Findings     []Finding        `json:"findings,omitempty"`
-	RepairWorkID ID               `json:"repair_work_id,omitempty"`
+	// RepairWorkID is retained only for historical automatic-repair records.
+	RepairWorkID ID `json:"repair_work_id,omitempty"`
 }
 type Event struct {
 	Change       *Change          `json:"change,omitempty"`

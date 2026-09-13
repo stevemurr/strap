@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/stevemurr/strap/roster"
 	"strings"
 	"sync"
 	"testing"
@@ -22,15 +23,18 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 type cycleProvider struct {
-	mu       sync.Mutex
-	session  *Session
-	plan     work.Plan
-	root     message.ActorID
-	assigned bool
-	reviews  map[work.SubmissionID]bool
-	calls    int
-	failed   bool
-	done     chan work.Work
+	mu          sync.Mutex
+	session     *Session
+	plan        work.Plan
+	root        message.ActorID
+	implementor message.ActorID
+	auditor     message.ActorID
+	repaired    map[work.AuditID]bool
+	assigned    bool
+	reviews     map[work.SubmissionID]bool
+	calls       int
+	failed      bool
+	done        chan work.Work
 }
 
 func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
@@ -47,9 +51,28 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if r.Agent == p.root {
+		for _, m := range r.Messages {
+			if m.Role == "tool" {
+				var reg roster.Registration
+				if json.Unmarshal([]byte(m.Content.Text()), &reg) == nil && reg.AgentID != "" {
+					if reg.Role == roster.Implementor {
+						p.implementor = reg.AgentID
+					}
+					if reg.Role == roster.Auditor {
+						p.auditor = reg.AgentID
+					}
+				}
+			}
+		}
+		if p.implementor == "" {
+			return invoke("create_agent", roster.CreateRequest{Role: roster.Implementor})
+		}
+		if p.auditor == "" {
+			return invoke("create_agent", roster.CreateRequest{Role: roster.Auditor})
+		}
 		if !p.assigned {
 			p.assigned = true
-			return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
+			return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
 		}
 		for i := len(r.Messages) - 1; i >= 0; i-- {
 			m := r.Messages[i]
@@ -57,6 +80,19 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 				continue
 			}
 			e := m.Envelope.Event
+			if e.Kind == work.AuditCompleted && e.Work.State == work.ChangesRequested && !p.repaired[e.AuditID] {
+				w, err := p.session.Store.GetWork(p.root, e.Work.ID)
+				if err != nil {
+					return provider.Response{}, err
+				}
+				if w.State == work.ChangesRequested && w.ActiveRepairID == "" {
+					if p.repaired == nil {
+						p.repaired = map[work.AuditID]bool{}
+					}
+					p.repaired[e.AuditID] = true
+					return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Repair, Assignee: p.implementor, WorkID: w.ID, ExpectedRevision: w.Revision, AuditID: e.AuditID})
+				}
+			}
 			if e.Kind == work.AuditCompleted && e.Work.State == work.Accepted {
 				select {
 				case p.done <- e.Work:
@@ -73,7 +109,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 					continue
 				}
 				p.reviews[e.SubmissionID] = true
-				return invoke("assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: w.LatestSubmissionID})
+				return invoke("assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: p.auditor, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: w.LatestSubmissionID})
 			}
 		}
 		return provider.Response{Content: "Waiting for the work cycle."}, nil
@@ -200,14 +236,14 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 	if reviews != 2 {
 		t.Fatal("expected audit and reaudit", reviews)
 	}
-	if len(c.Agents()) != 4 {
+	if len(c.Agents()) != 3 {
 		t.Fatal("repair should reuse implementor", c.Agents())
 	}
 	// Existing implementors cannot be selected as auditors by the host adapter.
 	s.mu.Lock()
 	var impl message.ActorID
 	for id, kind := range s.roles {
-		if kind == work.Implementation {
+		if kind.Role == roster.Implementor {
 			impl = id
 		}
 	}
@@ -284,6 +320,9 @@ func recoverySession(t *testing.T) (context.Context, *Session) {
 	if _, e := c.CreateAgent(message.User, agent.Spec{Provider: idleProvider{}, Tools: s.RootTools()}); e != nil {
 		t.Fatal(e)
 	}
+	if err := s.RegisterRoot(); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		cleanup, stop := context.WithTimeout(context.Background(), time.Second)
 		defer stop()
@@ -313,7 +352,7 @@ func invokeRoot(t *testing.T, s *Session, name string, args any) tool.Result {
 }
 func assigned(t *testing.T, s *Session) work.Work {
 	t.Helper()
-	result := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "task"})
+	result := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task"})
 	var w work.Work
 	if e := json.Unmarshal([]byte(result.Content.Text()), &w); e != nil {
 		t.Fatal(e)
@@ -332,14 +371,14 @@ func nextEvent(t *testing.T, ctx context.Context, s *Session, predicate func(con
 		}
 	}
 }
-func TestReassignProvisionsReplacementAndNotifiesDisplacedActor(t *testing.T) {
+func TestReassignUsesExplicitReplacementAndNotifiesDisplacedActor(t *testing.T) {
 	ctx, s := recoverySession(t)
 	w := assigned(t, s)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
 		m, ok := e.(conversation.MessageEvent)
 		return ok && m.Message.Work != nil && m.Message.Work.ID == w.ID
 	})
-	value := invokeRoot(t, s, "reassign_work", map[string]any{"work_id": w.ID, "expected_revision": w.Revision})
+	value := invokeRoot(t, s, "reassign_work", map[string]any{"assignee": createWorker(t, s, roster.Implementor), "work_id": w.ID, "expected_revision": w.Revision})
 	var replacement work.Work
 	if e := json.Unmarshal([]byte(value.Content.Text()), &replacement); e != nil {
 		t.Fatal(e)
@@ -358,7 +397,7 @@ func TestReassignProvisionsReplacementAndNotifiesDisplacedActor(t *testing.T) {
 		exit, ok := e.(conversation.AgentExited)
 		return ok && exit.Agent == replacement.Assignee
 	})
-	value = invokeRoot(t, s, "reassign_work", map[string]any{"work_id": replacement.ID, "expected_revision": replacement.Revision})
+	value = invokeRoot(t, s, "reassign_work", map[string]any{"assignee": createWorker(t, s, roster.Implementor), "work_id": replacement.ID, "expected_revision": replacement.Revision})
 	var final work.Work
 	_ = json.Unmarshal([]byte(value.Content.Text()), &final)
 	if final.Assignee == replacement.Assignee {
@@ -380,7 +419,7 @@ func TestAuditCancellationWakesRootAndSubmissionNeedsNoLiveImplementor(t *testin
 		t.Fatal("submitted work still requires active execution")
 	}
 	original, _ := s.Store.GetWork(s.Root(), w.ID)
-	result := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: original.Revision, SubmissionID: sub.ID})
+	result := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: original.Revision, SubmissionID: sub.ID})
 	var audit work.Work
 	_ = json.Unmarshal([]byte(result.Content.Text()), &audit)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
@@ -442,7 +481,8 @@ func TestUndeliveredOwnerNotificationRemainsPending(t *testing.T) {
 }
 func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 	ctx, s := recoverySession(t)
-	id, _, e := s.provision(s.Root(), "", work.Implementation)
+	reg, e := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Implementor})
+	id := reg.AgentID
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -479,4 +519,14 @@ func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 	if count != 1 {
 		t.Fatal("expected one recovery notification", count)
 	}
+}
+
+func createWorker(t *testing.T, s *Session, role roster.Role) message.ActorID {
+	t.Helper()
+	v := invokeRoot(t, s, "create_agent", roster.CreateRequest{Role: role})
+	var r roster.Registration
+	if e := json.Unmarshal([]byte(v.Content.Text()), &r); e != nil {
+		t.Fatal(e)
+	}
+	return r.AgentID
 }

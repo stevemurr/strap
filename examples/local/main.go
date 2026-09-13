@@ -34,8 +34,11 @@ func run(ctx context.Context, baseURL, model string) (err error) {
 		defer stop()
 		err = errors.Join(err, s.Close(cleanup))
 	}()
-	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Tools: s.RootTools(), Prompt: prompt.Prompt{Role: "Coordinate one audited arithmetic task.", Instructions: []string{"Call assign_work kind implementation once with task: calculate two plus two. After review_requested, call assign_work kind audit with the original work_id, current expected_revision and submission_id; use get_work to refresh. Repairs are issued automatically on failed audit. Assign a new audit after repair submission. Wait for acceptance before claiming success. Do not poll; events arrive automatically."}}})
+	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Tools: s.RootTools(), Prompt: prompt.Prompt{Role: "Coordinate one audited arithmetic task.", Instructions: []string{"Create an agent with role implementor, then call assign_work kind implementation once with its agent_id as assignee and task: calculate two plus two. After review_requested, create an agent with role auditor, then call assign_work kind audit with that assignee, the original work_id, current expected_revision and submission_id; use get_work to refresh. On failed audit explicitly assign_work kind repair to the implementor, referencing original work_id, current expected_revision and audit_id. Assign a new audit after repair submission. Wait for acceptance before claiming success. Do not poll; events arrive automatically."}}})
 	if err != nil {
+		return err
+	}
+	if err = s.RegisterRoot(); err != nil {
 		return err
 	}
 	if _, err = c.Send(c.Root(), "Delegate and audit the answer to two plus two."); err != nil {

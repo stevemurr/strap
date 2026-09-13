@@ -40,6 +40,9 @@ func describe(e conversation.Event) (eventlog.Data, any, error) {
 	case conversation.AckEvent:
 		kind = "ack"
 		actor = v.Receipt.Recipient
+	case conversation.AgentRegistered:
+		kind = "agent_registered"
+		actor = v.Registration.AgentID
 	case conversation.AgentStarted:
 		kind = "agent_started"
 		actor = v.Agent.ID
@@ -117,6 +120,8 @@ func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 		return decode[conversation.CommentaryEvent](e.Payload)
 	case "ack":
 		return decode[conversation.AckEvent](e.Payload)
+	case "agent_registered":
+		return decode[conversation.AgentRegistered](e.Payload)
 	case "agent_started":
 		return decode[conversation.AgentStarted](e.Payload)
 	case "agent_exited":

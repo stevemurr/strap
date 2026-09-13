@@ -12,7 +12,7 @@ func TestWorkerCommentaryReachesHostWithoutEnteringParentInbox(t *testing.T) {
 	if _, err := c.Send(c.Root(), "delegate"); err != nil {
 		t.Fatal(err)
 	}
-	p.next(t).tool("create_agent", `{"task":"inspect files","expected_output":"findings"}`)
+	p.next(t).tool("create_test_agent", `{"task":"inspect files","expected_output":"findings"}`)
 	var root, child call
 	for range 2 {
 		next := p.next(t)

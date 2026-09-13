@@ -255,7 +255,7 @@ func TestAuditValidationAndAccess(t *testing.T) {
 			t.Fatal(got, err)
 		}
 	}
-	repair, _ := s.GetWork("root", audit.RepairWorkID)
+	repair, _ := assignRepairForTest(t, s, audit)
 	repair, err = s.Reassign("root", ReassignRequest{WorkTarget: target(repair), Assignee: "repairer"})
 	if err != nil {
 		t.Fatal(err)

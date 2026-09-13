@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -40,17 +41,31 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 		name := ""
 		var args any
 		last := request.Messages[len(request.Messages)-1]
-		if last.Role == "user" {
+		var impl, auditor message.ActorID
+		for _, m := range request.Messages {
+			if m.Role == "tool" {
+				var reg roster.Registration
+				if json.Unmarshal([]byte(m.Content), &reg) == nil {
+					if reg.Role == roster.Implementor {
+						impl = reg.AgentID
+					}
+					if reg.Role == roster.Auditor {
+						auditor = reg.AgentID
+					}
+				}
+			}
+		}
+		if last.Role == "user" || last.Role == "tool" && (impl != "" || auditor != "") {
 			for _, op := range request.Tools {
 				switch op.Function.Name {
 				case "assign_work":
 					if env.Event != nil && env.Event.Kind == work.ReviewRequested {
 						item := env.Event.Work
 						name = "assign_work"
-						args = map[string]any{"kind": "audit", "work_id": item.ID, "expected_revision": item.Revision, "submission_id": item.LatestSubmissionID}
+						args = map[string]any{"kind": "audit", "assignee": auditor, "work_id": item.ID, "expected_revision": item.Revision, "submission_id": item.LatestSubmissionID}
 					} else if env.Kind == message.Instruction {
 						name = "assign_work"
-						args = map[string]any{"kind": "implementation", "task": "calculate two plus two"}
+						args = map[string]any{"kind": "implementation", "assignee": impl, "task": "calculate two plus two"}
 					}
 				case "submit_work":
 					if env.Work != nil {
@@ -63,6 +78,26 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 						args = map[string]any{"work_id": env.Work.ID, "expected_revision": env.Work.Revision, "submission_id": env.Work.SubjectSubmissionID, "summary": "2 + 2 = 4", "verdict": "pass"}
 					}
 				}
+			}
+		}
+		if name == "assign_work" {
+			if env.Event != nil && env.Event.Kind == work.ReviewRequested {
+				if auditor == "" {
+					name = "create_agent"
+					args = roster.CreateRequest{Role: roster.Auditor}
+				}
+			} else {
+				if impl == "" {
+					name = "create_agent"
+					args = roster.CreateRequest{Role: roster.Implementor}
+				}
+			}
+		}
+		// After an assignment result, wait for the next event.
+		if last.Role == "tool" {
+			var assigned work.Work
+			if json.Unmarshal([]byte(last.Content), &assigned) == nil && assigned.ID != "" {
+				name = ""
 			}
 		}
 		msg := map[string]any{"role": "assistant", "content": "Waiting for audited work."}

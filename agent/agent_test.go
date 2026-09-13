@@ -240,7 +240,9 @@ func TestIdlePauseResumeAndStop(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
-	awaitState(t, states, agent.Idle)
+	if a.State() != agent.Idle {
+		t.Fatal("new agent is not idle", a.State())
+	}
 	if _, err := a.Resume(); err != nil {
 		t.Fatal(err)
 	}
@@ -319,5 +321,36 @@ func TestCountTokensUsesHistoricalSnapshotAndTools(t *testing.T) {
 			t.Fatal(r)
 		}
 		r.Tools[0].Parameters[0] = '!'
+	}
+}
+
+func TestUnassignedAgentRemainsIdleWithoutRunningTransition(t *testing.T) {
+	c := config()
+	states := make(chan agent.State, 8)
+	started := make(chan struct{}, 1)
+	c.OnState = func(s agent.State) { states <- s }
+	c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+		if _, ok := e.(agent.HistoryAppended); ok {
+			started <- struct{}{}
+		}
+		return nil
+	})
+	c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
+		t.Error("unassigned agent called provider")
+		return provider.Response{}, nil
+	})
+	a := mustAgent(t, c)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+	defer func() { cancel(); await(t, done) }()
+	await(t, started)
+	select {
+	case s := <-states:
+		t.Fatal("unassigned agent emitted lifecycle transition", s)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if a.State() != agent.Idle {
+		t.Fatal(a.State())
 	}
 }

@@ -43,7 +43,7 @@ func TestLocalToolsThroughRootAndChild(t *testing.T) {
 	if err := json.Unmarshal([]byte(last.Content.Text()), &shellResult); err != nil || shellResult.Output != "after\n" || shellResult.ExitCode == nil || *shellResult.ExitCode != 3 {
 		t.Fatalf("shell result: %+v, %v", shellResult, err)
 	}
-	checked.tool("create_agent", `{"task":"Read and check result.txt"}`)
+	checked.tool("create_test_agent", `{"task":"Read and check result.txt"}`)
 	var root, child call
 	for range 2 {
 		got := m.next(t)

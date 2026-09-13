@@ -41,6 +41,10 @@ func (v *ReadModel) GetAudit(actor identity.ActorID, id AuditID) (Audit, error) 
 	return v.store.GetAudit(actor, id)
 }
 func (v *ReadModel) InspectWork(actor identity.ActorID, id ID) (Inspection, error) {
+	return v.store.InspectWork(actor, id)
+}
+
+func (v *Store) InspectWork(actor identity.ActorID, id ID) (Inspection, error) {
 	w, err := v.GetWork(actor, id)
 	if err != nil {
 		return Inspection{}, err
@@ -57,22 +61,53 @@ func (v *ReadModel) InspectWork(actor identity.ActorID, id ID) (Inspection, erro
 		}
 	}
 	sid := w.LatestSubmissionID
+	auditID := w.LatestAuditID
 	if w.Kind == AuditWork {
 		sid = w.SubjectSubmissionID
+	}
+	if w.Kind == Repair {
+		auditID = w.RequestedByAuditID
+	}
+	if auditID != "" {
+		a, err := v.GetAudit(actor, auditID)
+		if err != nil {
+			return Inspection{}, err
+		}
+		out.Audit = &a
+		if w.Kind == Repair {
+			sid = a.SubmissionID
+		}
 	}
 	if sid != "" {
 		sub, err := v.GetSubmission(actor, sid)
 		if err != nil {
 			return Inspection{}, err
 		}
+		// The contextual repair view stays scoped even for an owner with wider rights.
+		if w.Kind == Repair && w.Scope != nil {
+			sub.Steps = slices.DeleteFunc(sub.Steps, func(step Step) bool { return !slices.Contains(w.Scope.StepIDs, step.ID) })
+		}
 		out.Submission = &sub
 	}
-	if w.RequestedByAuditID != "" {
-		a, err := v.GetAudit(actor, w.RequestedByAuditID)
-		if err != nil {
-			return Inspection{}, err
-		}
-		out.Audit = &a
-	}
 	return out, nil
+}
+
+// Works returns detached snapshots; authorization belongs to the host's root-only listing.
+func (v *ReadModel) Works() []Work {
+	v.store.mu.Lock()
+	defer v.store.mu.Unlock()
+	out := make([]Work, 0, len(v.store.works))
+	for _, w := range v.store.works {
+		out = append(out, w.Clone())
+	}
+	slices.SortFunc(out, func(a, b Work) int {
+		if a.ID < b.ID {
+			return -1
+		}
+		if a.ID > b.ID {
+			return 1
+		}
+		return 0
+	})
+	return out
 }

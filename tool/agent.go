@@ -2,11 +2,12 @@ package tool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/stevemurr/strap/message"
-	"github.com/stevemurr/strap/work"
+	"github.com/stevemurr/strap/roster"
 )
 
 type sendMessageArgs struct {
@@ -46,24 +47,21 @@ func MessageStatus(lookup func(message.MessageID) (message.Receipt, bool)) Tool 
 		})
 }
 
-// CreateAgent is a compatibility hook for low-level host creation callbacks.
-// It decodes only task/context/expected_output; the value confers no ledger rights.
-// Tracked delegation should use AssignWork. The CLI uses AssignWork.
-func CreateAgent(handle Handler[work.Work]) Tool {
-	type args struct {
-		Task           string `json:"task"`
-		Context        string `json:"context,omitempty"`
-		ExpectedOutput string `json:"expected_output,omitempty"`
-	}
-	return builtin("create_agent",
-		"Create an agent to complete an assignment. Its operating instructions are supplied by the application. Returns immediately; replies arrive later in your inbox.",
-		func(ctx context.Context, c Call, a args) (Result, error) {
-			if strings.TrimSpace(a.Task) == "" {
-				return Result{}, errors.New("work task is required")
-			}
-			return handle(ctx, c, work.Work{Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput})
-		},
-		MinLength("task", 1))
+var creationParameters = parameters[roster.CreateRequest](
+	Enum("role", "implementor", "auditor"),
+	Description("role", "implementor executes tasks and repairs; auditor independently reviews submitted work."),
+)
+
+// DecodeAgentCreation validates the same wire contract advertised by CreateAgent.
+func DecodeAgentCreation(raw json.RawMessage) (roster.CreateRequest, error) {
+	return creationParameters.Decode(raw)
+}
+
+// CreateAgent creates an idle registered execution agent; assignment is separate.
+func CreateAgent(handle Handler[roster.CreateRequest]) Tool {
+	return Func[roster.CreateRequest]{Spec: Definition[roster.CreateRequest]{
+		Name: "create_agent", Description: "Create an idle agent. Choose implementor for tasks or repairs, or auditor for independent review. Returns agent_id and role. Then call assign_work with agent_id as assignee. Creation alone does not start a task.", Parameters: creationParameters,
+	}, Invoke: func(ctx context.Context, c Call, r roster.CreateRequest) (Result, error) { return handle(ctx, c, r) }}
 }
 
 // Management tools decode IDs and invoke application-supplied operations. Their

@@ -18,6 +18,7 @@ import (
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -39,10 +40,7 @@ type SendRequest struct {
 	To      identity.ActorID `json:"to"`
 	Content string           `json:"content"`
 }
-type AgentRequest struct {
-	Parent  identity.ActorID `json:"parent"`
-	Profile string           `json:"profile"`
-}
+
 type WorkRequest[T any] struct {
 	Actor   identity.ActorID `json:"actor"`
 	Request T                `json:"request"`
@@ -224,28 +222,24 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(path) == 1 {
 		switch path[0] {
+		case "work":
+			if r.Method == "GET" {
+				q, e := inspection.WorkQuery(r.URL.Query())
+				if e != nil {
+					respond(w, nil, e)
+					return
+				}
+				v, e := session.ListWork(r.Context(), identity.ActorID(r.URL.Query().Get("actor")), q)
+				respond(w, v, e)
+				return
+			}
 		case "agents":
 			if r.Method == "GET" {
 				respond(w, session.Agents(), nil)
 				return
 			}
 			if r.Method == "POST" {
-				req, err := decodeBody[AgentRequest](w, r)
-				if err != nil {
-					respond(w, nil, err)
-					return
-				}
-				if s.options.AgentProfile == nil {
-					respond(w, nil, fmt.Errorf("%w: agent profiles are not configured", work.ErrInvalid))
-					return
-				}
-				spec, err := s.options.AgentProfile(session, req.Profile)
-				if err != nil {
-					respond(w, nil, err)
-					return
-				}
-				v, err := session.CreateAgent(req.Parent, spec)
-				respond(w, v, err)
+				decodedCall(w, r, tool.DecodeAgentCreation, session.CreateAgent)
 				return
 			}
 		case "messages":
@@ -407,9 +401,9 @@ func workCall[T, R any](w http.ResponseWriter, r *http.Request, fn func(context.
 func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, action string) {
 	switch action {
 	case "assign":
-		workCall(w, r, s.AssignWork)
+		decodedCall(w, r, tool.DecodeAssignment, s.AssignWork)
 	case "reassign":
-		workCall(w, r, s.ReassignWork)
+		decodedCall(w, r, tool.DecodeReassignment, s.ReassignWork)
 	case "cancel":
 		workCall(w, r, s.CancelWork)
 	case "progress":
@@ -469,4 +463,20 @@ func (s *Service) stream(w http.ResponseWriter, r *http.Request, session *harnes
 			return
 		}
 	}
+}
+
+// Keep request bytes until the shared pure tool contract validates presence and variants.
+func decodedCall[T, R any](w http.ResponseWriter, r *http.Request, decode func(json.RawMessage) (T, error), fn func(context.Context, identity.ActorID, T) (R, error)) {
+	envelope, err := decodeBody[WorkRequest[json.RawMessage]](w, r)
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
+	request, err := decode(envelope.Request)
+	if err != nil {
+		respond(w, nil, fmt.Errorf("%w: %v", work.ErrInvalid, err))
+		return
+	}
+	result, err := fn(r.Context(), envelope.Actor, request)
+	respond(w, result, err)
 }

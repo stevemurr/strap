@@ -11,6 +11,7 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/content"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 )
@@ -20,14 +21,14 @@ type transcriptSession struct {
 	queries []agent.TranscriptQuery
 }
 
-func (s *transcriptSession) Agents() []conversation.AgentInfo {
-	return []conversation.AgentInfo{{ID: "root"}, {ID: "agent-7", Parent: "root"}}
+func (s *transcriptSession) Agents() []harness.AgentInfo {
+	return []harness.AgentInfo{{AgentInfo: conversation.AgentInfo{ID: "root"}}, {AgentInfo: conversation.AgentInfo{ID: "agent-7", Parent: "root"}}}
 }
-func (s *transcriptSession) InspectAgent(id message.ActorID, options conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *transcriptSession) InspectAgent(id message.ActorID, options conversation.InspectOptions) (harness.AgentInspection, error) {
 	if id != "root" && id != "agent-7" {
-		return conversation.AgentInspection{}, fmt.Errorf("unknown agent: %s", id)
+		return harness.AgentInspection{}, fmt.Errorf("unknown agent: %s", id)
 	}
-	in := conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: id, Parent: "root", State: agent.Running}}
+	in := harness.AgentInspection{AgentInspection: conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: id, Parent: "root", State: agent.Running}}}
 	if options.Transcript == nil {
 		return in, nil
 	}

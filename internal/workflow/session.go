@@ -14,6 +14,7 @@ import (
 	"github.com/stevemurr/strap/inbox"
 	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 )
@@ -35,7 +36,7 @@ type Session struct {
 	Store                *work.Store
 	implementor, auditor agent.Spec
 	mu                   sync.Mutex
-	roles                map[identity.ActorID]work.Kind
+	roles                map[identity.ActorID]roster.Registration
 	ctx                  context.Context
 	cancel               context.CancelFunc
 	events               *inbox.Inbox[conversation.Event]
@@ -54,7 +55,7 @@ func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admis
 func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec, options ...Option) *Session {
 	owner := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]work.Kind{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]roster.Registration{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	for _, option := range options {
 		option(s)
 	}
@@ -108,6 +109,10 @@ func (s *Session) updateProgress(ctx context.Context, c tool.Call, u work.Progre
 }
 func (s *Session) RootTools() []tool.Tool {
 	return append(s.commonTools(),
+		tool.CreateAgent(func(ctx context.Context, c tool.Call, r roster.CreateRequest) (tool.Result, error) {
+			v, e := s.CreateAgent(ctx, c.Actor, r)
+			return result(v, e)
+		}),
 		tool.UpdatePlan(func(ctx context.Context, c tool.Call, u work.PlanUpdate) (tool.Result, error) {
 			v, e := s.UpdatePlan(ctx, c.Actor, u)
 			return result(v, e)

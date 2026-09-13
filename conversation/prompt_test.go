@@ -37,7 +37,7 @@ func TestConfiguredPromptAndAssignmentStaySeparateAndCreationIsUnavailable(t *te
 	if got := systemPrompt(t, root).Role; got != "Coordinate work." {
 		t.Fatal(got)
 	}
-	root.tool("create_agent", `{"task":"first task","context":"a quoted \"value\"","expected_output":"one line"}`)
+	root.tool("create_test_agent", `{"task":"first task","context":"a quoted \"value\"","expected_output":"one line"}`)
 	var delegated call
 	for range 2 {
 		next := m.next(t)
@@ -64,17 +64,17 @@ func TestConfiguredPromptAndAssignmentStaySeparateAndCreationIsUnavailable(t *te
 
 	// The configured tool set controls both model visibility and dispatch.
 	for _, definition := range delegated.request.Tools {
-		if definition.Name == "create_agent" {
+		if definition.Name == "create_test_agent" {
 			t.Fatal("creation tool exposed to delegated agent")
 		}
 	}
-	delegated.tool("create_agent", `{"task":"must not create another agent"}`)
+	delegated.tool("create_test_agent", `{"task":"must not create another agent"}`)
 	next := m.next(t)
 	if next.request.Agent != delegated.request.Agent {
 		t.Fatal("unexpected agent created")
 	}
 	last := next.request.Messages[len(next.request.Messages)-1]
-	if last.Role != "tool" || last.Content.Text() != "Tool error: unknown tool: create_agent" {
+	if last.Role != "tool" || last.Content.Text() != "Tool error: unknown tool: create_test_agent" {
 		t.Fatalf("creation tool remained executable: %+v", last)
 	}
 	if len(c.Agents()) != 2 {
@@ -114,7 +114,7 @@ func TestAssignmentEventsAndProviderSnapshotsAreIndependent(t *testing.T) {
 	if _, err := c.Send(c.Root(), "delegate"); err != nil {
 		t.Fatal(err)
 	}
-	m.next(t).tool("create_agent", `{"task":"original"}`)
+	m.next(t).tool("create_test_agent", `{"task":"original"}`)
 	observed := event(t, c, func(e conversation.Event) bool {
 		msg, ok := e.(conversation.MessageEvent)
 		return ok && msg.Message.Work != nil
@@ -166,7 +166,7 @@ func TestApplicationSnapshotsCreationSpec(t *testing.T) {
 	if _, err := c.Send(c.Root(), "delegate"); err != nil {
 		t.Fatal(err)
 	}
-	m.next(t).tool("create_agent", `{"task":"work"}`)
+	m.next(t).tool("create_test_agent", `{"task":"work"}`)
 	for range 2 {
 		next := m.next(t)
 		if next.request.Agent != c.Root() {
@@ -184,7 +184,7 @@ func TestInvalidAssignmentsDoNotCreateAgents(t *testing.T) {
 			if _, err := c.Send(c.Root(), "delegate"); err != nil {
 				t.Fatal(err)
 			}
-			m.next(t).tool("create_agent", raw)
+			m.next(t).tool("create_test_agent", raw)
 			next := m.next(t)
 			last := next.request.Messages[len(next.request.Messages)-1]
 			if last.Role != "tool" || !strings.HasPrefix(last.Content.Text(), "Tool error:") {

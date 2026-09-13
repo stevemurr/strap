@@ -128,7 +128,7 @@ func TestSenderAndLedgerToolCallbacks(t *testing.T) {
 				t.Error(r)
 			}
 			return Text(string(r.WorkID)), nil
-		}), `{"kind":"audit","work_id":"selected","expected_revision":2,"submission_id":"sub"}`},
+		}), `{"kind":"audit","assignee":"auditor","work_id":"selected","expected_revision":2,"submission_id":"sub"}`},
 	}
 	for _, op := range operations {
 		result, err := op.tool.Call(context.Background(), Call{Arguments: json.RawMessage(op.raw)})
@@ -179,7 +179,7 @@ func TestCompositionRequiresNameAndBranches(t *testing.T) {
 		}
 		return Text("assigned"), nil
 	})
-	if result, err := op.Call(context.Background(), Call{Arguments: json.RawMessage(`{"kind":"implementation","task":"task"}`)}); err != nil || result.Content.Text() != "assigned" {
+	if result, err := op.Call(context.Background(), Call{Arguments: json.RawMessage(`{"kind":"implementation","assignee":"worker","task":"task"}`)}); err != nil || result.Content.Text() != "assigned" {
 		t.Fatal(result, err)
 	}
 }

@@ -40,7 +40,7 @@ func TestApplicationManagementTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	kit := map[string]tool.Tool{}
-	for _, operation := range managementTools(c) {
+	for _, operation := range managementTools(runtimeFixture{c}) {
 		kit[operation.Definition().Name] = operation
 	}
 	if len(kit) != 5 {
@@ -99,7 +99,7 @@ func TestApplicationManagementTools(t *testing.T) {
 func TestUnknownAgentErrors(t *testing.T) {
 	c := conversation.New(context.Background())
 	defer c.Close(context.Background())
-	for _, op := range managementTools(c) {
+	for _, op := range managementTools(runtimeFixture{c}) {
 		if op.Definition().Name == "list_agents" {
 			continue
 		}
@@ -111,7 +111,21 @@ func TestUnknownAgentErrors(t *testing.T) {
 func TestInspectionPagingOptionsReachController(t *testing.T) {
 	c := conversation.New(context.Background())
 	defer c.Close(context.Background())
-	if _, err := inspectTool(c).Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing","limit":3,"before":2}`)}); err == nil {
+	if _, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing","limit":3,"before":2}`)}); err == nil {
 		t.Fatal("unknown agent accepted")
 	}
+}
+
+type runtimeFixture struct{ *conversation.Controller }
+
+func (f runtimeFixture) Agents() []AgentInfo {
+	out := []AgentInfo{}
+	for _, a := range f.Controller.Agents() {
+		out = append(out, AgentInfo{AgentInfo: a})
+	}
+	return out
+}
+func (f runtimeFixture) InspectAgent(id message.ActorID, o conversation.InspectOptions) (AgentInspection, error) {
+	a, e := f.Controller.InspectAgent(id, o)
+	return AgentInspection{AgentInspection: a}, e
 }

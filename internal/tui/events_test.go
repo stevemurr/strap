@@ -11,6 +11,7 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/content"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/work"
@@ -74,16 +75,16 @@ func TestCommandErrorsAndHistoryWithoutMessages(t *testing.T) {
 
 type inspectionSession struct {
 	*fakeSession
-	inspection conversation.AgentInspection
+	inspection harness.AgentInspection
 	failure    error
 }
 
-func (s *inspectionSession) InspectAgent(message.ActorID, conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *inspectionSession) InspectAgent(message.ActorID, conversation.InspectOptions) (harness.AgentInspection, error) {
 	return s.inspection, s.failure
 }
 func TestTranscriptFormattingEmptyPagesAndErrors(t *testing.T) {
 	m, base := setup(t)
-	s := &inspectionSession{fakeSession: base, inspection: conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: "root", State: agent.Running}}}
+	s := &inspectionSession{fakeSession: base, inspection: harness.AgentInspection{AgentInspection: conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: "root", State: agent.Running}}}}
 	m.session = s
 	enter(m, "/transcript")
 	if !strings.Contains(m.View(), "No transcript returned") {

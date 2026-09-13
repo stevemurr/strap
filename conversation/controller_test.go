@@ -133,7 +133,7 @@ func TestRootPersistsAcrossMessagesAndAcknowledgesConsumption(t *testing.T) {
 func TestDelegationDoesNotBlockRootAndChildReplyReturnsThroughInbox(t *testing.T) {
 	c, m := setup(t)
 	_, _ = c.Send(c.Root(), "delegate this")
-	m.next(t).tool("create_agent", `{"task":"child task","context":"Background","expected_output":"A result"}`)
+	m.next(t).tool("create_test_agent", `{"task":"child task","context":"Background","expected_output":"A result"}`)
 	var root, child call
 	for range 2 {
 		got := m.next(t)

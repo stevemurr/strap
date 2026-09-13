@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 )
@@ -29,8 +30,8 @@ import (
 type Session interface {
 	Root() message.ActorID
 	Send(message.ActorID, string) (message.Receipt, error)
-	Agents() []conversation.AgentInfo
-	InspectAgent(message.ActorID, conversation.InspectOptions) (conversation.AgentInspection, error)
+	Agents() []harness.AgentInfo
+	InspectAgent(message.ActorID, conversation.InspectOptions) (harness.AgentInspection, error)
 	PauseAgent(message.ActorID) (conversation.AgentInfo, error)
 	ResumeAgent(message.ActorID) (conversation.AgentInfo, error)
 	StopAgent(message.ActorID) (conversation.AgentInfo, error)

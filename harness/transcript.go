@@ -47,11 +47,11 @@ type inspectionPage struct {
 	HasEarlier bool              `json:"has_earlier"`
 }
 
-func inspectionResult(in conversation.AgentInspection) (tool.Result, error) {
+func inspectionResult(in AgentInspection) (tool.Result, error) {
 	out := struct {
-		conversation.AgentInfo
+		AgentInfo
 		Transcript inspectionPage `json:"transcript"`
-	}{AgentInfo: in.AgentInfo, Transcript: inspectionPage{Entries: []inspectionEntry{}, HasEarlier: in.Transcript.HasEarlier}}
+	}{AgentInfo: in.Info(), Transcript: inspectionPage{Entries: []inspectionEntry{}, HasEarlier: in.Transcript.HasEarlier}}
 	// Encoded entry budget accounts for JSON escaping, not only source text size.
 	budget := 32 * 1024
 	for i := len(in.Transcript.Entries) - 1; i >= 0; i-- {

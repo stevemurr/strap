@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/stevemurr/strap/roster"
 	"reflect"
 	"testing"
 
@@ -32,7 +33,7 @@ func operationResult[T any](t *testing.T, s *Session, viaTools bool, actor messa
 		kind := s.roles[actor]
 		s.mu.Unlock()
 		operations = s.implementor.Tools
-		if kind == work.AuditWork {
+		if kind.Role == roster.Auditor {
 			operations = s.auditor.Tools
 		}
 	}
@@ -68,11 +69,17 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 	t.Helper()
 	ctx, s := recoverySession(t)
 	root := s.Root()
+	create := func(role roster.Role) roster.Registration {
+		r := roster.CreateRequest{Role: role}
+		return operationResult(t, s, viaTools, root, "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(ctx, root, r) })
+	}
+	implementor := create(roster.Implementor)
+	auditor := create(roster.Auditor)
 	planRequest := work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Unassigned")}}}
 	plan := operationResult(t, s, viaTools, root, "update_plan", planRequest, func() (work.Plan, error) {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
-	assignment := work.AssignmentRequest{Kind: work.Implementation, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
+	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
 	implementation := operationResult(t, s, viaTools, root, "assign_work", assignment, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
@@ -91,7 +98,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 		if err != nil {
 			t.Fatal(err)
 		}
-		auditRequest := work.AssignmentRequest{Kind: work.AuditWork, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: submission.ID}
+		auditRequest := work.AssignmentRequest{Kind: work.AuditWork, Assignee: auditor.AgentID, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: submission.ID}
 		auditing := operationResult(t, s, viaTools, root, "assign_work", auditRequest, func() (work.Work, error) {
 			return s.AssignWork(ctx, root, auditRequest)
 		})
@@ -109,8 +116,14 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 			return s.SubmitAudit(ctx, auditing.Assignee, verdictRequest)
 		})
 		if verdict == work.Fail {
-			repair := operationResult(t, s, viaTools, implementation.Assignee, "get_work", map[string]any{"work_id": lastAudit.RepairWorkID}, func() (work.Inspection, error) {
-				return s.InspectWork(ctx, implementation.Assignee, lastAudit.RepairWorkID)
+			original, e := s.GetWork(ctx, root, implementationID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			repairRequest := work.AssignmentRequest{Kind: work.Repair, Assignee: implementation.Assignee, WorkID: original.ID, ExpectedRevision: original.Revision, AuditID: lastAudit.ID}
+			repairWork := operationResult(t, s, viaTools, root, "assign_work", repairRequest, func() (work.Work, error) { return s.AssignWork(ctx, root, repairRequest) })
+			repair := operationResult(t, s, viaTools, implementation.Assignee, "get_work", map[string]any{"work_id": repairWork.ID}, func() (work.Inspection, error) {
+				return s.InspectWork(ctx, implementation.Assignee, repairWork.ID)
 			})
 			if repair.Audit == nil || repair.Audit.ID != lastAudit.ID || repair.Work.Assignee != implementation.Assignee {
 				t.Fatalf("repair did not preserve findings and assignee: %+v", repair)
@@ -130,12 +143,13 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 	if final.Work.State != work.Accepted || plan.Steps[0].Status != work.Completed || plan.Steps[1].Status != work.Pending || audit.Verdict != work.Pass {
 		t.Fatalf("unexpected audit/repair outcome: %+v, %+v, %+v", final, plan, audit)
 	}
-	assignment = work.AssignmentRequest{Kind: work.Implementation, Task: "reassign then cancel"}
+	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "reassign then cancel"}
 	extra := operationResult(t, s, viaTools, root, "assign_work", assignment, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	oldAssignee := extra.Assignee
-	reassign := work.ReassignRequest{WorkTarget: work.WorkTarget{ID: extra.ID, ExpectedRevision: extra.Revision}}
+	replacement := create(roster.Implementor)
+	reassign := work.ReassignRequest{Assignee: replacement.AgentID, WorkTarget: work.WorkTarget{ID: extra.ID, ExpectedRevision: extra.Revision}}
 	extra = operationResult(t, s, viaTools, root, "reassign_work", reassign, func() (work.Work, error) {
 		return s.ReassignWork(ctx, root, reassign)
 	})
@@ -162,7 +176,7 @@ func TestTypedAndToolOperationsProduceSameAuditRepairOutcome(t *testing.T) {
 
 func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	ctx, s := recoverySession(t)
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Task: "task"})
+	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,29 +216,29 @@ func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	}
 }
 
-func TestTypedAssignmentCompensatesLedgerFailure(t *testing.T) {
+func TestTypedAssignmentFailurePreservesExistingAgent(t *testing.T) {
 	ctx, s := recoverySession(t)
-	_, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Task: "task", Scope: &work.Scope{PlanID: "missing", StepIDs: []work.StepID{"missing"}}})
+	_, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task", Scope: &work.Scope{PlanID: "missing", StepIDs: []work.StepID{"missing"}}})
 	if !errors.Is(err, work.ErrNotFound) {
 		t.Fatal(err)
 	}
 	agents := s.Agents()
-	if len(agents) != 2 || (agents[1].State != agent.StopRequested && !agents[1].State.Terminal()) {
+	if len(agents) != 2 || agents[1].State != agent.Idle {
 		t.Fatalf("failed assignment left a live worker: %+v", agents)
 	}
 }
 
 func TestTypedReassignmentCancellationPreservesOriginalBinding(t *testing.T) {
 	_, s := recoverySession(t)
-	w, err := s.AssignWork(context.Background(), s.Root(), work.AssignmentRequest{Kind: work.Implementation, Task: "task"})
+	w, err := s.AssignWork(context.Background(), s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Registration cancels after provisioning starts, before the ledger commit.
-	s.implementor.Tools = append(s.implementor.Tools, cancelOnRegistration{cancel})
-	_, err = s.ReassignWork(ctx, s.Root(), work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}})
+	replacement := createWorker(t, s, roster.Implementor)
+	cancel()
+	_, err = s.ReassignWork(ctx, s.Root(), work.ReassignRequest{Assignee: replacement, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
@@ -233,7 +247,7 @@ func TestTypedReassignmentCancellationPreservesOriginalBinding(t *testing.T) {
 		t.Fatalf("canceled replacement changed original binding: %+v, %v", current, err)
 	}
 	agents := s.Agents()
-	if len(agents) != 3 || (agents[2].State != agent.StopRequested && !agents[2].State.Terminal()) {
+	if len(agents) != 3 || agents[2].State != agent.Idle {
 		t.Fatalf("canceled replacement left a live agent: %+v", agents)
 	}
 }

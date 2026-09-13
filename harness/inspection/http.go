@@ -11,6 +11,7 @@ import (
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/work"
 )
 
 // Handler serves read-only inspection of a borrowed reader. The embedding host
@@ -22,6 +23,10 @@ func Handler(reader *Reader) http.Handler {
 			if err != nil {
 				status, code := 500, "internal"
 				switch {
+				case errors.Is(err, work.ErrForbidden):
+					status, code = 403, "forbidden"
+				case errors.Is(err, work.ErrInvalid):
+					status, code = 400, "invalid"
 				case errors.Is(err, projection.ErrNotFound):
 					status, code = 404, "not_found"
 				case errors.Is(err, ErrClosed), errors.Is(err, eventlog.ErrDisposed):
@@ -46,6 +51,16 @@ func Handler(reader *Reader) http.Handler {
 			return
 		}
 		q := r.URL.Query()
+		if strings.Trim(r.URL.Path, "/") == "work" {
+			query, e := WorkQuery(q)
+			if e != nil {
+				write(nil, e)
+				return
+			}
+			v, e := reader.ListWork(r.Context(), identity.ActorID(q.Get("actor")), query)
+			write(v, e)
+			return
+		}
 		number := func(key string, def uint64) (uint64, error) {
 			if !q.Has(key) {
 				return def, nil

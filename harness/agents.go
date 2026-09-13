@@ -14,8 +14,8 @@ type agentControl interface {
 	StopAgent(message.ActorID) (conversation.AgentInfo, error)
 	PauseAgent(message.ActorID) (conversation.AgentInfo, error)
 	ResumeAgent(message.ActorID) (conversation.AgentInfo, error)
-	InspectAgent(message.ActorID, conversation.InspectOptions) (conversation.AgentInspection, error)
-	Agents() []conversation.AgentInfo
+	InspectAgent(message.ActorID, conversation.InspectOptions) (AgentInspection, error)
+	Agents() []AgentInfo
 }
 
 func managementTools(c agentControl) []tool.Tool {

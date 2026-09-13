@@ -28,7 +28,9 @@ import (
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/prompt"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
+	"github.com/stevemurr/strap/work"
 )
 
 type Resource = resource.Resource
@@ -283,9 +285,18 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
 		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish))
-	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), messaging, managementTools(s), deps.Root.Tools)}
+	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
+		v, e := s.ListWork(ctx, c.Actor, q)
+		if e != nil {
+			return tool.Result{}, e
+		}
+		return tool.JSON(v)
+	})}, messaging, managementTools(s), deps.Root.Tools)}
 	_, err = c.CreateAgent(message.User, rootSpec)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.workflow.RegisterRoot(); err != nil {
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
@@ -313,19 +324,22 @@ func (s *Session) Send(to identity.ActorID, text string) (message.Receipt, error
 	defer done()
 	return s.controller.Send(to, text)
 }
-func (s *Session) Agents() []conversation.AgentInfo {
-	_ = s.project(context.Background())
-	return s.projection.Agents()
-}
-func (s *Session) CreateAgent(parent identity.ActorID, spec agent.Spec) (conversation.Creation, error) {
-	_, done, err := s.admission.Begin(context.Background())
+func (s *Session) Agents() []AgentInfo {
+	reader, v, err := s.traceView(context.Background(), eventlog.Cursor{})
 	if err != nil {
-		return conversation.Creation{}, err
+		return nil
 	}
-	defer done()
-	return s.controller.CreateAgent(parent, spec)
+	defer reader.Close(context.Background())
+	out, err := v.Agents(context.Background())
+	if err != nil {
+		return nil
+	}
+	return out
 }
-func (s *Session) InspectAgent(id identity.ActorID, opts conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *Session) CreateAgent(ctx context.Context, actor identity.ActorID, request roster.CreateRequest) (roster.Registration, error) {
+	return s.workflow.CreateAgent(ctx, actor, request)
+}
+func (s *Session) InspectAgent(id identity.ActorID, opts conversation.InspectOptions) (AgentInspection, error) {
 	return s.InspectAgentContext(context.Background(), id, opts)
 }
 func (s *Session) PauseAgent(id identity.ActorID) (conversation.AgentInfo, error) {

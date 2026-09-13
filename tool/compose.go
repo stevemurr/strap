@@ -53,7 +53,8 @@ func Compose(definition provider.ToolDefinition, branches ...Tool) (Tool, error)
 		if err := json.Unmarshal(def.Parameters, &schema); err != nil {
 			return nil, err
 		}
-		schema["title"], _ = json.Marshal(def.Name)
+		// Branch names are internal diagnostics, not callable public tools.
+		// Advertising them as schema titles encourages models to invoke them.
 		if def.Description != "" {
 			schema["description"], _ = json.Marshal(def.Description)
 		}
@@ -93,10 +94,10 @@ func (t *composedTool) prepare(ctx context.Context, c Call) (func() (Result, err
 	}
 	var selected func() (Result, error)
 	failures := []string{}
-	for _, branch := range t.branches {
+	for i, branch := range t.branches {
 		invoke, err := branch.prepare(ctx, c)
 		if err != nil {
-			failures = append(failures, branch.Definition().Name+": "+err.Error())
+			failures = append(failures, fmt.Sprintf("arguments variant %d: %v", i+1, err))
 			continue
 		}
 		if selected != nil {

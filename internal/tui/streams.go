@@ -297,7 +297,10 @@ func workStatus(w work.Work) string {
 	case work.Checking:
 		return "in review"
 	case work.ChangesRequested:
-		return "changes requested"
+		if w.ActiveRepairID == "" {
+			return "awaiting repair assignment"
+		}
+		return "repair in progress"
 	}
 	if w.Kind == work.AuditWork {
 		return "auditing"

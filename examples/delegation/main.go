@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/stevemurr/strap/roster"
 	"log"
 	"os"
 	"strings"
@@ -24,15 +25,18 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 type cycleProvider struct {
-	mu       sync.Mutex
-	session  *workflow.Session
-	plan     work.Plan
-	root     message.ActorID
-	assigned bool
-	reviews  map[work.SubmissionID]bool
-	calls    int
-	failed   bool
-	done     chan work.Work
+	mu          sync.Mutex
+	session     *workflow.Session
+	plan        work.Plan
+	root        message.ActorID
+	implementor message.ActorID
+	auditor     message.ActorID
+	repaired    map[work.AuditID]bool
+	assigned    bool
+	reviews     map[work.SubmissionID]bool
+	calls       int
+	failed      bool
+	done        chan work.Work
 }
 
 func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
@@ -49,9 +53,28 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if r.Agent == p.root {
+		for _, m := range r.Messages {
+			if m.Role == "tool" {
+				var reg roster.Registration
+				if json.Unmarshal([]byte(m.Content.Text()), &reg) == nil && reg.AgentID != "" {
+					if reg.Role == roster.Implementor {
+						p.implementor = reg.AgentID
+					}
+					if reg.Role == roster.Auditor {
+						p.auditor = reg.AgentID
+					}
+				}
+			}
+		}
+		if p.implementor == "" {
+			return invoke("create_agent", roster.CreateRequest{Role: roster.Implementor})
+		}
+		if p.auditor == "" {
+			return invoke("create_agent", roster.CreateRequest{Role: roster.Auditor})
+		}
 		if !p.assigned {
 			p.assigned = true
-			return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
+			return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
 		}
 		for i := len(r.Messages) - 1; i >= 0; i-- {
 			m := r.Messages[i]
@@ -59,6 +82,19 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 				continue
 			}
 			e := m.Envelope.Event
+			if e.Kind == work.AuditCompleted && e.Work.State == work.ChangesRequested && !p.repaired[e.AuditID] {
+				w, err := p.session.Store.GetWork(p.root, e.Work.ID)
+				if err != nil {
+					return provider.Response{}, err
+				}
+				if w.State == work.ChangesRequested && w.ActiveRepairID == "" {
+					if p.repaired == nil {
+						p.repaired = map[work.AuditID]bool{}
+					}
+					p.repaired[e.AuditID] = true
+					return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Repair, Assignee: p.implementor, WorkID: w.ID, ExpectedRevision: w.Revision, AuditID: e.AuditID})
+				}
+			}
 			if e.Kind == work.AuditCompleted && e.Work.State == work.Accepted {
 				select {
 				case p.done <- e.Work:
@@ -75,7 +111,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 					continue
 				}
 				p.reviews[e.SubmissionID] = true
-				return invoke("assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: w.LatestSubmissionID})
+				return invoke("assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: p.auditor, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: w.LatestSubmissionID})
 			}
 		}
 		return provider.Response{Content: "Waiting for the work cycle."}, nil
@@ -146,6 +182,9 @@ func run(ctx context.Context) error {
 	}()
 	_, err := c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "root"}, Tools: s.RootTools()})
 	if err != nil {
+		return err
+	}
+	if err = s.RegisterRoot(); err != nil {
 		return err
 	}
 	p.root = c.Root()

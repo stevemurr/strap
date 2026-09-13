@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/message"
 )
 
@@ -21,7 +22,7 @@ type transcriptView struct {
 	reasoningLoading bool
 	reasoningEarlier bool
 	reasoningOutputs []reasoningOutput
-	inspection       conversation.AgentInspection
+	inspection       harness.AgentInspection
 	viewport         viewport.Model
 	raw              bool
 	copying          bool

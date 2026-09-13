@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stevemurr/strap/message"
-	"github.com/stevemurr/strap/work"
+	"github.com/stevemurr/strap/roster"
 )
 
 type recordingSender struct {
@@ -24,11 +24,11 @@ func TestCreateAgentCallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sender := &recordingSender{}
-	invocation := Call{Actor: "agent-7", Sender: sender, Arguments: json.RawMessage(`{"task":"work","context":"background","expected_output":"report"}`)}
-	want := work.Work{Task: "work", Context: "background", ExpectedOutput: "report"}
+	invocation := Call{Actor: "agent-7", Sender: sender, Arguments: json.RawMessage(`{"role":"implementor"}`)}
+	want := roster.CreateRequest{Role: roster.Implementor}
 	callbackErr := errors.New("creation unavailable")
 	calls := 0
-	operation := CreateAgent(func(gotCtx context.Context, call Call, assignment work.Work) (Result, error) {
+	operation := CreateAgent(func(gotCtx context.Context, call Call, assignment roster.CreateRequest) (Result, error) {
 		calls++
 		if gotCtx != ctx || call.Actor != invocation.Actor || call.Sender != sender || string(call.Arguments) != string(invocation.Arguments) {
 			t.Fatal("invocation changed at callback boundary")
@@ -46,7 +46,7 @@ func TestCreateAgentCallback(t *testing.T) {
 
 func TestCreateAgentRejectsInputBeforeCallingHandler(t *testing.T) {
 	calls := 0
-	operation := CreateAgent(func(context.Context, Call, work.Work) (Result, error) {
+	operation := CreateAgent(func(context.Context, Call, roster.CreateRequest) (Result, error) {
 		calls++
 		return Result{}, nil
 	})
@@ -57,7 +57,7 @@ func TestCreateAgentRejectsInputBeforeCallingHandler(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := operation.Call(ctx, Call{Arguments: json.RawMessage(`{"task":"valid"}`)}); !errors.Is(err, context.Canceled) {
+	if _, err := operation.Call(ctx, Call{Arguments: json.RawMessage(`{"role":"implementor"}`)}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled call: %v", err)
 	}
 	if calls != 0 {

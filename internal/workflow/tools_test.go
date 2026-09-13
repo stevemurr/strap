@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/stevemurr/strap/roster"
 	"testing"
 
 	"github.com/stevemurr/strap/agent"
@@ -33,7 +34,7 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	if err := json.Unmarshal([]byte(created.Content.Text()), &p); err != nil {
 		t.Fatal(err)
 	}
-	value := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "task", Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{p.Steps[0].ID}}})
+	value := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task", Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{p.Steps[0].ID}}})
 	var w work.Work
 	if err := json.Unmarshal([]byte(value.Content.Text()), &w); err != nil {
 		t.Fatal(err)
@@ -60,7 +61,7 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.Store.GetWork(s.Root(), w.ID)
-	v = invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	v = invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
 	var a work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &a)
 	v = invokeRoot(t, s, "get_work", map[string]any{"work_id": a.ID})
@@ -71,7 +72,12 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v = invokeRoot(t, s, "get_work", map[string]any{"work_id": audit.RepairWorkID})
+	w, _ = s.GetWork(context.Background(), s.Root(), w.ID)
+	repairArgs := tool.AssignWorkArgs{Kind: work.Repair, Assignee: w.Assignee, WorkID: w.ID, ExpectedRevision: w.Revision, AuditID: audit.ID}
+	v = invokeRoot(t, s, "assign_work", repairArgs)
+	var repair work.Work
+	json.Unmarshal([]byte(v.Content.Text()), &repair)
+	v = invokeRoot(t, s, "get_work", map[string]any{"work_id": repair.ID})
 	if err := json.Unmarshal([]byte(v.Content.Text()), &inspection); err != nil || inspection.Audit == nil || inspection.Audit.ID != audit.ID {
 		t.Fatal(inspection, err)
 	}
@@ -102,7 +108,7 @@ func TestAssignmentAndReassignmentRejectInvalidRequests(t *testing.T) {
 			t.Fatal("accepted", args)
 		}
 	}
-	if _, err := callAs(s, ctx, w.Assignee, "assign_work", map[string]any{"kind": "implementation", "task": "no delegation"}); !errors.Is(err, work.ErrForbidden) {
+	if _, err := callAs(s, ctx, w.Assignee, "assign_work", map[string]any{"kind": "implementation", "assignee": w.Assignee, "task": "no delegation"}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -133,11 +139,11 @@ func TestAssignmentAndReassignmentRejectInvalidRequests(t *testing.T) {
 	}
 	invokeRoot(t, s, "cancel_work", map[string]any{"work_id": w.ID, "expected_revision": w.Revision, "reason": "withdraw"})
 	current, _ := s.Store.GetWork(s.Root(), w.ID)
-	if _, err := callAs(s, ctx, s.Root(), "reassign_work", map[string]any{"work_id": w.ID, "expected_revision": current.Revision}); !errors.Is(err, work.ErrState) {
+	if _, err := callAs(s, ctx, s.Root(), "reassign_work", map[string]any{"assignee": w.Assignee, "work_id": w.ID, "expected_revision": current.Revision}); !errors.Is(err, work.ErrState) {
 		t.Fatal(err)
 	}
 }
-func TestAuditReassignmentProvisionsAuditor(t *testing.T) {
+func TestAuditReassignmentUsesExplicitAuditor(t *testing.T) {
 	_, s := recoverySession(t)
 	w := assigned(t, s)
 	sub, err := s.Store.SubmitWork(w.Assignee, work.SubmitRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Summary: "ready"})
@@ -145,10 +151,10 @@ func TestAuditReassignmentProvisionsAuditor(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.Store.GetWork(s.Root(), w.ID)
-	v := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	v := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
 	var a work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &a)
-	v = invokeRoot(t, s, "reassign_work", map[string]any{"work_id": a.ID, "expected_revision": a.Revision})
+	v = invokeRoot(t, s, "reassign_work", map[string]any{"assignee": createWorker(t, s, roster.Auditor), "work_id": a.ID, "expected_revision": a.Revision})
 	var replacement work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &replacement)
 	if replacement.Assignee == a.Assignee || replacement.Kind != work.AuditWork {
@@ -156,12 +162,12 @@ func TestAuditReassignmentProvisionsAuditor(t *testing.T) {
 	}
 }
 
-func TestProvisioningFailsWhenConversationIsClosed(t *testing.T) {
+func TestCreationFailsWhenConversationIsClosed(t *testing.T) {
 	_, s := recoverySession(t)
 	if err := s.Controller.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := callAs(s, context.Background(), s.Root(), "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "task"}); err == nil {
+	if _, err := callAs(s, context.Background(), s.Root(), "create_agent", roster.CreateRequest{Role: roster.Implementor}); err == nil {
 		t.Fatal("provisioned agent in closed conversation")
 	}
 }
@@ -174,7 +180,7 @@ func TestCanceledAuditCannotInspectRevokedSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.Store.GetWork(s.Root(), w.ID)
-	v := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	v := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
 	var a work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &a)
 	invokeRoot(t, s, "cancel_work", map[string]any{"work_id": a.ID, "expected_revision": a.Revision, "reason": "withdraw review"})
@@ -193,7 +199,7 @@ func (cancelOnRegistration) Call(context.Context, tool.Call) (tool.Result, error
 	return tool.Text("ok"), nil
 }
 
-func TestAssignmentCancellationStopsNewlyProvisionedAgent(t *testing.T) {
+func TestCreationCancellationStopsUnregisteredAgent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := conversation.New(context.Background())
@@ -202,7 +208,7 @@ func TestAssignmentCancellationStopsNewlyProvisionedAgent(t *testing.T) {
 	if _, err := c.CreateAgent(message.User, agent.Spec{Provider: idleProvider{}, Tools: s.RootTools()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := callAs(s, ctx, s.Root(), "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "task"}); !errors.Is(err, context.Canceled) {
+	if _, err := callAs(s, ctx, s.Root(), "create_agent", roster.CreateRequest{Role: roster.Implementor}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	agents := s.Agents()

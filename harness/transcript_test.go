@@ -21,7 +21,7 @@ func TestInspectionProjectionIsBoundedAndDoesNotMutateTranscript(t *testing.T) {
 		entries[i] = agent.TranscriptEntry{Position: uint64(i + 1), Message: provider.Message{Role: "tool", ToolCallID: "call-1", Content: content.Text(strings.Repeat("\"世界", 3000))}}
 	}
 	in := conversation.AgentInspection{AgentInfo: conversation.AgentInfo{ID: "root"}, Transcript: &agent.TranscriptPage{Entries: entries}}
-	result, err := inspectionResult(in)
+	result, err := inspectionResult(AgentInspection{AgentInspection: in})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestInspectionProjectionIsBoundedAndDoesNotMutateTranscript(t *testing.T) {
 
 func TestInspectionProjectionPreservesRawArgumentsAndLabelsImages(t *testing.T) {
 	in := conversation.AgentInspection{Transcript: &agent.TranscriptPage{Entries: []agent.TranscriptEntry{{Position: 1, Message: provider.Message{Role: "assistant", Content: content.Content{{Text: "checking"}, {Image: &content.Image{MIMEType: "image/png", Data: []byte("secret binary")}}}, ToolCalls: []provider.ToolCall{{ID: "bad", Name: "shell", Arguments: json.RawMessage(`{"invalid":`)}}}}}}}
-	result, err := inspectionResult(in)
+	result, err := inspectionResult(AgentInspection{AgentInspection: in})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestInspectToolDefaultsToTranscriptAndPreservesThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := inspectTool(c).Call(context.Background(), tool.Call{Actor: created.AgentID, Arguments: json.RawMessage(`{"agent_id":"` + string(created.AgentID) + `"}`)})
+	result, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Actor: created.AgentID, Arguments: json.RawMessage(`{"agent_id":"` + string(created.AgentID) + `"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

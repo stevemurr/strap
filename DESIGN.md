@@ -45,7 +45,8 @@ Conversation controller
                 ├── Bound message.Sender
                 ├── provider.Provider
                 └── tool.Tool instances
-                    ├── assign_work → application callback → work store + controller (if supplied)
+                    ├── create_agent → application registration + controller (if supplied)
+                    ├── assign_work → application callback → work store (if supplied)
                     ├── send_message → bound sender (if supplied)
                     ├── message_status → receipt lookup (if supplied)
                     └── Supplied tools
@@ -390,21 +391,22 @@ Send → controller assigns message ID and orders delivery
 
 ## Delegation and review
 
-The CLI root calls `assign_work` with kind `implementation`, a task, and optional
-plan scope. Application wiring creates an idle implementor with a snapshotted
-spec, records its work, and dispatches the store-issued snapshot. Invalid work
-registration stops a newly provisioned agent. Existing suitable agents can be
-selected explicitly. The root alone receives assignment and recovery tools.
+The CLI root calls `create_agent` with role `implementor` or `auditor` to create an
+idle registered agent from a snapshotted spec. It then calls `assign_work` with an
+existing eligible assignee. Assignment never creates, stops, or resumes agents;
+failed assignment leaves the selected agent available. Root bootstrap is the only
+root registration path. Only root receives creation, assignment, and recovery tools.
 
 Implementors call `update_plan` with a work ID/revision to report progress, then
 `submit_work` to capture an immutable outcome. Submission suspends writes and
 emits a review request. The root assigns an auditor through the same `assign_work`
-tool with kind `audit`, original work ID/revision, and exact submission ID.
+tool with kind `audit`, an existing auditor assignee, original work ID/revision, and exact submission ID.
 
 The application owns distinct auditor specifications and role membership. Auditors
 cannot implement or repair. `submit_audit` records pass/fail atomically; a fail
-creates repair work restricted to the findings and directed to the submitted
-outcome's implementor. Repair reassignment does not transfer the original work's
+records immutable findings and moves the original work to `changes_requested`.
+The root explicitly assigns repair work to an existing implementor, referencing
+the original work/revision and failing audit ID. Repair reassignment does not transfer the original work's
 broader scope. Submission views for narrow repair actors are filtered, while the
 canonical outcome remains complete for the owner and auditor.
 
@@ -415,7 +417,7 @@ returns the original work to `needs_check`. Text replies do not change work stat
 The store emits pending events; the application delivers them outside store locks.
 Owner events remain pending until consumed. Assignment receipts track recipient and
 assignment binding so old delivery failures cannot invalidate new assignments.
-`reassign_work` can provision a replacement when its assignee is omitted. Cancellation
+`reassign_work` requires an existing eligible replacement; runtime management remains explicit. Cancellation
 informs affected agents, but does not interrupt already-running tools or isolate
 shared files. Cancelling implementation/repair ends that implementation cycle;
 cancelling only an audit returns its unchanged submission for another review.
@@ -436,10 +438,12 @@ are deeply cloned across inbox, provider, and host boundaries. Tools decode narr
 operation requests, not arbitrary mutable work records. `tool.Call.Actor` and the
 bound sender come from the runtime; only arguments come from the model.
 
-The low-level `create_agent` callback remains available for custom hosts and core
-transport tests. It decodes only task, context, and expected output into a task-only
-work value. It is not configured by the CLI and grants no ledger authority. Hosts
-using it for tracked assignments must register work before delivering its snapshot.
+`create_agent` accepts only a role. The old task-only callback is removed. Raw
+`conversation.Controller.CreateAgent(parent, spec)` stays a runtime primitive with
+no workflow registration. The harness public method takes context, root actor, and
+`roster.CreateRequest`. Model tools and HTTP use the same pure typed wire decoders;
+normalized Go commands share semantic validation. Role registration is recorded
+before it becomes eligible for assignment and appears in live and archived views.
 
 ## Lifecycle ownership
 

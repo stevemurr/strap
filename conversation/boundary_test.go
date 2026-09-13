@@ -61,10 +61,10 @@ func TestBootstrapAndNoImplicitTools(t *testing.T) {
 		if len(request.request.Tools) != 0 {
 			t.Fatalf("injected tools: %+v", request.request.Tools)
 		}
-		request.tool("create_agent", `{"task":"unexpected"}`)
+		request.tool("create_test_agent", `{"task":"unexpected"}`)
 		next := m.next(t)
 		last := next.request.Messages[len(next.request.Messages)-1]
-		if last.Content.Text() != "Tool error: unknown tool: create_agent" {
+		if last.Content.Text() != "Tool error: unknown tool: create_test_agent" {
 			t.Fatalf("unexpected dispatch: %+v", last)
 		}
 	}
@@ -92,7 +92,7 @@ func TestSharedCreationToolUsesExecutingAgentAndConfiguredSpec(t *testing.T) {
 		if _, err := c.Send(id, "delegate"); err != nil {
 			t.Fatal(err)
 		}
-		callers.next(t).tool("create_agent", `{"task":"work"}`)
+		callers.next(t).tool("create_test_agent", `{"task":"work"}`)
 		worker := workers.next(t)
 		if systemPrompt(t, worker).Role != "Configured execution prompt" || len(worker.request.Tools) != 0 {
 			t.Fatal("caller configuration leaked into created agent")

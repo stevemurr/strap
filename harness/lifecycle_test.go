@@ -3,10 +3,10 @@ package harness_test
 import (
 	"context"
 	"errors"
+	"github.com/stevemurr/strap/roster"
 	"testing"
 	"time"
 
-	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/inbox"
@@ -65,7 +65,7 @@ func TestCloseTimeoutKeepsOwnershipAndDrainsTail(t *testing.T) {
 	if _, err := s.AssignWork(context.Background(), s.Root(), work.AssignmentRequest{Kind: work.Implementation, Task: "late"}); !errors.Is(err, harness.ErrClosed) {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateAgent(s.Root(), agent.Spec{Provider: idle{}}); !errors.Is(err, harness.ErrClosed) {
+	if _, err := s.CreateAgent(context.Background(), s.Root(), roster.CreateRequest{Role: roster.Implementor}); !errors.Is(err, harness.ErrClosed) {
 		t.Fatal(err)
 	}
 	close(p.release)

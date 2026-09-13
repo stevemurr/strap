@@ -13,13 +13,13 @@ import (
 )
 
 // InspectAgentContext returns only state derived from an accepted log prefix.
-func (s *View) InspectAgentContext(ctx context.Context, id identity.ActorID, opts conversation.InspectOptions) (conversation.AgentInspection, error) {
+func (s *View) InspectAgentContext(ctx context.Context, id identity.ActorID, opts conversation.InspectOptions) (projection.AgentInspection, error) {
 	ctx, done, err := s.query(ctx)
 	if err != nil {
-		return conversation.AgentInspection{}, err
+		return projection.AgentInspection{}, err
 	}
 	defer done()
-	info, err := s.projection.AgentInspection(id)
+	info, err := s.agentInspection(ctx, id)
 	if errors.Is(err, projection.ErrNotFound) {
 		return info, conversation.ErrAgentNotFound
 	}

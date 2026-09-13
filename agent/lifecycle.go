@@ -137,8 +137,11 @@ func (a *Agent) RequestStopSnapshot() (StateSnapshot, error) {
 	a.unlockAndReportState()
 	return s, a.reportError()
 }
-func (a *Agent) RequestStop() State { s, _ := a.RequestStopSnapshot(); return s.State }
-func (a *Agent) checkpoint(ctx context.Context) error {
+func (a *Agent) RequestStop() State                   { s, _ := a.RequestStopSnapshot(); return s.State }
+func (a *Agent) checkpoint(ctx context.Context) error { return a.checkpointState(ctx, Running) }
+
+// Waiting for an inbox must not advertise execution before a message arrives.
+func (a *Agent) checkpointState(ctx context.Context, next State) error {
 	for {
 		if err := a.reportError(); err != nil {
 			return err
@@ -169,7 +172,7 @@ func (a *Agent) checkpoint(ctx context.Context) error {
 			case <-changed:
 			}
 		default:
-			a.setStateLocked(Running)
+			a.setStateLocked(next)
 			a.unlockAndReportState()
 			a.emission.Unlock()
 			return a.reportError()
@@ -178,12 +181,12 @@ func (a *Agent) checkpoint(ctx context.Context) error {
 }
 func (a *Agent) waitInbox(ctx context.Context) error {
 	for {
-		if err := a.checkpoint(ctx); err != nil {
+		if err := a.checkpointState(ctx, Idle); err != nil {
 			return err
 		}
 		a.emission.Lock()
 		a.control.mu.Lock()
-		if a.control.state != Running {
+		if a.control.state != Idle {
 			a.control.mu.Unlock()
 			a.emission.Unlock()
 			continue

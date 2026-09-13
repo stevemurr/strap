@@ -3,12 +3,12 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/stevemurr/strap/roster"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/tool"
@@ -160,13 +160,13 @@ func TestAutomaticTelemetryBoundsConcurrentProviderIO(t *testing.T) {
 	cfg.Web = nil
 	cfg.LocalTools = false
 	cfg.Telemetry.Concurrency = 2
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Implementor: harness.AgentDependencies{Tools: []tool.Tool{pingTool{}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
 	for i := 0; i < 6; i++ {
-		created, err := s.CreateAgent(s.Root(), agent.Spec{Provider: p, Tools: []tool.Tool{pingTool{}}})
+		created, err := s.CreateAgent(context.Background(), s.Root(), roster.CreateRequest{Role: roster.Implementor})
 		if err != nil {
 			t.Fatal(err)
 		}

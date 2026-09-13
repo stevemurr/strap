@@ -59,11 +59,11 @@ func TestToolCallRoundTrip(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if len(tools) != 1 || tools[0].Type != "function" || tools[0].Function.Name != "create_agent" || tools[0].Function.Parameters["type"] != "object" {
+		if len(tools) != 1 || tools[0].Type != "function" || tools[0].Function.Name != "create_test_agent" || tools[0].Function.Parameters["type"] != "object" {
 			t.Errorf("bad tools: %+v", tools)
 		}
 		if calls.Add(1) == 1 {
-			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-42","type":"function","function":{"name":"create_agent","arguments":"{\"task\":\"hello\"}"}}]},"finish_reason":"tool_calls"}]}`)
+			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-42","type":"function","function":{"name":"create_test_agent","arguments":"{\"task\":\"hello\"}"}}]},"finish_reason":"tool_calls"}]}`)
 			return
 		}
 		var assistant struct {
@@ -99,7 +99,7 @@ func TestToolCallRoundTrip(t *testing.T) {
 			{Role: "system", Content: content.Text("Coordinate.")},
 			{Role: "user", Content: content.Text("hello"), Envelope: &message.Message{ID: "internal-message-id"}},
 		},
-		Tools: []provider.ToolDefinition{{Name: "create_agent", Parameters: json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)}},
+		Tools: []provider.ToolDefinition{{Name: "create_test_agent", Parameters: json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)}},
 	}
 	response, err := c.Submit(context.Background(), request, nil)
 	if err != nil {
@@ -149,8 +149,8 @@ func TestIncompleteAndMalformedResponsesAreErrors(t *testing.T) {
 		"no choice":             `{"choices":[]}`,
 		"no output":             `{"choices":[{"message":{"role":"assistant","content":null},"finish_reason":"stop"}]}`,
 		"invalid JSON":          `{`,
-		"broken arguments":      `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"create_agent","arguments":"{"}}]},"finish_reason":"tool_calls"}]}`,
-		"missing call identity": `{"choices":[{"message":{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"create_agent","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
+		"broken arguments":      `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"create_test_agent","arguments":"{"}}]},"finish_reason":"tool_calls"}]}`,
+		"missing call identity": `{"choices":[{"message":{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"create_test_agent","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -1,7 +1,7 @@
 package work
 
 import (
-	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/stevemurr/strap/identity"
@@ -30,7 +30,7 @@ func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Subm
 	original := w
 	if w.Kind == Repair {
 		original = s.works[w.ParentID].Clone()
-		if original.State != ChangesRequested {
+		if original.State != ChangesRequested || original.ActiveRepairID != w.ID {
 			return Submission{}, ErrState
 		}
 	}
@@ -46,6 +46,7 @@ func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Subm
 		w.Revision++
 		s.putWork(w.ID, w)
 	}
+	original.ActiveRepairID = ""
 	original.State = NeedsCheck
 	original.LatestSubmissionID = sub.ID
 	original.Revision++
@@ -149,28 +150,16 @@ func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (result Audi
 		}
 	} else {
 		original.State = ChangesRequested
-		var scope *Scope
-		if original.Scope != nil {
-			scope = &Scope{PlanID: original.Scope.PlanID}
-			for _, id := range original.Scope.StepIDs {
-				if affected[id] {
-					scope.StepIDs = append(scope.StepIDs, id)
-				}
-			}
-			for i := range p.Steps {
-				if affected[p.Steps[i].ID] {
-					p.Steps[i].Status = Pending
-				}
+		for i := range p.Steps {
+			if affected[p.Steps[i].ID] {
+				p.Steps[i].Status = Pending
 			}
 		}
-		findings, _ := json.Marshal(a.Findings)
-		repair := Work{ID: ID(s.id("work")), Kind: Repair, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: original.Owner, RequestedBy: actor, Assignee: s.submissions[r.SubmissionID].SubmittedBy, Scope: scope, Task: "Repair the audited outcome: " + original.Task, Context: string(findings), ExpectedOutput: "Address every finding and submit the repaired outcome for another audit.", ParentID: original.ID, RequestedByAuditID: a.ID}.Clone()
-		a.RepairWorkID = repair.ID
-		s.putWork(repair.ID, repair)
 	}
 	if original.Scope != nil {
 		s.putPlan(p.ID, p)
 	}
+	original.LatestAuditID = a.ID
 	original.Revision++
 	w.State = Closed
 	w.Revision++
@@ -179,11 +168,65 @@ func (s *Store) SubmitAudit(actor identity.ActorID, r AuditRequest) (result Audi
 	s.putAudit(a.ID, a)
 	s.emit(AuditCompleted, actor, original, true)
 	s.events[len(s.events)-1].AuditID = a.ID
-	if a.RepairWorkID != "" {
-		s.emit(WorkAssigned, actor, s.works[a.RepairWorkID], true)
-	}
 	return a.Clone(), nil
 }
+
+// AssignRepair starts one repair for the current failing verdict. Verdicts remain
+// immutable, and validation finishes before any work or revision is changed.
+func (s *Store) AssignRepair(actor identity.ActorID, r AssignRepairRequest) (result Work, err error) {
+	if err = s.beginMutation(); err != nil {
+		return result, err
+	}
+	defer s.endMutation(&err)
+	original, err := s.target(actor, r.WorkTarget, true)
+	if err != nil {
+		return Work{}, err
+	}
+	if blank(string(r.Assignee)) || blank(string(r.AuditID)) {
+		return Work{}, invalid("assignee and audit_id are required")
+	}
+	if original.Kind != Implementation || original.State != ChangesRequested {
+		return Work{}, ErrState
+	}
+	if original.ActiveRepairID != "" {
+		return Work{}, fmt.Errorf("%w: repair %s is already active", ErrConflict, original.ActiveRepairID)
+	}
+	a, ok := s.audits[r.AuditID]
+	if !ok {
+		return Work{}, ErrNotFound
+	}
+	if a.Verdict != Fail || original.LatestAuditID != a.ID || original.LatestSubmissionID != a.SubmissionID || s.works[a.WorkID].ParentID != original.ID {
+		return Work{}, fmt.Errorf("%w: audit does not identify the current failing submission", ErrConflict)
+	}
+	for _, w := range s.works {
+		if w.RequestedByAuditID == a.ID {
+			return Work{}, fmt.Errorf("%w: repair %s already exists for this audit", ErrConflict, w.ID)
+		}
+	}
+	var scope *Scope
+	if original.Scope != nil {
+		scope = &Scope{PlanID: original.Scope.PlanID}
+		affected := map[StepID]bool{}
+		for _, f := range a.Findings {
+			for _, id := range f.StepIDs {
+				affected[id] = true
+			}
+		}
+		for _, id := range original.Scope.StepIDs {
+			if affected[id] {
+				scope.StepIDs = append(scope.StepIDs, id)
+			}
+		}
+	}
+	repair := Work{ID: ID(s.id("work")), Kind: Repair, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: original.Owner, RequestedBy: actor, Assignee: r.Assignee, Scope: scope, Task: "Repair the audited outcome: " + original.Task, Context: original.Context, ExpectedOutput: original.ExpectedOutput + "\nAddress every audit finding and submit the repaired outcome for another audit.", ParentID: original.ID, RequestedByAuditID: a.ID}.Clone()
+	original.ActiveRepairID = repair.ID
+	original.Revision++
+	s.putWork(original.ID, original)
+	s.putWork(repair.ID, repair)
+	s.emit(WorkAssigned, actor, repair, true)
+	return repair.Clone(), nil
+}
+
 func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (result Work, err error) {
 	if err = s.beginMutation(); err != nil {
 		return result, err
@@ -230,6 +273,7 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 		}
 		s.putPlan(p.ID, p)
 	}
+	w.ActiveRepairID = ""
 	w.State = Cancelled
 	w.Revision++
 	w.Note = reason

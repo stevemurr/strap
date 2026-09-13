@@ -154,6 +154,8 @@ func control(e conversation.Event) (json.RawMessage, error) {
 	case conversation.ContextTokensEvent:
 		e.Error = "token count unavailable; full details in content"
 		v = e
+	case conversation.AgentRegistered:
+		v = e
 	case conversation.AgentStarted:
 		v = conversation.AgentStarted{Agent: e.Agent, OutputTokenLimit: e.OutputTokenLimit}
 	case conversation.AgentEvent:

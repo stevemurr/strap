@@ -29,6 +29,7 @@ type Parameters[A any] struct {
 
 type parameterNode struct {
 	kind                          string
+	description                   string
 	fields                        map[string]*parameterNode
 	required                      []string
 	item                          *parameterNode
@@ -44,6 +45,11 @@ type parameterNode struct {
 type Constraint struct {
 	path  string
 	apply func(*parameterNode) error
+}
+
+// Description annotates a field without changing its validation contract.
+func Description(path, text string) Constraint {
+	return Constraint{path, func(p *parameterNode) error { p.description = text; return nil }}
 }
 
 func MinLength(path string, n int) Constraint { return countConstraint(path, "string", "minLength", n) }
@@ -315,6 +321,9 @@ func (p *parameterNode) check() error {
 }
 func (p *parameterNode) schema() map[string]any {
 	s := map[string]any{"type": p.kind}
+	if p.description != "" {
+		s["description"] = p.description
+	}
 	if p.kind == "object" {
 		fields := map[string]any{}
 		for name, child := range p.fields {

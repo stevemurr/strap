@@ -63,7 +63,7 @@ func TestDelegatedPromptAndAssignmentReachHTTPServer(t *testing.T) {
 		}
 		hasCreation := false
 		for _, operation := range request.Tools {
-			if operation.Function.Name == "create_agent" {
+			if operation.Function.Name == "create_test_agent" {
 				hasCreation = true
 			}
 		}
@@ -77,7 +77,7 @@ func TestDelegatedPromptAndAssignmentReachHTTPServer(t *testing.T) {
 				response := map[string]any{"choices": []any{map[string]any{
 					"finish_reason": "tool_calls",
 					"message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
-						"id": "delegate-1", "type": "function", "function": map[string]any{"name": "create_agent", "arguments": string(args)},
+						"id": "delegate-1", "type": "function", "function": map[string]any{"name": "create_test_agent", "arguments": string(args)},
 					}}},
 				}}}
 				if err := json.NewEncoder(w).Encode(response); err != nil {

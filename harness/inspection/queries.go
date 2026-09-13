@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/stevemurr/strap/conversation"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
-	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/harness/projection"
@@ -66,7 +66,7 @@ type Page[T any] struct {
 }
 type ToolPage = Page[ToolView]
 type OutputPage = Page[OutputView]
-type AgentPage = Page[conversation.AgentInspection]
+type AgentPage = Page[projection.AgentInspection]
 
 type viewIndex struct {
 	tools       map[identity.ToolInvocationID]ToolView
@@ -287,13 +287,13 @@ func (v *View) output(id identity.OutputID) (OutputView, error) {
 	}
 	return o, nil
 }
-func (v *View) InspectAgent(ctx context.Context, id identity.ActorID) (conversation.AgentInspection, error) {
+func (v *View) InspectAgent(ctx context.Context, id identity.ActorID) (projection.AgentInspection, error) {
 	_, done, err := v.query(ctx)
 	if err != nil {
-		return conversation.AgentInspection{}, err
+		return projection.AgentInspection{}, err
 	}
 	defer done()
-	return v.projection.AgentInspection(id)
+	return v.agentInspection(ctx, id)
 }
 func (v *View) validatePage(q PageQuery) (PageQuery, error) {
 	if q.Limit == 0 {
@@ -386,7 +386,12 @@ func (v *View) ListAgents(ctx context.Context, q AgentQuery) (AgentPage, error) 
 	if err != nil {
 		return AgentPage{}, err
 	}
-	page := AgentPage{Through: v.through, Next: q.After, Items: []conversation.AgentInspection{}}
+	model, _, err := v.workModel(ctx)
+	if err != nil {
+		return AgentPage{}, err
+	}
+	works := model.Works()
+	page := AgentPage{Through: v.through, Next: q.After, Items: []projection.AgentInspection{}}
 	for _, id := range v.indexes.agentOrder {
 		if err := ctx.Err(); err != nil {
 			return AgentPage{}, err
@@ -399,11 +404,11 @@ func (v *View) ListAgents(ctx context.Context, q AgentQuery) (AgentPage, error) 
 			return page, nil
 		}
 		page.Next = seq
-		a, err := v.projection.AgentInspection(id)
+		base, err := v.projection.AgentInspection(id)
 		if err != nil {
 			return page, err
 		}
-		page.Items = append(page.Items, a)
+		page.Items = append(page.Items, v.projection.Enrich(base, works))
 	}
 	page.End = true
 	page.Next = v.through.Sequence

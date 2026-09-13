@@ -255,18 +255,23 @@ implementor a scoped repair, and accepts the repaired submission after another
 audit. The third step stays pending. `go run ./examples/local` exercises the same
 submission/audit tools against a real model server for a standalone arithmetic task.
 
+The opt-in discovery evaluation covers natural-language creation, reuse, audit, repair,
+replacement, and worker escalation. See [the implementation and validation notes](docs/architecture/EXPLICIT_AGENT_WORK_DESIGN.md).
+
 The CLI exposes tools according to each agent’s role:
 
 | Tool | Contract |
 |---|---|
 | `update_plan` | Root: omit IDs to create, or use `plan_id` and `expected_revision` to edit structure. Implementor: use `work_id` and `expected_revision` for scoped progress |
 | `update_work` | Auditor reports work-level notes and blockers without changing implementation steps |
-| `assign_work` | Assign implementation with task and optional scope, or audit with original work ID, revision, and submission ID; application selects agent configuration |
+| `create_agent` | Root creates an idle registered `implementor` or `auditor`; no task starts |
+| `assign_work` | Require an existing `assignee`: implementation takes task and optional scope; audit takes original work/revision/submission; repair takes original work/revision/audit |
+| `list_work` | Root discovers work in all states; optional assignee/kind/state filters, default 20 results, max 100, fixed-prefix continuation cursor |
 | `get_plan` / `get_work` | Read current authorized snapshots, scoped steps, and available submission/repair findings |
 | `get_audit` | Read an immutable verdict, summary, and findings using the event's `audit_id` |
 | `submit_work` | Implementor or repair actor submits an outcome for review |
-| `submit_audit` | Auditor records pass or fail; failure creates scoped repair work |
-| `reassign_work` / `cancel_work` | Owner recovery; omit reassignment's `assignee` to provision a replacement with the appropriate configuration |
+| `submit_audit` | Auditor records immutable pass/fail; failure requests changes and waits for explicit repair assignment |
+| `reassign_work` / `cancel_work` | Owner recovery; reassignment requires an existing eligible assignee and never creates or stops agents |
 
 Implementors receive progress/read tools and `submit_work`. Auditors receive
 work reporting/read tools and `submit_audit`. They cannot provision arbitrary agents or
@@ -377,11 +382,19 @@ accepted session log for delivery observations, so work continues without a UI r
 `conversation.Deliver` is a trusted host operation; model-facing messaging still
 uses the runtime-bound `Sender`.
 
-`CreateAgent(handle)` remains a low-level compatibility callback for hosts and
-core transport tests. It accepts only task/context/expected-output arguments and
-confers no work-store authority. It is not installed in the CLI; tracked delegation
-uses `assign_work`. Custom hosts retaining that callback must register work before
-delivering its authoritative snapshot.
+Tracked delegation uses `create_agent({role:"implementor"})`, followed by
+`assign_work({kind:"implementation",assignee:agent_id,task:"..."})`. Choose `auditor`
+for independent review; implementors also handle repairs. Roles are immutable.
+`harness.Session.CreateAgent(ctx, actor, roster.CreateRequest)` uses the same path.
+The controller's raw `CreateAgent(parent, spec)` remains a work-independent runtime
+primitive; it does not register application eligibility. The old task-only tool
+callback and HTTP profile resolver have been removed.
+
+`list_agents` and `inspect_agent` show role, registration, eligible work kinds,
+and currently active work IDs. Use `list_work` to discover submitted, accepted,
+closed, or cancelled work, then `get_work` for current mutation revisions. An empty
+snapshot is not proof that an uncertain assignment failed. Work listing and agent
+creation do not provide retry deduplication.
 
 Creation and reassignment are not transparently retried. Work revisions prevent
 stale writes; exact submission identity prevents stale audits. Owner notification

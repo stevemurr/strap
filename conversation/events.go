@@ -5,6 +5,7 @@ import (
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -128,3 +129,10 @@ type AgentEvent struct {
 }
 
 func (AgentEvent) isEvent() {}
+
+// AgentRegistered is an application fact; the controller does not select roles.
+type AgentRegistered struct {
+	Registration roster.Registration `json:"registration"`
+}
+
+func (AgentRegistered) isEvent() {}

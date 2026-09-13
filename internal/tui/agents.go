@@ -15,7 +15,7 @@ import (
 // transcript entries keep their original values, including across resizes.
 type agentsTable struct {
 	id   uint64
-	rows [][6]string
+	rows [][9]string
 }
 
 type agentTableCount struct {
@@ -38,7 +38,19 @@ func (m *model) showAgents() tea.Cmd {
 		if info.ID == m.session.Root() {
 			name += " (root)"
 		}
-		row := [6]string{name, string(info.State), string(info.Parent), "unknown", "unknown", "unknown"}
+		role := string(info.Role)
+		if role == "" {
+			role = "unknown"
+		}
+		kinds := []string{}
+		for _, k := range info.EligibleWorkKinds {
+			kinds = append(kinds, string(k))
+		}
+		ids := []string{}
+		for _, id := range info.ActiveWorkIDs {
+			ids = append(ids, string(id))
+		}
+		row := [9]string{name, string(info.State), string(info.Parent), "unknown", "unknown", "unknown", role, strings.Join(kinds, ", "), strings.Join(ids, ", ")}
 		inspection, err := m.session.InspectAgent(info.ID, conversation.InspectOptions{})
 		if err == nil {
 			row[1] = string(inspection.State)
@@ -93,7 +105,7 @@ func (m *model) finishAgentTableCount(result agentTableCount) {
 			continue
 		}
 		table := *e.agents
-		table.rows = append([][6]string(nil), table.rows...)
+		table.rows = append([][9]string(nil), table.rows...)
 		table.rows[result.row][3] = "unknown"
 		if result.err == nil && result.count >= 0 {
 			table.rows[result.row][3] = tokenDigits(result.count)
@@ -111,8 +123,8 @@ func (t *agentsTable) render(width int) string {
 	if len(t.rows) == 0 {
 		return "No agents."
 	}
-	headers := [6]string{"Agent", "State", "Parent", "Context", "Last output", "Output cap"}
-	sizes := [6]int{}
+	headers := [9]string{"Agent", "State", "Parent", "Context", "Last output", "Output cap", "Role", "Eligible work", "Active work"}
+	sizes := [9]int{}
 	for i, header := range headers {
 		sizes[i] = ansi.StringWidth(header)
 		for _, row := range t.rows {
@@ -125,11 +137,11 @@ func (t *agentsTable) render(width int) string {
 	}
 	var lines []string
 	if width <= 0 || total <= width {
-		format := func(row [6]string) string {
+		format := func(row [9]string) string {
 			cells := make([]string, len(row))
 			for i, cell := range row {
 				padding := strings.Repeat(" ", sizes[i]-ansi.StringWidth(cell))
-				if i >= 3 {
+				if i >= 3 && i <= 5 {
 					cells[i] = padding + cell
 				} else {
 					cells[i] = cell + padding

@@ -19,27 +19,31 @@ caller against the current record.
 
 ```text
 Root owns plan
-  → assign_work: implementation over selected step IDs
+  → create_agent(role=implementor): idle registered agent
+  → assign_work: implementation to explicit assignee over selected step IDs
   → implementor updates shared progress
   → submit_work: immutable outcome, needs_check
   → root receives review request
-  → assign_work: application provisions auditor, assigns audit
+  → create_agent(role=auditor), or select an existing auditor
+  → assign_work: audit to explicit assignee
   → submit_audit
       pass → implementation accepted, scoped steps completed
-      fail → scoped repair work delivered to original implementor
+      fail → immutable findings, original changes_requested
+               → root assign_work(kind=repair, assignee, original work/revision, audit_id)
                → submit_work: superseding outcome, needs_check
 ```
 
-The auditor issues repair work through its verdict. It cannot choose an arbitrary
-recipient, expand the original scope, or provision execution agents. The root
-remains the owner; the auditor is recorded as the repair requester. Subsequent repairs target the latest submission’s implementor;
-reassigning narrow repair work does not change the original work’s assignee or
-expand the replacement actor’s reads.
+The root explicitly chooses an existing implementor for each repair; it may reuse
+the previous implementor or create a fresh one. The store derives scope and context
+from the immutable audit and its exact source submission. Repair reassignment does
+not change the original work's assignee or grant the replacement broader reads.
+The auditor records findings but does not create or assign repair work.
 
 ## Package boundaries
 
 | Package | Responsibility |
 |---|---|
+| `roster` | Application role, creation request, registration, and eligible work kinds |
 | `identity` | Dependency-free `ActorID`; shared by work and messages |
 | `work` | Records, scope reservations, authorization, transitions, snapshots, pending events |
 | `message` | Envelopes containing `*work.Work`; transport identity and receipts |
@@ -101,6 +105,8 @@ type Work struct {
     ParentID            ID
     SubjectSubmissionID SubmissionID
     RequestedByAuditID  AuditID
+    LatestAuditID       AuditID
+    ActiveRepairID      ID
     LatestSubmissionID  SubmissionID
 }
 
@@ -134,15 +140,15 @@ complete original scope.
 | `Submission` | ID, original work ID, submitting implementation/repair ID, submitter, superseded submission ID, captured task/expected output/steps, summary, evidence, artifact references |
 | `ArtifactRef` | URI/path and optional version identifier, such as a commit or digest |
 | `Finding` | Scoped step IDs, deficiency, required change, verification criteria |
-| `Audit` | ID, auditor work ID, exact submission ID, reviewer, verdict, summary, findings, generated repair work ID |
+| `Audit` | ID, auditor work ID, exact submission ID, reviewer, verdict, summary, findings; legacy repair work ID is read-only historical data |
 
 Submissions and audit outcomes are immutable. An artifact reference can identify
 a generated or modified document, code, image, or report. It does not prove that
 the reference is immutable or that an auditor inspected those bytes. Artifact
 resolution and verification belong to application tooling.
 
-Verdicts are `pass` and `fail`. Failure requires findings and atomically issues
-repair work for the affected subset. Acceptance covers the complete submitted
+Verdicts are `pass` and `fail`. Failure requires findings and atomically records `LatestAuditID` and requests changes.
+The root must explicitly assign repair work for the affected subset. Acceptance covers the complete submitted
 scope; partial acceptance is deferred. Repair submission creates a new outcome
 for the original scope, ready for another audit.
 
@@ -184,6 +190,7 @@ func (*Store) UpdateProgress(identity.ActorID, ProgressUpdate) (Work, error)
 func (*Store) SubmitWork(identity.ActorID, SubmitRequest) (Submission, error)
 func (*Store) AssignAudit(identity.ActorID, AssignAuditRequest) (Work, error)
 func (*Store) SubmitAudit(identity.ActorID, AuditRequest) (Audit, error)
+func (*Store) AssignRepair(identity.ActorID, AssignRepairRequest) (Work, error)
 func (*Store) Reassign(identity.ActorID, ReassignRequest) (Work, error)
 func (*Store) Cancel(identity.ActorID, CancelRequest) (Work, error)
 
@@ -193,7 +200,7 @@ func (*Store) GetSubmission(identity.ActorID, SubmissionID) (Submission, error)
 func (*Store) GetAudit(identity.ActorID, AuditID) (Audit, error)
 ```
 
-`AssignWork` and `AssignAudit` both assign responsibility; neither claims that
+`AssignWork`, `AssignAudit`, and `AssignRepair` assign responsibility; neither claims that
 execution has started. They replace the earlier `Assign` / `StartAudit` wording.
 
 | Input | Fields and restrictions |
@@ -204,7 +211,8 @@ execution has started. They replace the earlier `Assign` / `StartAudit` wording.
 | `SubmitRequest` | `WorkTarget`; summary, evidence, artifact references |
 | `AssignAuditRequest` | Implementation `WorkTarget`, current submission ID, application-validated auditor |
 | `AuditRequest` | Audit `WorkTarget`, submission ID, pass/fail verdict, summary, findings |
-| `ReassignRequest` | `WorkTarget`, replacement assignee; the tool provisions one when omitted, then passes its ID to the store |
+| `AssignRepairRequest` | Original implementation `WorkTarget`, current failing audit ID, required existing implementor assignee |
+| `ReassignRequest` | `WorkTarget`, required existing replacement assignee |
 | `CancelRequest` | `WorkTarget`, reason |
 
 `UpdatePlan` creates when the ID is omitted and patches when it is supplied. An
@@ -227,7 +235,7 @@ The root receives creation/editing, and implementors receive progress. Auditors
 use `update_work` for notes/blockers and cannot advertise implementation step edits.
 Conflicting selectors cannot match any operation.
 
-`assign_work` composes implementation and audit argument contracts; `submit_audit`
+`assign_work` composes implementation, audit, and repair argument contracts; `submit_audit`
 composes pass and fail contracts. Pass accepts omitted or empty findings; fail
 requires at least one finding.
 `submit_work` maps to its store operation. `get_audit` resolves the immutable
@@ -301,10 +309,20 @@ Dispatch must operate independently of whether a UI consumer is currently readin
 5. **Host and examples.** The CLI relays workflow events to the TUI. The scripted
    delegation example exercises fail → repair → pass without a model server.
 
-Raw host agent creation remains idle and work-independent. The CLI and both
-delegation examples use authoritative work registration; the old task-only
-`create_agent` callback remains a compatibility hook for custom hosts and core
-transport tests and grants no store permissions.
+The application exposes one registered creation path, `create_agent(role)`, separate
+from `assign_work`. The root is registered during bootstrap. Raw controller creation
+remains idle and does not confer tracked-work eligibility. The old task-only
+creation callback has been removed; core tests define a local `create_test_agent`.
+
+`LatestAuditID` changes only on verdict. `ActiveRepairID` changes on explicit repair
+assignment, submission, or cancellation. One repair may exist per audit; duplicate
+or concurrent requests fail without creating additional work. Repair submission
+requires that exact active repair and clears the pointer. `get_work(repair)` returns
+the original context, exact source submission's evidence/artifacts, and immutable
+audit, with step snapshots filtered to repair scope even for the owner. Current
+noncancelled repair assignees can read that source submission and audit; reassignment
+or cancellation revokes derived rights. Independent owner/submitter/auditor rights
+remain. Evidence and artifact references are shared at submission level.
 
 Implementation cancellation cascades to live audit/repair work, resets reserved
 steps to pending, and releases reservations. Cancelling repair ends that original
@@ -318,8 +336,8 @@ submitted outcome remains reviewable after the implementor exits.
   restrictions; no implicit acceptance through plan edits.
 - Disjoint work can progress independently; overlapping reservations fail;
   stale calls after reassignment or cancellation cannot write.
-- Submission suspends writes; stale audit verdicts fail; failure creates exactly
-  one repair for the derived recipient/scope; repair submission triggers a new
+- Submission suspends writes; stale audit verdicts fail; failure creates no repair; explicit assignment creates exactly
+  one repair per audit for the derived scope; repair submission requests a new
   audit; passing completes the whole original subset.
 - Auditor blockers wake the owner without verdicts or repairs. Clearing a blocker
   permits continuation. Configured auditor actors never implement or repair.

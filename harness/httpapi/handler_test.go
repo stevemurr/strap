@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/stevemurr/strap/roster"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -97,6 +98,9 @@ func operationResult[T any](t *testing.T, s *testSession, viaHTTP bool, actor id
 		action = "progress"
 	}
 	method, path, body := "POST", "/sessions/"+s.ID()+"/work/"+action, any(httpapi.WorkRequest[any]{Actor: actor, Request: params})
+	if name == "create_agent" {
+		path = "/sessions/" + s.ID() + "/agents"
+	}
 	if m, ok := params.(map[string]any); ok {
 		method = "GET"
 		body = nil
@@ -132,11 +136,17 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 	t.Helper()
 	ctx, s := recoverySession(t, viaHTTP)
 	root := s.Root()
+	create := func(role roster.Role) roster.Registration {
+		r := roster.CreateRequest{Role: role}
+		return operationResult(t, s, viaHTTP, root, "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(ctx, root, r) })
+	}
+	implementor := create(roster.Implementor)
+	auditor := create(roster.Auditor)
 	planRequest := work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Unassigned")}}}
 	plan := operationResult(t, s, viaHTTP, root, "update_plan", planRequest, func() (work.Plan, error) {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
-	assignment := work.AssignmentRequest{Kind: work.Implementation, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
+	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
 	implementation := operationResult(t, s, viaHTTP, root, "assign_work", assignment, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
@@ -153,7 +163,7 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 		})
 		originalView := operationResult(t, s, viaHTTP, root, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) { return s.InspectWork(ctx, root, implementationID) })
 		original := originalView.Work
-		auditRequest := work.AssignmentRequest{Kind: work.AuditWork, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: submission.ID}
+		auditRequest := work.AssignmentRequest{Kind: work.AuditWork, Assignee: auditor.AgentID, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: submission.ID}
 		auditing := operationResult(t, s, viaHTTP, root, "assign_work", auditRequest, func() (work.Work, error) {
 			return s.AssignWork(ctx, root, auditRequest)
 		})
@@ -171,8 +181,14 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 			return s.SubmitAudit(ctx, auditing.Assignee, verdictRequest)
 		})
 		if verdict == work.Fail {
-			repair := operationResult(t, s, viaHTTP, implementation.Assignee, "get_work", map[string]any{"work_id": lastAudit.RepairWorkID}, func() (work.Inspection, error) {
-				return s.InspectWork(ctx, implementation.Assignee, lastAudit.RepairWorkID)
+			original, e := s.GetWork(ctx, root, implementationID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			repairRequest := work.AssignmentRequest{Kind: work.Repair, Assignee: implementation.Assignee, WorkID: original.ID, ExpectedRevision: original.Revision, AuditID: lastAudit.ID}
+			repairWork := operationResult(t, s, viaHTTP, root, "assign_work", repairRequest, func() (work.Work, error) { return s.AssignWork(ctx, root, repairRequest) })
+			repair := operationResult(t, s, viaHTTP, implementation.Assignee, "get_work", map[string]any{"work_id": repairWork.ID}, func() (work.Inspection, error) {
+				return s.InspectWork(ctx, implementation.Assignee, repairWork.ID)
 			})
 			if repair.Audit == nil || repair.Audit.ID != lastAudit.ID || repair.Work.Assignee != implementation.Assignee {
 				t.Fatalf("repair did not preserve findings and assignee: %+v", repair)
@@ -192,12 +208,13 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 	if final.Work.State != work.Accepted || plan.Steps[0].Status != work.Completed || plan.Steps[1].Status != work.Pending || audit.Verdict != work.Pass {
 		t.Fatalf("unexpected audit/repair outcome: %+v, %+v, %+v", final, plan, audit)
 	}
-	assignment = work.AssignmentRequest{Kind: work.Implementation, Task: "reassign then cancel"}
+	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "reassign then cancel"}
 	extra := operationResult(t, s, viaHTTP, root, "assign_work", assignment, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	oldAssignee := extra.Assignee
-	reassign := work.ReassignRequest{WorkTarget: work.WorkTarget{ID: extra.ID, ExpectedRevision: extra.Revision}}
+	replacement := create(roster.Implementor)
+	reassign := work.ReassignRequest{Assignee: replacement.AgentID, WorkTarget: work.WorkTarget{ID: extra.ID, ExpectedRevision: extra.Revision}}
 	extra = operationResult(t, s, viaHTTP, root, "reassign_work", reassign, func() (work.Work, error) {
 		return s.ReassignWork(ctx, root, reassign)
 	})
@@ -239,7 +256,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 		{"GET", base + "/events?limit=0", nil, 400},
 		{"GET", base + "/agents/missing", nil, 404},
 		{"POST", base + "/messages", map[string]any{"to": s.Root(), "unexpected": true}, 400},
-		{"POST", base + "/work/assign", httpapi.WorkRequest[work.AssignmentRequest]{Actor: "intruder", Request: work.AssignmentRequest{Kind: work.Implementation, Task: "forbidden"}}, 403},
+		{"POST", base + "/work/assign", httpapi.WorkRequest[work.AssignmentRequest]{Actor: "intruder", Request: work.AssignmentRequest{Kind: work.Implementation, Assignee: "worker", Task: "forbidden"}}, 403},
 	}
 	for _, tc := range cases {
 		w := request(t, s.http, tc.method, tc.path, tc.body)
@@ -247,7 +264,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 			t.Fatal(tc.path, w.Code, w.Body.String())
 		}
 	}
-	w := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[work.AssignmentRequest]{Actor: s.Root(), Request: work.AssignmentRequest{Kind: work.Implementation, Task: "task"}})
+	w := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[work.AssignmentRequest]{Actor: s.Root(), Request: work.AssignmentRequest{Kind: work.Implementation, Assignee: createHTTPWorker(t, s), Task: "task"}})
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -275,4 +292,11 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 	if w.Code != 409 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+}
+
+func createHTTPWorker(t *testing.T, s *testSession) identity.ActorID {
+	t.Helper()
+	r := roster.CreateRequest{Role: roster.Implementor}
+	v := operationResult(t, s, true, s.Root(), "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(context.Background(), s.Root(), r) })
+	return v.AgentID
 }

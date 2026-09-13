@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/internal/resource"
@@ -40,7 +39,6 @@ type Options struct {
 	Factory func(context.Context, harness.Config) (*harness.Session, error)
 	// Agent profiles resolve executable collaborators on the host. They are not
 	// serialized in HTTP requests. Nil disables dynamic agent creation over HTTP.
-	AgentProfile func(*harness.Session, string) (agent.Spec, error)
 }
 
 // BearerToken authorizes all host capabilities for one configured token. Serve
