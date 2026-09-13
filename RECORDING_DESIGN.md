@@ -1,5 +1,10 @@
 # Tool execution recording
 
+The current proposed improvements are in
+[Session trace improvements: types and contracts](docs/architecture/TRACE_CONTRACTS.md).
+That plan extends the implemented session log with structured outcomes, provider
+evidence, recording placement, and execution provenance.
+
 Historical design sketch. Session-owned recording is now implemented in
 `eventlog`, `harness/eventcodec`, and `harness`; this document retains the original proposal. Snippets show the intended boundaries, with supporting implementation
 explicitly described below. They are not a complete patch.

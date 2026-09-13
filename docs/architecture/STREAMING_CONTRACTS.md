@@ -1,5 +1,9 @@
 # Recoverable session log: types and interfaces
 
+Proposed trace-evidence extensions are specified separately in
+[Session trace improvements: types and contracts](TRACE_CONTRACTS.md).
+They retain this log/subscription architecture and are not yet implemented.
+
 Implementation: the architecture is now implemented. See [harness/RECOVERY.md](../../harness/RECOVERY.md) for the concrete API, migration notes, and implementation refinements. The sketches below preserve the design discussion.
 Status: implemented, with concrete refinements linked above. This refines
 [STREAMING_DESIGN.md](../../STREAMING_DESIGN.md) and
