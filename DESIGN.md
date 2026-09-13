@@ -164,9 +164,12 @@ Agent → provider.Provider.Submit → provider/vllm or provider/chatcompletions
       ← provider.Response       ← decoded text / tool calls
 ```
 
-The CLI selects the concrete backend and resolves an application-owned generation
-preset followed by explicit flag overrides. Model aliases and agent roles never
-select presets inside an adapter. `provider.Request`, the agent loop, and the
+The CLI selects a named model profile from a JSON catalog, then applies explicit
+flag overrides. Profiles pair endpoint aliases with generation policy; personal
+catalogs replace the bundled catalog without changing library defaults. An explicit
+`-preset` replaces saved generation settings before generation flags are applied.
+Model configuration is validated before either terminal or HTTP startup. Model
+aliases and agent roles never select presets inside an adapter. `provider.Request`, the agent loop, and the
 workflow/controller carry no sampling or vLLM fields.
 
 `provider/vllm` owns its complete, typed generation configuration and the private

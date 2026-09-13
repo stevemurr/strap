@@ -2,6 +2,8 @@
 package roster
 
 import (
+	"slices"
+
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/work"
 )
@@ -26,12 +28,7 @@ func (r Role) WorkKinds() []work.Kind {
 	return []work.Kind{}
 }
 func (r Role) Accepts(k work.Kind) bool {
-	for _, allowed := range r.WorkKinds() {
-		if k == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(r.WorkKinds(), k)
 }
 
 type CreateRequest struct {

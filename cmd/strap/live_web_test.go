@@ -27,7 +27,7 @@ func TestLiveWebResearch(t *testing.T) {
 	if model == "" {
 		model = "qwen3.6"
 	}
-	p, err := (&modelOptions{backend: "vllm", overrides: vllm.Generation{MaxTokens: valuePtr(8192)}}).config(base, model).NewProvider(&http.Client{Timeout: 2 * time.Minute})
+	p, err := (harness.ModelConfig{Backend: "vllm", BaseURL: base, Model: model, Generation: vllm.Generation{MaxTokens: valuePtr(8192)}}).NewProvider(&http.Client{Timeout: 2 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

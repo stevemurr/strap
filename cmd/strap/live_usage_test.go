@@ -17,6 +17,7 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/content"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/workflow"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/prompt"
@@ -39,7 +40,7 @@ func TestLiveTokenUsage(t *testing.T) {
 	}
 
 	t.Run("agent_tool_loop_and_followup", func(t *testing.T) {
-		p, wire := liveUsageProvider(t, baseURL, model, modelOptions{backend: "vllm", overrides: vllm.Generation{MaxTokens: valuePtr(1024)}})
+		p, wire := liveUsageProvider(t, baseURL, model, harness.ModelConfig{Backend: "vllm", Generation: vllm.Generation{MaxTokens: valuePtr(1024)}})
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		c := conversation.New(ctx)
@@ -123,11 +124,11 @@ func TestLiveTokenUsage(t *testing.T) {
 
 	for _, tc := range []struct {
 		name, text string
-		options    modelOptions
+		options    harness.ModelConfig
 		truncated  bool
 	}{
-		{"generic_adapter", "Reply with OK only.", modelOptions{backend: "chatcompletions"}, false},
-		{"truncated_completion", "Write the integers from 1 through 20 separated by spaces.", modelOptions{backend: "vllm", overrides: vllm.Generation{MaxTokens: valuePtr(1), EnableThinking: valuePtr(false)}}, true},
+		{"generic_adapter", "Reply with OK only.", harness.ModelConfig{Backend: "chatcompletions"}, false},
+		{"truncated_completion", "Write the integers from 1 through 20 separated by spaces.", harness.ModelConfig{Backend: "vllm", Generation: vllm.Generation{MaxTokens: valuePtr(1), EnableThinking: valuePtr(false)}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, wire := liveUsageProvider(t, baseURL, model, tc.options)
@@ -197,13 +198,14 @@ func (w *liveUsageTransport) at(t *testing.T, index int) liveWireCompletion {
 	return w.records[index]
 }
 
-func liveUsageProvider(t *testing.T, url, model string, options modelOptions) (provider.Provider, *liveUsageTransport) {
+func liveUsageProvider(t *testing.T, url, model string, options harness.ModelConfig) (provider.Provider, *liveUsageTransport) {
 	t.Helper()
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	base.Proxy = nil // The explicitly supplied endpoint is a direct local connection.
 	t.Cleanup(base.CloseIdleConnections)
 	wire := &liveUsageTransport{base: base}
-	p, err := options.config(url, model).NewProvider(&http.Client{Transport: wire, Timeout: time.Minute})
+	options.BaseURL, options.Model = url, model
+	p, err := options.NewProvider(&http.Client{Transport: wire, Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

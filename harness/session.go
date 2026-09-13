@@ -52,7 +52,8 @@ type Config struct {
 	Auditor     AgentConfig     `json:"auditor"`
 }
 
-// DefaultConfig returns independent CLI-compatible defaults without acquiring resources.
+// DefaultConfig returns independent library defaults without acquiring resources.
+// The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
 	return Config{Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}}
@@ -427,6 +428,7 @@ func cloneModel(m ModelConfig) ModelConfig {
 	g.RepetitionPenalty = copyPtr(g.RepetitionPenalty)
 	g.MaxTokens = copyPtr(g.MaxTokens)
 	g.EnableThinking = copyPtr(g.EnableThinking)
+	g.ForceNonemptyContent = copyPtr(g.ForceNonemptyContent)
 	return m
 }
 

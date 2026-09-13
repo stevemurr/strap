@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stevemurr/strap/identity"
 	"time"
+
+	"github.com/stevemurr/strap/identity"
 )
 
 var (
@@ -30,9 +31,8 @@ type Data struct {
 	Correlation string             `json:"correlation,omitempty"`
 	Kind        string             `json:"kind"`
 	Agent       string             `json:"agent,omitempty"`
-	Time        time.Time          `json:"time"
- "github.com/stevemurr/strap/identity"`
-	Payload json.RawMessage `json:"payload"`
+	Time        time.Time          `json:"time"`
+	Payload     json.RawMessage    `json:"payload"`
 }
 
 func (d Data) Clone() Data {

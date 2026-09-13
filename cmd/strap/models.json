@@ -1,0 +1,24 @@
+{
+  "default": "nemotron-lightning",
+  "models": {
+    "nemotron-lightning": {
+      "backend": "vllm",
+      "base_url": "http://192.168.1.237:8364",
+      "model": "nemotron-lightning",
+      "timeout": "60m",
+      "generation": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "enable_thinking": true,
+        "force_nonempty_content": true
+      }
+    },
+    "qwen3.6": {
+      "backend": "vllm",
+      "base_url": "http://192.168.1.237:8355",
+      "model": "qwen3.6",
+      "preset": "qwen3.6-coding",
+      "timeout": "60m"
+    }
+  }
+}

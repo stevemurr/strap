@@ -12,38 +12,76 @@ With your local model server running:
 go run ./cmd/strap
 ```
 
-Select your server with `-model` and `-base-url`; `-timeout` limits each model
-request. The CLI defaults to `-backend vllm` with the `qwen3.6-coding` preset.
-The server must support Chat Completions and tool calling. For a generic compatible
-server, use `-backend chatcompletions`, which sends no generation overrides.
-See `go run ./cmd/strap -help` for all options.
+Model endpoints and defaults live in [`cmd/strap/models.json`](cmd/strap/models.json).
+The bundled default is `nemotron-lightning`; select the saved Qwen endpoint with
+`-profile qwen3.6`. A profile pairs a server's model alias with its endpoint,
+request timeout, and generation settings.
 
-The Qwen preset follows the [Qwen3.6-35B-A3B precise-coding sampling guidance](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices), with a 128K output budget for extended thinking and coding:
-
-| Setting | Value |
-|---|---|
-| Temperature / top-p / top-k | `0.6` / `0.95` / `20` |
-| Min-p / presence penalty / repetition penalty | `0` / `0` / `1` |
-| Maximum output tokens | `131072` |
-| Thinking | Enabled |
-
-Explicit flags override individual preset values. Use `-preset none` to leave
-unspecified settings to the server, especially when selecting another model:
+For personal settings, copy that catalog to `~/.config/strap/models.json`
+(or `$XDG_CONFIG_HOME/strap/models.json`). Strap automatically loads it when present;
+otherwise it uses the bundled catalog. Use `-config /path/to/models.json` to select
+another file. A personal file replaces the entire catalog. Edit `default` to choose
+which profile runs without flags, and add entries under `models` to save more models.
+Changes to a personal file take effect on the next invocation without rebuilding.
 
 ```sh
-go run ./cmd/strap -temperature 0.4 -max-tokens 16384
+go run ./cmd/strap -profile qwen3.6
+go run ./cmd/strap -config cmd/strap/models.json -profile nemotron-lightning
+go run ./cmd/strap -temperature 0.8 -max-tokens 16384
+```
+
+Flags override the selected profile, regardless of argument order. `-model` changes
+only the server alias; `-profile` selects the saved settings. `-base-url` and
+`-timeout` override the endpoint and per-request timeout. Profile `timeout` values
+use Go durations such as `60m`; omitted timeouts use the harness default (one hour).
+Missing profile `backend` and `preset` fields mean `vllm` and `none` respectively.
+Unknown JSON fields and invalid selected model settings fail before startup.
+See `go run ./cmd/strap -help` for all options.
+
+The Nemotron profile assumes the alias serves **NVIDIA Nemotron 3.5 Lightning
+30B-A3B**. Its [Hugging Face card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16#api-client)
+and NVIDIA's [SWE-bench recipe](https://github.com/NVIDIA-NeMo/Gym/blob/main/nemotron_recipes/lightning-3.5/instruct/nemo-evaluator/swebench-verified.yaml)
+support this coding baseline (checked September 12, 2026):
+
+| Setting | Nemotron Lightning |
+|---|---|
+| Temperature / top-p | `1.0` / `0.95` |
+| Thinking | Enabled |
+| `force_nonempty_content` | Enabled, as the card recommends for coding agents |
+| Top-k, min-p, presence/repetition penalties | Unspecified; server defaults |
+| Maximum output tokens | Unspecified; set `-max-tokens` for your deployment |
+
+These are published recommendations, not a demonstrated optimum for every coding
+task. The card's `16000` output limit is an API example; NVIDIA's agentic coding
+recipes drop `max_tokens` before sending requests. The profile therefore does not
+inherit Qwen's 128K output cap. For vLLM tool calling, the card specifies
+`--enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3`.
+The evaluation recipes also replay reasoning history; Strap currently does not,
+so these sampling settings alone do not reproduce NVIDIA's benchmark setup.
+
+The Qwen profile explicitly selects `qwen3.6-coding`: temperature `0.6`, top-p
+`0.95`, top-k `20`, min-p `0`, presence penalty `0`, repetition penalty `1`,
+`131072` maximum output tokens, and thinking enabled. Library callers retain
+`harness.DefaultConfig()`'s existing Qwen defaults; only the CLI loads catalogs.
+
+`-preset none` discards saved generation settings and leaves unspecified values to
+the server. `-preset qwen3.6-coding` replaces them with the Qwen preset. Generation
+flags then override that choice, including explicit `0` and `false`. For example:
+
+```sh
 go run ./cmd/strap -model another-model -preset none -top-p 0.9
 ```
 
 Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
-`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, and `-thinking=false`.
-Zero and false are explicit values, not omissions. Presets and generation overrides
-require the vLLM backend; the generic backend rejects them instead of ignoring them.
+`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, `-thinking=false`, and
+`-force-nonempty-content=false`. They require the vLLM backend. Explicitly selecting
+`-backend chatcompletions` clears saved generation settings and uses server defaults;
+explicit generation flags or a nonempty preset other than `none` are then rejected.
 The same immutable provider settings apply to the root, implementors, and auditors.
-Changing `-model` does not automatically change the selected preset.
 
 The vLLM adapter targets the generation fields exposed by vLLM 0.25.0, including
-`chat_template_kwargs.enable_thinking`. Thinking requires support in the served
+`chat_template_kwargs.enable_thinking`, plus Nemotron's
+`chat_template_kwargs.force_nonempty_content`. Both require support in the served
 model's template. Settings are sent on every request; unsupported settings and
 output/context limits remain visible server errors, with no automatic retry or
 parameter substitution. Reasoning-history preservation is not implemented.

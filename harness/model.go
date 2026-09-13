@@ -60,6 +60,7 @@ func (o ModelConfig) Resolve() (ModelConfig, error) {
 		g.RepetitionPenalty = cmp.Or(o.Generation.RepetitionPenalty, g.RepetitionPenalty)
 		g.MaxTokens = cmp.Or(o.Generation.MaxTokens, g.MaxTokens)
 		g.EnableThinking = cmp.Or(o.Generation.EnableThinking, g.EnableThinking)
+		g.ForceNonemptyContent = cmp.Or(o.Generation.ForceNonemptyContent, g.ForceNonemptyContent)
 		o.Backend = "vllm"
 		o.Generation = g
 		if o.Preset == "" {

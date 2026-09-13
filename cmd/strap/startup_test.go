@@ -10,6 +10,7 @@ import (
 )
 
 func TestCanceledStartupClosesSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// A canceled controller rejects root creation after local tools are initialized.
@@ -31,6 +32,7 @@ func TestUnknownFlagAndMissingAgentErrors(t *testing.T) {
 }
 
 func TestStartupReachesTerminal(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	// No input is sent, so startup never contacts the configured model endpoint.

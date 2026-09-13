@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,10 +27,11 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 		want    map[string]any
 		generic bool
 	}{
-		{"default", nil, preset, false},
+		{"default", nil, map[string]any{"temperature": 1.0, "top_p": 0.95, "chat_template_kwargs": map[string]any{"enable_thinking": true, "force_nonempty_content": true}}, false},
+		{"qwen profile", []string{"-profile", "qwen3.6"}, preset, false},
 		{"explicit preset", []string{"-preset", "qwen3.6-coding"}, preset, false},
 		{"server defaults", []string{"-preset", "none"}, map[string]any{}, false},
-		{"zero and false overrides", []string{"-temperature", "0", "-thinking=false", "-max-tokens", "4096"}, map[string]any{
+		{"zero and false overrides", []string{"-profile", "qwen3.6", "-temperature", "0", "-thinking=false", "-max-tokens", "4096"}, map[string]any{
 			"temperature": 0.0, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0, "presence_penalty": 0.0,
 			"repetition_penalty": 1.0, "max_tokens": 4096.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
 		}, false},
@@ -40,6 +40,12 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 			"chat_template_kwargs": map[string]any{"enable_thinking": true},
 		}, false},
 		{"generic", []string{"-backend", "chatcompletions"}, map[string]any{}, true},
+		{"content only", []string{"-preset", "none", "-force-nonempty-content"}, map[string]any{
+			"chat_template_kwargs": map[string]any{"force_nonempty_content": true},
+		}, false},
+		{"explicit false content", []string{"-preset", "none", "-force-nonempty-content=false"}, map[string]any{
+			"chat_template_kwargs": map[string]any{"force_nonempty_content": false},
+		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,12 +67,12 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 				fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 			}))
 			defer server.Close()
-			flags := flag.NewFlagSet("test", flag.ContinueOnError)
-			o := modelFlags(flags)
-			if err := flags.Parse(tc.args); err != nil {
+			args := append([]string{"-config", "models.json", "-base-url", server.URL, "-model", "arbitrary-server-alias"}, tc.args...)
+			o, err := parseOptions(args, io.Discard)
+			if err != nil {
 				t.Fatal(err)
 			}
-			p, err := o.config(server.URL, "arbitrary-server-alias").NewProvider(server.Client())
+			p, err := o.config.Model.NewProvider(server.Client())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,16 +96,11 @@ func TestCLIRejectsInvalidOrUnsupportedModelOptions(t *testing.T) {
 		{"-backend", "chatcompletions", "-preset", "qwen3.6-coding"},
 		{"-backend", "chatcompletions", "-temperature", "0"},
 		{"-backend", "chatcompletions", "-thinking=false"},
+		{"-backend", "chatcompletions", "-force-nonempty-content=false"},
 		{"-temperature", "NaN"}, {"-temperature", "-1"}, {"-top-p", "0"},
 		{"-max-tokens", "0"}, {"-top-k", "1.5"}, {"-thinking=maybe"},
 	} {
-		flags := flag.NewFlagSet("test", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		o := modelFlags(flags)
-		err := flags.Parse(args)
-		if err == nil {
-			_, err = o.config("http://127.0.0.1:1", "local").NewProvider(nil)
-		}
+		_, err := parseOptions(append([]string{"-config", "models.json"}, args...), io.Discard)
 		if err == nil {
 			t.Errorf("accepted %v", args)
 		}

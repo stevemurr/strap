@@ -34,13 +34,13 @@ func TestGenerationSnapshotAndConcurrentIsolation(t *testing.T) {
 		want := map[string]string{
 			"temperature": "0", "top_p": "0.95", "top_k": "20", "min_p": "0",
 			"presence_penalty": "0", "repetition_penalty": "1", "max_tokens": "32768",
-			"chat_template_kwargs": `{"enable_thinking":false}`,
+			"chat_template_kwargs": `{"enable_thinking":false,"force_nonempty_content":true}`,
 		}
 		if string(body["model"]) == `"second"` {
 			want = map[string]string{
 				"temperature": "0.8", "top_p": "0.8", "top_k": "0", "min_p": "0.1",
 				"presence_penalty": "1.5", "repetition_penalty": "1.2", "max_tokens": "2048",
-				"chat_template_kwargs": `{"enable_thinking":true}`,
+				"chat_template_kwargs": `{"enable_thinking":true,"force_nonempty_content":false}`,
 			}
 		}
 		for name, expected := range want {
@@ -72,13 +72,14 @@ func TestGenerationSnapshotAndConcurrentIsolation(t *testing.T) {
 		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":%s},"finish_reason":"stop"}]}`, messages[0]["content"])
 	}))
 	defer server.Close()
-	g := vllm.Generation{Temperature: ptr(0.0), TopP: ptr(0.95), TopK: ptr(20), MinP: ptr(0.0), PresencePenalty: ptr(0.0), RepetitionPenalty: ptr(1.0), MaxTokens: ptr(32768), EnableThinking: ptr(false)}
+	g := vllm.Generation{Temperature: ptr(0.0), TopP: ptr(0.95), TopK: ptr(20), MinP: ptr(0.0), PresencePenalty: ptr(0.0), RepetitionPenalty: ptr(1.0), MaxTokens: ptr(32768), EnableThinking: ptr(false), ForceNonemptyContent: ptr(true)}
 	first, err := vllm.New(vllm.Config{BaseURL: server.URL, Model: "first", Generation: g})
 	if err != nil {
 		t.Fatal(err)
 	}
 	*g.Temperature, *g.TopP, *g.TopK, *g.MinP = 0.8, 0.8, 0, 0.1
 	*g.PresencePenalty, *g.RepetitionPenalty, *g.MaxTokens, *g.EnableThinking = 1.5, 1.2, 2048, true
+	*g.ForceNonemptyContent = false
 	second, err := vllm.New(vllm.Config{BaseURL: server.URL + "/v1/", Model: "second", Generation: g})
 	if err != nil {
 		t.Fatal(err)

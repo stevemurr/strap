@@ -9,14 +9,15 @@ import (
 // leaves a field to the server; explicit zero/false is sent unchanged. New
 // validates finite numbers and snapshots all values without supplying defaults.
 type Generation struct {
-	Temperature       *float64 `json:"temperature,omitempty"`        // [0, 2]; zero selects greedy decoding.
-	TopP              *float64 `json:"top_p,omitempty"`              // (0, 1]
-	TopK              *int     `json:"top_k,omitempty"`              // -1 or 0 disables filtering; positive values select k.
-	MinP              *float64 `json:"min_p,omitempty"`              // [0, 1]
-	PresencePenalty   *float64 `json:"presence_penalty,omitempty"`   // [-2, 2]
-	RepetitionPenalty *float64 `json:"repetition_penalty,omitempty"` // > 0; 1 disables the penalty.
-	MaxTokens         *int     `json:"max_tokens,omitempty"`         // > 0; output budget, not context length.
-	EnableThinking    *bool    `json:"enable_thinking,omitempty"`    // Requires support in the served chat template.
+	Temperature          *float64 `json:"temperature,omitempty"`            // [0, 2]; zero selects greedy decoding.
+	TopP                 *float64 `json:"top_p,omitempty"`                  // (0, 1]
+	TopK                 *int     `json:"top_k,omitempty"`                  // -1 or 0 disables filtering; positive values select k.
+	MinP                 *float64 `json:"min_p,omitempty"`                  // [0, 1]
+	PresencePenalty      *float64 `json:"presence_penalty,omitempty"`       // [-2, 2]
+	RepetitionPenalty    *float64 `json:"repetition_penalty,omitempty"`     // > 0; 1 disables the penalty.
+	MaxTokens            *int     `json:"max_tokens,omitempty"`             // > 0; output budget, not context length.
+	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
+	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
 }
 
 type generationFields struct {
@@ -31,7 +32,8 @@ type generationFields struct {
 }
 
 type templateFields struct {
-	EnableThinking bool `json:"enable_thinking"`
+	EnableThinking       *bool `json:"enable_thinking,omitempty"`
+	ForceNonemptyContent *bool `json:"force_nonempty_content,omitempty"`
 }
 
 func (g Generation) freeze() (generationFields, error) {
@@ -73,8 +75,8 @@ func (g Generation) freeze() (generationFields, error) {
 		MinP: copyValue(g.MinP), PresencePenalty: copyValue(g.PresencePenalty),
 		RepetitionPenalty: copyValue(g.RepetitionPenalty), MaxTokens: copyValue(g.MaxTokens),
 	}
-	if g.EnableThinking != nil {
-		fields.ChatTemplate = &templateFields{EnableThinking: *g.EnableThinking}
+	if g.EnableThinking != nil || g.ForceNonemptyContent != nil {
+		fields.ChatTemplate = &templateFields{EnableThinking: copyValue(g.EnableThinking), ForceNonemptyContent: copyValue(g.ForceNonemptyContent)}
 	}
 	return fields, nil
 }

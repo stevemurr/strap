@@ -22,6 +22,7 @@ func TestHelpDoesNotOpenTerminalOrModel(t *testing.T) {
 }
 
 func TestInvalidFlagsFailBeforeStartingConversation(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	for _, args := range [][]string{{"-timeout", "0s"}, {"-base-url", "not-a-url"}, {"extra"}, {"-C", filepath.Join(t.TempDir(), "missing")}, {"-temperature", "NaN"}, {"-backend", "unknown"}, {"-preset", "unknown"}} {
 		var out bytes.Buffer
 		if err := run(context.Background(), args, &out); err == nil {
