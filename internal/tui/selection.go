@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -18,6 +19,17 @@ type mouseSelection struct {
 	start, end screenPoint
 	dragging   bool
 	status     string
+	region     *selectionRegion
+	footerLeft int
+}
+
+type selectionRegion struct{ left, right, top, bottom int }
+
+func (s *mouseSelection) point(x, y, width int) screenPoint {
+	if r := s.region; r != nil {
+		return screenPoint{max(r.left, min(x, r.right-1)), max(r.top, min(y, r.bottom-1))}
+	}
+	return screenPoint{max(0, min(x, width-1)), max(0, min(y, len(s.lines)-1))}
 }
 
 type clipboardResult struct {
@@ -60,6 +72,9 @@ func (s *mouseSelection) columns(row int) (int, int) {
 	if row == b.y {
 		right = b.x + 1
 	}
+	if r := s.region; r != nil {
+		left, right = max(left, r.left), min(right, r.right)
+	}
 	return selectionColumns(s.lines[row], left, right)
 }
 
@@ -92,13 +107,21 @@ func (s *mouseSelection) view(width int) string {
 	// Keep feedback outside the selected range so the visible text still matches
 	// the copied snapshot when the footer itself is selected.
 	if b.y < len(lines)-1 && s.status != "" {
-		lines[len(lines)-1] = dimStyle.Render(ansi.Truncate(" "+s.status, width, "…"))
+		if s.footerLeft > 0 {
+			last := len(lines) - 1
+			lines[last] = ansi.Cut(lines[last], 0, s.footerLeft) + dimStyle.Render(ansi.Truncate(s.status, max(1, width-s.footerLeft), "…"))
+		} else {
+			lines[len(lines)-1] = dimStyle.Render(ansi.Truncate(" "+s.status, width, "…"))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (m *model) selectWithMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 	if event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress {
+		if m.transcript == nil && event.X >= 1+m.sidebarWidth() && event.Y >= m.height-m.input.Height()-2 && event.Y < m.height-2 {
+			m.focusRoster(false)
+		}
 		view := m.View()
 		if m.mouseSelection != nil {
 			view = strings.Join(m.mouseSelection.lines, "\n")
@@ -106,18 +129,30 @@ func (m *model) selectWithMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 		lines := strings.Split(view, "\n")
 		point := screenPoint{max(0, min(event.X, m.width-1)), max(0, min(event.Y, len(lines)-1))}
 		m.mouseSelection = &mouseSelection{lines: lines, start: point, end: point, dragging: true, status: "Drag to select · release to copy"}
-		return true, nil
+		// A multiline transcript drag must not copy the neighboring roster.
+		if m.transcript == nil && m.sidebarWidth() != 0 {
+			left, top := 1+m.sidebarWidth(), 4
+			m.mouseSelection.footerLeft = left
+			bottom := top + m.viewport.Height
+			if point.x >= left && point.y >= top && point.y < bottom {
+				m.mouseSelection.region = &selectionRegion{left: left, right: left + m.viewport.Width, top: top, bottom: bottom}
+				m.focusRoster(false)
+			} else if inputTop := m.height - m.input.Height() - 2; point.x >= left && point.y >= inputTop && point.y < m.height-2 {
+				m.mouseSelection.region = &selectionRegion{left: left, right: left + m.viewport.Width, top: inputTop, bottom: m.height - 2}
+			}
+		}
+		return true, textarea.Blink
 	}
 	s := m.mouseSelection
 	if s == nil || !s.dragging {
 		return false, nil
 	}
 	if event.Action == tea.MouseActionMotion && event.Button == tea.MouseButtonLeft {
-		s.end = screenPoint{max(0, min(event.X, m.width-1)), max(0, min(event.Y, len(s.lines)-1))}
+		s.end = s.point(event.X, event.Y, m.width)
 		return true, nil
 	}
 	if event.Action == tea.MouseActionRelease && (event.Button == tea.MouseButtonLeft || event.Button == tea.MouseButtonNone) {
-		s.end = screenPoint{max(0, min(event.X, m.width-1)), max(0, min(event.Y, len(s.lines)-1))}
+		s.end = s.point(event.X, event.Y, m.width)
 		s.dragging = false
 		if s.text() == "" {
 			m.mouseSelection = nil

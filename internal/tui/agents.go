@@ -19,10 +19,12 @@ type agentsTable struct {
 }
 
 type agentTableCount struct {
-	table uint64
-	row   int
-	count int64
-	err   error
+	agent    message.ActorID
+	revision uint64
+	table    uint64
+	row      int
+	count    int64
+	err      error
 }
 
 func (m *model) showAgents() tea.Cmd {
@@ -31,6 +33,7 @@ func (m *model) showAgents() tea.Cmd {
 	var commands []tea.Cmd
 	session, canCount := m.session.(tokenSession)
 	for _, info := range m.session.Agents() {
+		m.ensureStream(info.ID).parent = info.Parent
 		name := string(info.ID)
 		if info.ID == m.session.Root() {
 			name += " (root)"
@@ -73,11 +76,17 @@ func countAgentTable(ctx context.Context, session tokenSession, table uint64, ro
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		count, err := session.CountAgentTokens(ctx, id, revision)
-		return agentTableCount{table: table, row: row, count: count, err: err}
+		return agentTableCount{agent: id, revision: revision, table: table, row: row, count: count, err: err}
 	}
 }
 
 func (m *model) finishAgentTableCount(result agentTableCount) {
+	if result.agent != "" {
+		v := m.ensureStream(result.agent)
+		if v.context == nil || result.revision >= v.context.revision {
+			v.context = &contextTokens{revision: result.revision, count: result.count, failed: result.err != nil || result.count < 0}
+		}
+	}
 	for i := range m.entries {
 		e := &m.entries[i]
 		if e.agents == nil || e.agents.id != result.table || result.row < 0 || result.row >= len(e.agents.rows) {

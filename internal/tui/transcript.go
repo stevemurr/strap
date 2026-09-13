@@ -26,7 +26,7 @@ type transcriptView struct {
 	raw              bool
 	copying          bool
 	err              string
-	mainOffset       int
+	mainPosition     streamPosition
 }
 
 func (m *model) openTranscript(id message.ActorID) {
@@ -41,11 +41,11 @@ func (m *model) openTranscript(id message.ActorID) {
 	}
 	raw := m.transcript != nil && m.transcript.raw
 	copying := m.transcript != nil && m.transcript.copying
-	mainOffset := m.viewport.YOffset
+	mainPosition := m.streamPosition()
 	if m.transcript != nil {
-		mainOffset = m.transcript.mainOffset
+		mainPosition = m.transcript.mainPosition
 	}
-	m.transcript = &transcriptView{inspection: in, viewport: viewport.New(max(1, m.width), max(1, m.height-4)), raw: raw, copying: copying, mainOffset: mainOffset}
+	m.transcript = &transcriptView{inspection: in, viewport: viewport.New(max(1, m.width), max(1, m.height-4)), raw: raw, copying: copying, mainPosition: mainPosition}
 	m.resizeAgentTranscript()
 	m.transcript.viewport.GotoBottom()
 }
@@ -195,7 +195,7 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.renderAgentTranscript()
 		return m, tea.EnableMouseCellMotion
 	case "esc":
-		m.viewport.SetYOffset(v.mainOffset)
+		m.restoreStreamPosition(v.mainPosition)
 		m.transcript = nil
 		if v.copying {
 			return m, tea.EnableMouseCellMotion

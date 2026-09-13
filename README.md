@@ -59,8 +59,31 @@ to omit them. Missing backends produce a tool error when called; startup does no
 launch a browser.
 Commands run with host permissions, without a sandbox or approval prompt.
 
-Type a message and press Enter. Input stays available while agents work. The
-colorized transcript shows tool calls with the calling agent. Consecutive calls
+Type a message and press Enter. Input stays available while agents work and always
+addresses Strap's root, regardless of which agent you are watching. The root's
+live stream opens by default. At 100 columns or wider, a persistent agent list
+shows roles, execution state, assigned work, current activity, and unread counts.
+Work awaiting review or blocked work remains distinct from an agent being idle;
+`!` also flags execution errors. Context measurements show the last available
+count, with unknown or unavailable values shown explicitly.
+
+Press F6 to focus the agent list, use Up / Down to select a live stream, and press
+Enter, Tab, Escape, or F6 to return to the composer. Click an agent to select it;
+scrolling over the list moves between agents. In narrower terminals, F6 opens
+the list in place of the transcript. The list becomes compact and scrolls to
+keep the selected agent visible when there are many agents. `/focus [id]` selects
+a live stream, `/focus root` returns to root, and `/focus all` shows All activity.
+Viewing a stream never pauses an agent, changes its context, or redirects input.
+
+Each stream remembers its own scroll position. Output arriving above the text you
+are reading preserves the current message anchor. Unread counts track changed
+message/tool rows, so a streaming paragraph counts once rather than once per token.
+Ctrl-End returns to live output and marks the selected stream read. Root's stream
+includes messages routed to or from root; a child's unaddressed live output and
+tools stay in that child's stream and All activity. `/transcript [id]` remains
+the separate model-history inspector.
+
+The colorized transcript shows tool calls with the calling agent. Consecutive calls
 collapse into one line, grouped by agent and tool name with repeat counts:
 `agent-2 · Read file ×3, Write file`. A conversation message or error starts a new
 group. Long rows end with an ellipsis to fit the terminal width.
@@ -154,6 +177,9 @@ message. Leading indentation and trailing newlines are preserved when sending.
 | Up / Down | Select a suggestion, move within multiline input, or recall single-line history |
 | Alt+Up / Alt+Down | Recall history / restore the unfinished draft |
 | Tab / Escape | Complete / dismiss suggestions; Tab otherwise inserts four spaces |
+| F6 | Focus the agent list / return to the root composer |
+| Up / Down, then Enter (agent list focused) | Select a live stream, then return to composing |
+| `/focus [id\|root\|all]` | Watch an agent's live stream or All activity; defaults to root |
 | Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |
 | Ctrl-Home / Ctrl-End | Jump to the beginning / end |
 | F2 | Freeze / resume display updates for copying |

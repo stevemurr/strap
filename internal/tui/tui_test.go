@@ -48,7 +48,11 @@ func setup(t *testing.T) (*model, *fakeSession) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s := &fakeSession{events: make(chan conversation.Event)}
-	return newModel(ctx, cancel, s, Options{Model: "local-model", Endpoint: "localhost"}), s
+	m := newModel(ctx, cancel, s, Options{Model: "local-model", Endpoint: "localhost"})
+	// These original tests exercise the combined transcript. Focused-stream
+	// behavior and the default root selection are covered in streams_test.go.
+	m.selectStream("")
+	return m, s
 }
 
 func enter(m *model, text string) {

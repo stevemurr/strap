@@ -50,7 +50,9 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 	name := toolName(activity.Call.Name)
 	if activity.FinishedAt.IsZero() {
 		m.activeTools[key] = activity
-		m.entries = append(m.entries, entry{label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key})
+		m.streamUI.nextEntry++
+		m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: []message.ActorID{event.Agent}, label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key})
+		m.noteStreamEntry(&m.entries[len(m.entries)-1])
 		if !m.selecting {
 			m.renderTranscript(false)
 		}
@@ -58,7 +60,7 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 	}
 	delete(m.activeTools, key)
 	if activity.Err != nil {
-		m.addDetail("Error", string(event.Agent), name+" failed: "+activity.Err.Error(), false)
+		m.addAttributed("Error", string(event.Agent), name+" failed: "+activity.Err.Error(), false, event.Agent)
 	}
 }
 
@@ -122,10 +124,17 @@ func (m *model) activityLine() string {
 }
 
 func (m *model) addDetail(label, meta, body string, follow bool) {
-	m.entries = append(m.entries, entry{label: safeText(label), meta: safeText(meta), body: safeText(body), at: m.now()})
+	m.addAttributed(label, meta, body, follow)
+}
+
+func (m *model) addAttributed(label, meta, body string, follow bool, actors ...message.ActorID) {
+	m.streamUI.nextEntry++
+	m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: actors, label: safeText(label), meta: safeText(meta), body: safeText(body), at: m.now()})
+	m.noteStreamEntry(&m.entries[len(m.entries)-1])
 	if !m.selecting {
-		m.renderTranscript(follow)
+		m.renderTranscript(follow && m.entries[len(m.entries)-1].inStream(m.streamUI.selected))
 	}
+	m.markStreamRead()
 }
 
 func (m *model) toggleSelection() {
@@ -133,8 +142,10 @@ func (m *model) toggleSelection() {
 		m.selecting = false
 		m.frozenView = ""
 		m.frozenEntries = nil
+		m.streamUI.frozenRoster = nil
 		m.renderTranscript(false)
 	} else {
+		m.streamUI.frozenRoster = m.rosterLines(m.rosterHeight(), rosterColumns)
 		m.selecting = true
 		m.frozenEntries = append([]entry(nil), m.entries...)
 		m.frozenView = m.renderView()

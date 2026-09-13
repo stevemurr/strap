@@ -16,6 +16,7 @@ var slashCommands = []slashCommand{
 	{"/agents", "List agents"},
 	{"/clear", "Clear the display"},
 	{"/exit", "Exit Strap"},
+	{"/focus", "Watch a live stream · [id|all]"},
 	{"/help", "Show commands"},
 	{"/inspect", "Inspect an agent · [id]"},
 	{"/pause", "Pause an agent · [id]"},
@@ -33,7 +34,7 @@ type completionState struct {
 
 func (m *model) completionMatches() []slashCommand {
 	text := m.input.Value()
-	if m.completion.dismissed || !strings.HasPrefix(text, "/") ||
+	if m.streamUI.rosterFocused || m.completion.dismissed || !strings.HasPrefix(text, "/") ||
 		strings.ContainsFunc(text, unicode.IsSpace) || m.input.LineInfo().StartColumn+m.input.LineInfo().ColumnOffset != utf8.RuneCountInString(text) {
 		return nil
 	}
@@ -47,7 +48,7 @@ func (m *model) completionMatches() []slashCommand {
 }
 
 func (m *model) completionHeight() int {
-	return min(5, len(m.completionMatches()), max(0, m.height-7-m.input.Height()))
+	return min(5, len(m.completionMatches()), max(0, m.height-7-m.input.Height()-m.streamChrome()))
 }
 
 func (m *model) syncCompletion() {
@@ -56,14 +57,12 @@ func (m *model) syncCompletion() {
 	}
 	m.completion.selected = min(m.completion.selected, max(0, len(m.completionMatches())-1))
 	m.syncInputHeight()
-	height := max(1, m.height-5-m.input.Height()-m.completionHeight())
+	height := max(1, m.height-5-m.input.Height()-m.completionHeight()-m.streamChrome())
 	if m.viewport.Height != height {
-		bottom, offset := m.viewport.AtBottom(), m.viewport.YOffset
+		position := m.streamPosition()
 		m.viewport.Height = height
-		m.renderTranscript(bottom)
-		if !bottom {
-			m.viewport.SetYOffset(offset)
-		}
+		m.renderTranscript(position.follow)
+		m.restoreStreamPosition(position)
 	}
 }
 
@@ -119,7 +118,7 @@ func (m *model) completionView() []string {
 			label = "› " + command.name + "  " + command.description
 			style = titleStyle
 		}
-		lines = append(lines, style.Render(ansi.Truncate(label, max(1, m.width-2), "…")))
+		lines = append(lines, style.Render(ansi.Truncate(label, m.viewport.Width, "…")))
 	}
 	return lines
 }

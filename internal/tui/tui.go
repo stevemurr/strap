@@ -62,6 +62,8 @@ type received struct {
 }
 
 type entry struct {
+	serial            uint64
+	actors            []message.ActorID // Empty for local UI notices visible in every stream.
 	reasoning         string
 	reasoningExpanded bool
 	contentStarted    bool
@@ -111,6 +113,7 @@ type model struct {
 	mouseSelection    *mouseSelection
 	copyText          func(string) error
 	nextTableID       uint64
+	streamUI          streamUI
 }
 
 var (
@@ -130,8 +133,9 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 		now:     time.Now, activeTools: make(map[toolKey]agent.ToolActivity),
 		copyText: clipboard.WriteAll,
 	}
+	m.initStreams()
 	m.resize(80, 24)
-	m.add("Welcome", "Send a message to get started. You can keep typing while agents work.\nScroll to browse history · Drag to select and copy · /help for commands", true)
+	m.addAttributed("Welcome", "", "Send a message to get started. You can keep typing while agents work.\nF6 to browse agent streams · Drag to select and copy · /help for commands", true, session.Root())
 	return m
 }
 
@@ -150,6 +154,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.syncCompletion()
 	defer m.syncCompletion()
+	defer m.markStreamRead()
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -208,6 +213,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.transcript != nil && m.transcript.copying {
 			return m, nil
 		}
+		if m.transcript == nil && m.streamMouse(msg) {
+			return m, nil
+		}
 		if tea.MouseEvent(msg).IsWheel() {
 			m.mouseSelection = nil
 		} else if handled, cmd := m.selectWithMouse(msg); handled {
@@ -245,6 +253,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.transcript != nil {
 			return m.transcriptKey(msg)
+		}
+		if !m.selecting && m.streamKey(msg) {
+			return m, textarea.Blink
 		}
 		if !m.selecting && m.completionKey(msg.String()) {
 			return m, nil
@@ -340,10 +351,13 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/clear":
 			m.entries = nil
+			m.clearStreams()
 			m.renderTranscript(true)
+		case "/focus":
+			m.focusCommand(fields)
 		case "/transcript":
 			if len(fields) > 2 {
 				m.add("Error", "Usage: /transcript [agent-id]", true)
@@ -402,13 +416,15 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 	m.historyIndex = len(m.history)
 	m.draft = ""
 	m.input.Reset()
-	m.addDetail("You", fmt.Sprintf("user → %s · %s", m.session.Root(), receipt.MessageID), text, true)
+	m.addAttributed("You", fmt.Sprintf("user → %s · %s", m.session.Root(), receipt.MessageID), text, true, m.session.Root())
 	m.entries[len(m.entries)-1].message = receipt.MessageID
 	return m, nil
 }
 
 func (m *model) observe(event conversation.Event) {
 	defer m.refreshActivity()
+	defer m.markStreamRead()
+	m.observeStreamEvent(event)
 	switch e := event.(type) {
 	case conversation.AgentEvent:
 		m.observeOutput(e.Event)
@@ -435,13 +451,15 @@ func (m *model) observe(event conversation.Event) {
 		if e.Agent == m.session.Root() {
 			label = "Strap"
 		}
-		m.addDetail(label, string(e.Agent)+" · progress", e.Content, false)
+		m.addAttributed(label, string(e.Agent)+" · progress", e.Content, false, e.Agent)
 	case conversation.WorkEvent:
 		change := e.Event
-		title := string(change.Kind)
+		title := toolName(string(change.Kind))
 		meta := string(change.Work.ID)
-		body := change.Work.Task + " · " + string(change.Work.State)
+		body := change.Work.Task + " · " + workStatus(change.Work)
+		actors := []message.ActorID{change.Work.Owner, change.Work.Assignee, change.Actor}
 		if change.Plan != nil {
+			actors = append(actors, change.Plan.Owner)
 			meta = string(change.Plan.ID)
 			body = change.Plan.Title
 			change.Steps = change.Plan.Steps
@@ -452,7 +470,7 @@ func (m *model) observe(event conversation.Event) {
 		if change.Work.Blocker != "" {
 			body += "\nBlocked: " + change.Work.Blocker
 		}
-		m.addDetail(title, meta, body, false)
+		m.addAttributed("Work", title+" · "+meta, body, false, actors...)
 	case conversation.ToolEvent:
 		m.toolEvent(e)
 	case conversation.AgentStateChanged:
@@ -468,14 +486,14 @@ func (m *model) observe(event conversation.Event) {
 			delete(m.working, e.Agent)
 		}
 		if e.State == agent.PauseRequested || e.State == agent.Paused || e.State == agent.StopRequested {
-			m.addDetail("State", string(e.Agent), string(e.State), false)
+			m.addAttributed("State", string(e.Agent), string(e.State), false, e.Agent)
 		}
 	case conversation.AgentStarted:
 		label := "Delegation"
 		if e.Agent.ID == m.session.Root() {
 			label = "Agent"
 		}
-		m.addDetail(label, fmt.Sprintf("%s → %s", e.Agent.Parent, e.Agent.ID), "Agent created · "+string(e.Agent.State), false)
+		m.addAttributed(label, fmt.Sprintf("%s → %s", e.Agent.Parent, e.Agent.ID), "Agent created · "+string(e.Agent.State), false, e.Agent.Parent, e.Agent.ID)
 	case conversation.AckEvent:
 		if e.Receipt.Status == message.Queued && e.Receipt.Recipient != message.User {
 			m.pending[e.Receipt.MessageID] = e.Receipt.Recipient
@@ -486,7 +504,7 @@ func (m *model) observe(event conversation.Event) {
 		}
 		if e.Receipt.Status == message.Undelivered {
 			delete(m.pending, e.Receipt.MessageID)
-			m.add("Error", fmt.Sprintf("%s was not consumed: %s", e.Receipt.MessageID, e.Receipt.Detail), false)
+			m.addAttributed("Error", "", fmt.Sprintf("%s was not consumed: %s", e.Receipt.MessageID, e.Receipt.Detail), false, e.Receipt.Recipient)
 		}
 	case conversation.MessageEvent:
 		msg := e.Message
@@ -509,7 +527,7 @@ func (m *model) observe(event conversation.Event) {
 					return
 				}
 			}
-			m.addDetail("You", fmt.Sprintf("user → %s · %s", msg.To, msg.ID), msg.Content, false)
+			m.addAttributed("You", fmt.Sprintf("user → %s · %s", msg.To, msg.ID), msg.Content, false, msg.To)
 			m.entries[len(m.entries)-1].message = msg.ID
 			return
 		}
@@ -517,6 +535,8 @@ func (m *model) observe(event conversation.Event) {
 			if row := m.outputEntry(*msg.Output); row != nil {
 				row.meta = fmt.Sprintf("%s → %s · %s", msg.From, msg.To, msg.ID)
 				row.message = msg.ID
+				row.actors = []message.ActorID{msg.From, msg.To}
+				m.noteStreamEntry(row)
 				row.renderWidth = 0
 				if !m.selecting {
 					m.renderTranscript(false)
@@ -546,7 +566,7 @@ func (m *model) observe(event conversation.Event) {
 		} else if msg.To == message.User && msg.From == m.session.Root() {
 			label = "Strap"
 		}
-		m.addDetail(label, meta, body, false)
+		m.addAttributed(label, meta, body, false, msg.From, msg.To)
 	case conversation.AgentExited:
 		if !m.states[e.Agent].Terminal() {
 			m.states[e.Agent] = agent.Stopped
@@ -561,9 +581,9 @@ func (m *model) observe(event conversation.Event) {
 			m.rootStopped = true
 		}
 		if e.Err != nil && !errors.Is(e.Err, context.Canceled) {
-			m.add("Error", fmt.Sprintf("%s stopped: %v", e.Agent, e.Err), false)
+			m.addAttributed("Error", "", fmt.Sprintf("%s stopped: %v", e.Agent, e.Err), false, e.Agent)
 		} else {
-			m.add("Agent", fmt.Sprintf("%s stopped", e.Agent), false)
+			m.addAttributed("Agent", "", fmt.Sprintf("%s stopped", e.Agent), false, e.Agent)
 		}
 	}
 }
@@ -594,8 +614,8 @@ func (m *model) resize(width, height int) {
 	m.width, m.height = max(1, width), max(1, height)
 	// Keep two text columns internally so wide runes remain navigable even
 	// when the terminal is smaller; renderView clips each displayed row.
-	m.input.SetWidth(max(4, m.width-2))
-	m.viewport.Width = max(1, m.width-2)
+	m.viewport.Width = max(1, m.width-2-m.sidebarWidth())
+	m.input.SetWidth(max(4, m.viewport.Width))
 	m.syncCompletion()
 	m.renderTranscript(false)
 	if m.transcript != nil {
@@ -608,30 +628,44 @@ func (m *model) add(label, body string, follow bool) {
 }
 
 func (m *model) renderTranscript(follow bool) {
-	bottom := m.viewport.AtBottom()
-	var transcript strings.Builder
-	entries := m.entries
+	position := m.streamPosition()
+	position.follow = position.follow || follow
+	source := m.entries
 	if m.selecting {
-		entries = m.frozenEntries
+		source = m.frozenEntries
+	}
+	var entries []*entry
+	for i := range source {
+		if source[i].inStream(m.streamUI.selected) {
+			entries = append(entries, &source[i])
+		}
+	}
+	var rows []string
+	m.streamUI.lines = nil
+	block := func(e *entry, text string) {
+		if len(rows) > 0 {
+			rows = append(rows, "")
+			m.streamUI.lines = append(m.streamUI.lines, streamAnchor{entry: e.serial, line: -1})
+		}
+		for i, line := range strings.Split(text, "\n") {
+			rows = append(rows, line)
+			m.streamUI.lines = append(m.streamUI.lines, streamAnchor{entry: e.serial, line: i})
+		}
 	}
 	for i := 0; i < len(entries); i++ {
-		e := &entries[i]
+		e := entries[i]
 		if e.label == "Tool" {
 			end := i + 1
 			for end < len(entries) && entries[end].label == "Tool" {
 				end++
 			}
-			if i > 0 {
-				transcript.WriteString("\n")
+			group := make([]entry, end-i)
+			for j := i; j < end; j++ {
+				group[j-i] = *entries[j]
 			}
-			row := toolRows(entries[i:end], max(1, m.viewport.Width-1))
-			transcript.WriteString(toolStyle.Render(row))
-			transcript.WriteString("\n")
+			block(e, toolStyle.Render(toolRows(group, max(1, m.viewport.Width-1))))
 			i = end - 1
 			continue
-		}
-		if i > 0 {
-			transcript.WriteString("\n")
 		}
 		style := dimStyle.Bold(true)
 		if e.label == "You" {
@@ -655,12 +689,13 @@ func (m *model) renderTranscript(follow bool) {
 			heading += "  " + dimStyle.Render(e.meta)
 		}
 		heading = ansi.Truncate(heading, max(1, m.viewport.Width-1), "…")
-		transcript.WriteString(heading + "\n" + body + "\n")
+		block(e, heading+"\n"+body)
 	}
-	m.viewport.SetContent(strings.TrimSuffix(transcript.String(), "\n"))
-	if follow || bottom {
-		m.viewport.GotoBottom()
+	if len(rows) == 0 {
+		rows = []string{dimStyle.Render("No activity in this stream yet.")}
 	}
+	m.viewport.SetContent(strings.Join(rows, "\n"))
+	m.restoreStreamPosition(position)
 }
 
 func (m *model) status() string {
@@ -720,22 +755,31 @@ func (m *model) renderView() string {
 		}
 		return strings.Join(rows, "\n")
 	}
-	lines := []string{
-		line(m.header()),
-		"", lipgloss.NewStyle().PaddingLeft(min(1, m.width-1)).Render(m.viewport.View()),
-	}
+	lines := strings.Split(m.streamBody(), "\n")
 	for _, suggestion := range m.completionView() {
-		lines = append(lines, line(suggestion))
+		lines = append(lines, suggestion)
 	}
-	lines = append(lines, line(dimStyle.Render(strings.Repeat("─", max(1, m.width-2)))))
+	composerLabel := "─ To Strap (root) "
+	lines = append(lines, dimStyle.Render(composerLabel+strings.Repeat("─", max(0, m.viewport.Width-ansi.StringWidth(composerLabel)))))
 	for _, row := range strings.Split(m.input.View(), "\n") {
-		lines = append(lines, line(row))
+		lines = append(lines, row)
 	}
 	lines = append(lines,
-		line(m.activityLine()),
-		line(dimStyle.Render(m.footer())),
+		m.activityLine(),
+		dimStyle.Render(m.footer()),
 	)
-	return strings.Join(lines, "\n")
+	var roster []rosterLine
+	if m.sidebarWidth() != 0 {
+		roster = m.rosterLines(m.rosterHeight(), rosterColumns)
+	}
+	for i, row := range lines {
+		prefix := " "
+		if roster != nil {
+			prefix += fitStreamCell(roster[i].text, rosterColumns) + dimStyle.Render(" │ ")
+		}
+		lines[i] = ansi.Truncate(prefix+fitStreamCell(row, m.viewport.Width), m.width, "")
+	}
+	return line(m.header()) + "\n\n" + strings.Join(lines, "\n")
 }
 
 func (m *model) header() string {
@@ -766,8 +810,11 @@ func (m *model) footer() string {
 	if m.completionHeight() > 0 {
 		return "↑/↓ select · Tab complete · Enter confirm · Esc dismiss"
 	}
+	if m.streamUI.rosterFocused {
+		return "↑/↓ agent · Enter compose · F6 return · /focus all"
+	}
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter send · Ctrl+T thinking · Alt+Enter newline · /help"
+	return "Enter → root · F6 agents · Ctrl+T thinking · /help"
 }

@@ -18,7 +18,7 @@ func newInput() textarea.Model {
 	input.FocusedStyle.Prompt = titleStyle
 	input.FocusedStyle.Placeholder = dimStyle
 	input.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	input.Placeholder = "Send a message…"
+	input.Placeholder = "Message Strap (root)…"
 	input.CharLimit = 0
 	input.MaxWidth = 0
 	input.SetHeight(1)
@@ -30,7 +30,7 @@ func newInput() textarea.Model {
 // Grow with the draft, reserving space for conversation output. Textarea owns
 // wrapping and cursor scrolling when the draft exceeds the visible rows.
 func (m *model) syncInputHeight() {
-	limit := min(6, max(1, m.height-7))
+	limit := min(6, max(1, m.height-7-m.streamChrome()))
 	if m.height < 8 {
 		limit = min(6, m.height)
 	}
