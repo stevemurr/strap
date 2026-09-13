@@ -196,10 +196,14 @@ func TestRosterRendersAgentDetail(t *testing.T) {
 	if summary := m.streamSummary(); summary == "" {
 		t.Fatal("a running agent produced no summary")
 	}
-	// An agent whose stream carries an error shows the error in its row.
+	// Errors remain flagged in the roster; selecting the agent shows the detail.
 	m.ensureStream("agent-3").err = "provider unreachable"
-	if !strings.Contains(ansi.Strip(m.View()), "provider unreachable") {
+	if m.rosterStatus("agent-3") != "error" || m.rosterGroup("agent-3") != "Needs attention" {
 		t.Fatal("a stream error was not surfaced in the roster")
+	}
+	m.selectStream("agent-3")
+	if !strings.Contains(ansi.Strip(m.View()), "provider unreachable") {
+		t.Fatal("a selected stream error was not surfaced")
 	}
 	_ = s
 }

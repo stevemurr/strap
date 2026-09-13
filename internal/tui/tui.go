@@ -68,6 +68,8 @@ type entry struct {
 	reasoning         string
 	reasoningExpanded bool
 	contentStarted    bool
+	progress          bool
+	outputFailed      bool
 	output            *identity.OutputID
 	message           identity.MessageID
 	label, meta, body string
@@ -352,7 +354,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool calls share a line, grouped by agent with repeat counts. Context tokens show the latest completed batch, including its tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nProgress updates, replies, and individual tool calls stay in the transcript without folding. Each tool row shows its completed batch context count, including tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/clear":
 			m.entries = nil
 			m.clearStreams()
@@ -441,6 +443,7 @@ func (m *model) observe(event conversation.Event) {
 		if e.Output != nil {
 			if row := m.outputEntry(*e.Output); row != nil {
 				row.meta = string(e.Agent) + " · progress"
+				row.progress = true
 				row.renderWidth = 0
 				if !m.selecting {
 					m.renderTranscript(false)
@@ -534,6 +537,7 @@ func (m *model) observe(event conversation.Event) {
 		}
 		if msg.Output != nil {
 			if row := m.outputEntry(*msg.Output); row != nil {
+				row.progress = false
 				row.meta = fmt.Sprintf("%s → %s · %s", msg.From, msg.To, msg.ID)
 				row.message = msg.ID
 				row.actors = []message.ActorID{msg.From, msg.To}
@@ -656,16 +660,7 @@ func (m *model) renderTranscript(follow bool) {
 	for i := 0; i < len(entries); i++ {
 		e := entries[i]
 		if e.label == "Tool" {
-			end := i + 1
-			for end < len(entries) && entries[end].label == "Tool" {
-				end++
-			}
-			group := make([]entry, end-i)
-			for j := i; j < end; j++ {
-				group[j-i] = *entries[j]
-			}
-			block(e, toolStyle.Render(toolRows(group, max(1, m.viewport.Width-1))))
-			i = end - 1
+			block(e, toolStyle.Render(toolRow(e, max(1, m.viewport.Width-1))))
 			continue
 		}
 		style := dimStyle.Bold(true)
@@ -688,6 +683,14 @@ func (m *model) renderTranscript(follow bool) {
 		heading := style.Render(e.label) + "  " + dimStyle.Render(e.at.Format("15:04"))
 		if e.meta != "" {
 			heading += "  " + dimStyle.Render(e.meta)
+		}
+		if e.progress && !e.outputFailed {
+			heading = routeStyle.Render(inlineText(string(e.actors[0])) + " · Progress")
+			stamp := e.at.Format("15:04")
+			room := m.viewport.Width - 1 - ansi.StringWidth(heading) - len(stamp)
+			if room >= 2 {
+				heading += strings.Repeat(" ", room) + dimStyle.Render(stamp)
+			}
 		}
 		heading = ansi.Truncate(heading, max(1, m.viewport.Width-1), "…")
 		block(e, heading+"\n"+body)
@@ -812,7 +815,7 @@ func (m *model) footer() string {
 		return "↑/↓ select · Tab complete · Enter confirm · Esc dismiss"
 	}
 	if m.streamUI.rosterFocused {
-		return "↑/↓ agent · Enter compose · F6 return · /focus all"
+		return "↑/↓ select · Enter open/compose · c completed · F6 return"
 	}
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)

@@ -8,9 +8,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/work"
 )
 
-const rosterColumns = 30
+const rosterColumns = 34
 
 func (m *model) streamChrome() int {
 	if m.height >= 12 {
@@ -44,127 +45,219 @@ type rosterLine struct {
 	text       string
 	id         message.ActorID
 	selectable bool
+	completed  bool
+}
+
+type rosterChoice struct {
+	id        message.ActorID
+	completed bool
+}
+
+var rosterGroups = []string{"Needs attention", "Working", "Idle", "Inactive", "Completed"}
+
+func (m *model) rosterGroup(id message.ActorID) string {
+	if m.streamNeedsAttention(id) {
+		return "Needs attention"
+	}
+	if m.working[id] || m.streamState(id) == "running" || m.streamActivity(id) != "" {
+		return "Working"
+	}
+	if w, ok := m.streamWork(id); ok && w.State == work.Accepted {
+		return "Completed"
+	}
+	if state := m.streamState(id); state != "idle" {
+		return "Inactive"
+	}
+	if w, ok := m.streamWork(id); ok && workFinished(w) {
+		return "Inactive"
+	}
+	return "Idle"
+}
+
+func (m *model) groupedAgents(group string) []message.ActorID {
+	var ids []message.ActorID
+	for _, id := range m.streamUI.order {
+		if id != m.session.Root() && m.rosterGroup(id) == group {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func (m *model) rosterChoices() []rosterChoice {
+	choices := []rosterChoice{{id: ""}, {id: m.session.Root()}}
+	for _, group := range rosterGroups {
+		ids := m.groupedAgents(group)
+		if group == "Completed" && len(ids) > 0 {
+			choices = append(choices, rosterChoice{completed: true})
+			if !m.streamUI.completedExpanded {
+				continue
+			}
+		}
+		for _, id := range ids {
+			choices = append(choices, rosterChoice{id: id})
+		}
+	}
+	return choices
+}
+
+func (m *model) toggleCompleted() {
+	if len(m.groupedAgents("Completed")) == 0 {
+		return
+	}
+	m.streamUI.completedExpanded = !m.streamUI.completedExpanded
+	if !m.streamUI.completedExpanded && m.rosterGroup(m.streamUI.selected) == "Completed" {
+		m.streamUI.completedFocused = true
+	}
+}
+
+func (m *model) streamTask(id message.ActorID) string {
+	if id == m.session.Root() {
+		return "Conversation & coordination"
+	}
+	if w, ok := m.streamWork(id); ok && strings.TrimSpace(w.Task) != "" {
+		return inlineText(w.Task)
+	}
+	return inlineText(string(id)) + " · " + m.streamRole(id)
+}
+
+func (m *model) rosterStatus(id message.ActorID) string {
+	if m.ensureStream(id).err != "" {
+		return "error"
+	}
+	if w, ok := m.streamWork(id); ok {
+		if workFinished(w) && m.rosterGroup(id) != "Working" {
+			return workStatus(w)
+		}
+		if m.streamNeedsAttention(id) {
+			return workStatus(w)
+		}
+	}
+	return m.streamState(id)
 }
 
 func (m *model) rosterLines(height, width int) []rosterLine {
+	if height <= 0 {
+		return nil
+	}
 	if m.selecting && m.streamUI.frozenRoster != nil {
 		lines := make([]rosterLine, height)
 		copy(lines, m.streamUI.frozenRoster)
 		return lines
 	}
-	lines := []rosterLine{
-		{text: stateStyle.Bold(true).Render(fmt.Sprintf("Agents  %d", len(m.streamUI.order)))},
-		{text: dimStyle.Render(m.streamSummary())},
-		{},
+	// A finished agent can begin another operation while the roster is focused.
+	if len(m.groupedAgents("Completed")) == 0 {
+		m.streamUI.completedFocused = false
 	}
+	// Finishing work must not make the currently watched agent disappear.
+	if !m.streamUI.completedFocused && m.rosterGroup(m.streamUI.selected) == "Completed" {
+		m.streamUI.completedExpanded = true
+	}
+	lines := []rosterLine{{text: stateStyle.Bold(true).Render(fmt.Sprintf("Agents  %d", len(m.streamUI.order)))}, {text: dimStyle.Render(m.streamSummary())}, {}}
 	var rows []rosterLine
 	selectedStart, selectedEnd := 0, 0
-	// Compact automatically as the roster grows. The selected agent's full
-	// task and activity remain available in its stream heading and transcript.
-	rowHeight := min(6, max(2, (height-4)/max(1, len(m.streamUI.order))))
-	for _, id := range m.streamChoices() {
+	addAgent := func(id message.ActorID) {
 		start := len(rows)
-		selected := id == m.streamUI.selected
-		marker := "  "
+		selected := id == m.streamUI.selected && !m.streamUI.completedFocused
+		marker := "○ "
+		switch m.rosterGroup(id) {
+		case "Needs attention":
+			marker = "! "
+		case "Working":
+			marker = "● "
+		case "Completed":
+			marker = "✓ "
+		}
+		title := m.streamTask(id)
+		if id == "" {
+			title = "All activity"
+			marker = "  "
+		}
 		if selected {
 			marker = "› "
 		}
-		title := "All activity"
-		if id != "" {
-			title = inlineText(string(id)) + " · " + m.streamRole(id)
-		}
 		badge := ""
-		if n := len(m.ensureStream(id).unread); n != 0 {
+		if n := len(m.ensureStream(id).unread); n > 0 {
 			badge = fmt.Sprintf(" +%d", n)
 		}
-		w, hasWork := m.streamWork(id)
-		if m.streamNeedsAttention(id) {
-			badge += " !"
-		}
-		label := ansi.Truncate(marker+title, max(1, width-ansi.StringWidth(badge)), "…") + stateStyle.Render(badge)
-		if selected {
-			label = routeStyle.Bold(m.streamUI.rosterFocused).Render(label)
-		}
+		label := fitStreamCell(marker+title, max(1, width-ansi.StringWidth(badge))) + badge
 		block := []string{label}
-		if id == "" {
-			block = append(block, "")
-		} else {
-			state := m.streamState(id)
-			if v := m.streamUI.views[id]; !v.since.IsZero() {
-				state += " · " + elapsed(m.now().Sub(v.since))
+		if id != "" {
+			status := m.rosterStatus(id)
+			left := "  " + inlineText(string(id))
+			// Prefer the identifier over a long status in very narrow terminals.
+			room := width - ansi.StringWidth(left) - 1
+			if room > 0 {
+				status = ansi.Truncate(status, room, "…")
+				left = fitStreamCell(left, width-ansi.StringWidth(status)) + status
 			}
-			style := dimStyle
-			if m.working[id] {
-				style = stateStyle
-			}
-			block = append(block, "  "+style.Render(state))
-			if rowHeight > 2 {
-				task := "No assigned work"
-				if id == m.session.Root() {
-					task = "Conversation & coordination"
-				}
-				if hasWork {
-					task = inlineText(w.Task)
-				}
-				block = append(block, "  "+ansi.Truncate(task, width-2, "…"))
-			}
-			if rowHeight > 3 {
-				detail := m.streamActivity(id)
-				if hasWork {
-					detail = workStatus(w)
-					if w.Blocker != "" && !workFinished(w) {
-						detail += ": " + inlineText(w.Blocker)
-					} else if activity := m.streamActivity(id); activity != "" {
-						detail += " · " + activity
-					}
-				}
-				if v := m.streamUI.views[id]; v.err != "" {
-					detail = "error: " + inlineText(v.err)
-				}
-				block = append(block, "  "+dimStyle.Render(ansi.Truncate(detail, width-2, "…")))
-			}
-			if rowHeight > 4 {
-				context := "context unknown"
-				if c := m.streamUI.views[id].context; c != nil {
-					context = c.label()
-					if !c.failed && !c.pending {
-						context = tokenDigits(c.count) + " ctx · last count"
-					}
-				}
-				block = append(block, "  "+dimStyle.Render(ansi.Truncate(context, width-2, "…")))
-			}
-			if rowHeight > 5 && id != m.streamUI.order[len(m.streamUI.order)-1] {
-				block = append(block, "")
-			}
+			block = append(block, left)
 		}
 		for i, line := range block {
-			if selected && line != "" {
-				style := dimStyle
+			style := dimStyle
+			if i == 0 {
+				style = lipgloss.NewStyle()
+			}
+			if m.streamNeedsAttention(id) && i == 1 {
+				style = stateStyle
+			}
+			if selected {
 				if i == 0 {
 					style = routeStyle.Bold(m.streamUI.rosterFocused)
-				} else if i == 1 && m.working[id] {
-					style = stateStyle
-				} else if i == 2 {
-					style = lipgloss.NewStyle()
 				}
-				line = style.Background(lipgloss.AdaptiveColor{Light: "254", Dark: "235"}).Render(fitStreamCell(ansi.Strip(line), width))
+				style = style.Background(lipgloss.AdaptiveColor{Light: "254", Dark: "235"})
 			}
-			rows = append(rows, rosterLine{text: line, id: id, selectable: true})
+			rows = append(rows, rosterLine{text: style.Render(fitStreamCell(line, width)), id: id, selectable: true})
 		}
 		if selected {
 			selectedStart, selectedEnd = start, len(rows)
 		}
 	}
+	addAgent("")
+	addAgent(m.session.Root())
+	for _, group := range rosterGroups {
+		ids := m.groupedAgents(group)
+		if len(ids) == 0 {
+			continue
+		}
+		rows = append(rows, rosterLine{})
+		heading := fmt.Sprintf("%s  %d", group, len(ids))
+		if group == "Completed" {
+			marker := "▸ "
+			if m.streamUI.completedExpanded {
+				marker = "▾ "
+			}
+			style := dimStyle
+			if m.streamUI.completedFocused {
+				marker = "› " + marker
+				style = routeStyle
+			}
+			if m.streamUI.completedFocused {
+				selectedStart, selectedEnd = len(rows), len(rows)+1
+			}
+			rows = append(rows, rosterLine{text: style.Render(marker + heading), selectable: true, completed: true})
+			if !m.streamUI.completedExpanded {
+				continue
+			}
+		} else {
+			style := dimStyle
+			if group == "Needs attention" {
+				style = stateStyle
+			}
+			rows = append(rows, rosterLine{text: style.Render(heading)})
+		}
+		for _, id := range ids {
+			addAgent(id)
+		}
+	}
 	available := max(1, height-len(lines))
-	start := max(0, selectedEnd-available)
-	start = min(start, selectedStart)
+	start := min(max(0, selectedEnd-available), selectedStart)
 	if start > 0 {
 		lines[2].text = dimStyle.Render("↑ more agents")
 	}
 	end := min(len(rows), start+available)
 	lines = append(lines, rows[start:end]...)
-	if end < len(rows) && len(lines) > 1 {
-		// Keep the last selectable row; the header hints that the list continues.
+	if end < len(rows) {
 		lines[0].text += dimStyle.Render("  ↓")
 	}
 	for len(lines) < height {
@@ -173,21 +266,50 @@ func (m *model) rosterLines(height, width int) []rosterLine {
 	return lines[:min(height, len(lines))]
 }
 
+func (m *model) streamDetails() string {
+	if m.selecting {
+		return m.streamUI.frozenDetails
+	}
+	id := m.streamUI.selected
+	if id == "" {
+		return "Stream · all agents · F6 agents"
+	}
+	context := "context unknown"
+	if c := m.ensureStream(id).context; c != nil {
+		context = c.label()
+		if !c.failed && !c.pending {
+			context = tokenDigits(c.count) + " ctx · last count"
+		}
+	}
+	parts := []string{m.streamRole(id), m.streamState(id), context}
+	if parent := m.ensureStream(id).parent; parent != "" {
+		parts = append(parts, "parent "+inlineText(string(parent)))
+	}
+	parts = append(parts, "/transcript "+inlineText(string(id)))
+	return strings.Join(parts, " · ")
+}
+
 func (m *model) streamTitle() string {
+	if m.selecting {
+		return m.streamUI.frozenTitle
+	}
 	id := m.streamUI.selected
 	if id == "" {
 		return titleStyle.Render("All activity")
 	}
 	title := inlineText(string(id)) + " · " + m.streamRole(id)
-	if w, ok := m.streamWork(id); ok {
-		title = inlineText(string(id)) + " · " + inlineText(w.Task)
+	if _, ok := m.streamWork(id); ok || id == m.session.Root() {
+		title = inlineText(string(id)) + " · " + m.streamTask(id)
 	}
-	state := m.streamState(id)
+	state := m.rosterStatus(id)
 	width := max(1, m.viewport.Width-len(state)-3)
 	return titleStyle.Render(ansi.Truncate(title, width, "…")) + "  " + stateStyle.Render(state)
 }
 
 func (m *model) streamFollowLabel() string {
+	if m.selecting {
+		return m.streamUI.frozenFollow
+	}
 	id := m.streamUI.selected
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %d new · Ctrl+End latest", len(m.ensureStream(id).unread))
@@ -195,6 +317,12 @@ func (m *model) streamFollowLabel() string {
 	label := "LIVE · following " + inlineText(string(id))
 	if id == "" {
 		label = "LIVE · all agents"
+	}
+	if v := m.streamUI.views[id]; v != nil && v.err != "" {
+		return label + " · error: " + inlineText(v.err)
+	}
+	if w, ok := m.streamWork(id); ok && !workFinished(w) && w.Blocker != "" {
+		return label + " · blocked: " + inlineText(w.Blocker)
 	}
 	if activity := m.streamActivity(id); activity != "" {
 		label += " · " + activity
@@ -213,11 +341,7 @@ func (m *model) streamBody() string {
 	}
 	var rows []string
 	if m.streamChrome() != 0 {
-		id := string(m.streamUI.selected)
-		if id == "" {
-			id = "root"
-		}
-		rows = append(rows, m.streamTitle(), dimStyle.Render("Stream · /transcript "+inlineText(id)+" · F6 agents"))
+		rows = append(rows, m.streamTitle(), dimStyle.Render(m.streamDetails()))
 	}
 	rows = append(rows, strings.Split(m.viewport.View(), "\n")...)
 	if m.streamChrome() != 0 {
@@ -257,7 +381,12 @@ func (m *model) streamMouse(event tea.MouseMsg) bool {
 		if line := rows[event.Y-2]; line.selectable {
 			m.mouseSelection = nil
 			m.focusRoster(true)
-			m.selectStream(line.id)
+			if line.completed {
+				m.streamUI.completedFocused = true
+				m.toggleCompleted()
+			} else {
+				m.selectStream(line.id)
+			}
 			return true
 		}
 	}

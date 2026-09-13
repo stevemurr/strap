@@ -129,7 +129,8 @@ func (m *model) addDetail(label, meta, body string, follow bool) {
 
 func (m *model) addAttributed(label, meta, body string, follow bool, actors ...message.ActorID) {
 	m.streamUI.nextEntry++
-	m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: actors, label: safeText(label), meta: safeText(meta), body: safeText(body), at: m.now()})
+	progress := len(actors) == 1 && meta == string(actors[0])+" · progress" && (label == "Strap" || label == "Message")
+	m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: actors, label: safeText(label), meta: safeText(meta), body: safeText(body), at: m.now(), progress: progress})
 	m.noteStreamEntry(&m.entries[len(m.entries)-1])
 	if !m.selecting {
 		m.renderTranscript(follow && m.entries[len(m.entries)-1].inStream(m.streamUI.selected))
@@ -143,9 +144,13 @@ func (m *model) toggleSelection() {
 		m.frozenView = ""
 		m.frozenEntries = nil
 		m.streamUI.frozenRoster = nil
+		m.streamUI.frozenTitle, m.streamUI.frozenDetails, m.streamUI.frozenFollow = "", "", ""
 		m.renderTranscript(false)
 	} else {
 		m.streamUI.frozenRoster = m.rosterLines(m.rosterHeight(), rosterColumns)
+		m.streamUI.frozenTitle = m.streamTitle()
+		m.streamUI.frozenDetails = m.streamDetails()
+		m.streamUI.frozenFollow = m.streamFollowLabel()
 		m.selecting = true
 		m.frozenEntries = append([]entry(nil), m.entries...)
 		m.frozenView = m.renderView()
@@ -158,62 +163,11 @@ func (m *model) refreshSelection() {
 	}
 }
 
-// toolRows groups an uninterrupted run of tools by agent. Context measurements
-// are snapshots, so each group shows the latest batch rather than summing them.
-func toolRows(entries []entry, width int) string {
-	type group struct {
-		agent  string
-		names  []string
-		counts map[string]int
-		tokens *contextTokens
+// Keep every call in order, including repeated tools and its batch measurement.
+func toolRow(e *entry, width int) string {
+	label := "├─ " + inlineText(e.meta) + " · " + e.body
+	if e.tokens != nil {
+		label += " · " + e.tokens.label()
 	}
-	var groups []group
-	agents := make(map[string]int)
-	for _, e := range entries {
-		index, exists := agents[e.meta]
-		if !exists {
-			index = len(groups)
-			agents[e.meta] = index
-			groups = append(groups, group{agent: e.meta, counts: make(map[string]int)})
-		}
-		g := &groups[index]
-		if g.counts[e.body] == 0 {
-			g.names = append(g.names, e.body)
-		}
-		g.counts[e.body]++
-		if e.tokens != nil {
-			g.tokens = e.tokens
-		}
-	}
-	var labels []string
-	counted := false
-	for _, g := range groups {
-		counted = counted || g.tokens != nil
-	}
-	for _, g := range groups {
-		var calls []string
-		for _, name := range g.names {
-			label := name
-			if g.counts[name] > 1 {
-				label += fmt.Sprintf(" ×%d", g.counts[name])
-			}
-			calls = append(calls, label)
-		}
-		label := strings.Join(strings.Fields(g.agent), " ") + " · " + strings.Join(calls, ", ")
-		if counted {
-			suffix := ""
-			if g.tokens != nil {
-				suffix = " · " + g.tokens.label()
-			}
-			// Reserve room for the count when tool names are long. Separate
-			// agents get their own line so one agent cannot hide another's count.
-			label = ansi.Truncate("├─ "+label, max(1, width-lipgloss.Width(suffix)), "…") + suffix
-			label = ansi.Truncate(label, width, "…")
-		}
-		labels = append(labels, label)
-	}
-	if counted {
-		return strings.Join(labels, "\n")
-	}
-	return ansi.Truncate("├─ "+strings.Join(labels, "; "), width, "…")
+	return ansi.Hardwrap(label, width, true)
 }

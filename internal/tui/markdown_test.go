@@ -18,8 +18,9 @@ func addTool(m *model, actor message.ActorID, name string) {
 	m.observe(conversation.ToolEvent{Agent: actor, Activity: agent.ToolActivity{Call: provider.ToolCall{ID: name, Name: name}, StartedAt: time.Now()}})
 }
 
-func TestToolRowsCollapseWithAgentAttribution(t *testing.T) {
+func TestToolRowsRemainSeparateWithAgentAttribution(t *testing.T) {
 	m, _ := setup(t)
+	m.resize(100, 60)
 	m.entries = nil
 	for range 3 {
 		addTool(m, "agent-2", "read_file")
@@ -27,24 +28,24 @@ func TestToolRowsCollapseWithAgentAttribution(t *testing.T) {
 	addTool(m, "agent-2", "write_file")
 	addTool(m, "agent-3", "shell")
 	got := ansi.Strip(m.viewport.View())
-	if !strings.Contains(got, "├─ agent-2 · Read file ×3, Write file; agent-3 · Shell") || strings.Count(got, "├─") != 1 {
+	if strings.Count(got, "├─ agent-2 · Read file") != 3 || !strings.Contains(got, "├─ agent-2 · Write file") || !strings.Contains(got, "├─ agent-3 · Shell") || strings.Count(got, "├─") != 5 {
 		t.Fatal(got)
 	}
 	m.add("Strap", "A message between calls", false)
 	addTool(m, "agent-2", "read_file")
 	got = ansi.Strip(m.viewport.View())
-	if strings.Count(got, "├─") != 2 {
-		t.Fatal("group crossed message boundary", got)
+	if strings.Count(got, "├─") != 6 {
+		t.Fatal("message hid an earlier tool call", got)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 25, Height: 24})
 	for _, line := range strings.Split(m.View(), "\n") {
 		if lipgloss.Width(line) > 25 {
-			t.Fatal("compact row overflow", line)
+			t.Fatal("tool row overflow", line)
 		}
 	}
 }
 
-func TestGroupedToolsDoNotChangeFrozenView(t *testing.T) {
+func TestToolCallsDoNotChangeFrozenView(t *testing.T) {
 	m, _ := setup(t)
 	m.entries = nil
 	addTool(m, "agent-2", "read_file")
@@ -55,12 +56,12 @@ func TestGroupedToolsDoNotChangeFrozenView(t *testing.T) {
 		t.Fatal("new call changed frozen display")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
-	if strings.Contains(m.View(), "×2") {
-		t.Fatal("resize expanded frozen group")
+	if strings.Count(ansi.Strip(m.viewport.View()), "├─ agent-2 · Read file") != 1 {
+		t.Fatal("resize revealed a new tool call")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
-	if !strings.Contains(m.View(), "Read file ×2") {
-		t.Fatal("resume lost grouped call")
+	if strings.Count(ansi.Strip(m.viewport.View()), "├─ agent-2 · Read file") != 2 {
+		t.Fatal("resume lost an individual tool call")
 	}
 }
 

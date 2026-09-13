@@ -60,12 +60,12 @@ func TestToolCountsStayWithAgentAndRevisionWhenResultsArriveOutOfOrder(t *testin
 	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Count: 600}})
 	m.Update(received{event: conversation.ContextTokensEvent{Agent: "worker", Revision: 4, Count: 1000}})
 	got := ansi.Strip(m.View())
-	for _, want := range []string{"worker · Read file, Shell · 2,400 context tokens", "root · Shell · 600 context tokens"} {
+	for _, want := range []string{"worker · Read file · 1,000 context tokens", "worker · Shell · 2,400 context tokens", "root · Shell · 600 context tokens"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
 		}
 	}
-	if strings.Contains(got, "1,000") || strings.Contains(got, "3,400") {
+	if strings.Contains(got, "3,400") {
 		t.Fatal("context snapshots summed or regressed", got)
 	}
 	m.add("Strap", "message separates batches", false)

@@ -19,15 +19,20 @@ import (
 // Streams are views of the same entries and event reader. Selecting a stream
 // never changes the recipient, execution state, or model history.
 type streamUI struct {
-	selected      message.ActorID // Empty selects All activity.
-	rosterFocused bool
-	order         []message.ActorID // Stable discovery order, root first.
-	views         map[message.ActorID]*agentStream
-	works         map[work.ID]work.Work
-	workOrder     []work.ID
-	nextEntry     uint64
-	lines         []streamAnchor
-	frozenRoster  []rosterLine
+	selected          message.ActorID // Empty selects All activity.
+	rosterFocused     bool
+	order             []message.ActorID // Stable discovery order, root first.
+	views             map[message.ActorID]*agentStream
+	works             map[work.ID]work.Work
+	workOrder         []work.ID
+	nextEntry         uint64
+	lines             []streamAnchor
+	frozenRoster      []rosterLine
+	frozenTitle       string
+	frozenDetails     string
+	frozenFollow      string
+	completedExpanded bool
+	completedFocused  bool
 }
 
 type agentStream struct {
@@ -53,9 +58,10 @@ type streamPosition struct {
 
 func (m *model) initStreams() {
 	m.streamUI = streamUI{
-		selected: m.session.Root(),
-		views:    make(map[message.ActorID]*agentStream),
-		works:    make(map[work.ID]work.Work),
+		selected:          m.session.Root(),
+		completedExpanded: true,
+		views:             make(map[message.ActorID]*agentStream),
+		works:             make(map[work.ID]work.Work),
 	}
 	m.ensureStream("")
 	m.ensureStream(m.session.Root())
@@ -148,6 +154,10 @@ func (m *model) restoreStreamPosition(p streamPosition) {
 }
 
 func (m *model) selectStream(id message.ActorID) {
+	m.streamUI.completedFocused = false
+	if m.rosterGroup(id) == "Completed" {
+		m.streamUI.completedExpanded = true
+	}
 	if id == m.streamUI.selected {
 		return
 	}
@@ -177,14 +187,21 @@ func (m *model) focusRoster(focus bool) {
 	}
 }
 
-func (m *model) streamChoices() []message.ActorID {
-	return append([]message.ActorID{""}, m.streamUI.order...)
-}
-
 func (m *model) moveStream(delta int) {
-	ids := m.streamChoices()
-	i := slices.Index(ids, m.streamUI.selected)
-	m.selectStream(ids[max(0, min(len(ids)-1, i+delta))])
+	choices := m.rosterChoices()
+	i := 0
+	for j, choice := range choices {
+		if choice.completed == m.streamUI.completedFocused && (choice.completed || choice.id == m.streamUI.selected) {
+			i = j
+			break
+		}
+	}
+	choice := choices[max(0, min(len(choices)-1, i+delta))]
+	if choice.completed {
+		m.streamUI.completedFocused = true
+	} else {
+		m.selectStream(choice.id)
+	}
 }
 
 func (m *model) streamKey(key tea.KeyMsg) bool {
@@ -196,8 +213,28 @@ func (m *model) streamKey(key tea.KeyMsg) bool {
 		return false
 	}
 	switch key.String() {
-	case "enter", "tab", "esc":
+	case "enter":
+		if m.streamUI.completedFocused {
+			m.toggleCompleted()
+			break
+		}
 		m.focusRoster(false)
+	case "tab", "esc":
+		m.focusRoster(false)
+	case "c":
+		m.toggleCompleted()
+	case " ":
+		if m.streamUI.completedFocused {
+			m.toggleCompleted()
+		}
+	case "left":
+		if m.streamUI.completedFocused && m.streamUI.completedExpanded {
+			m.toggleCompleted()
+		}
+	case "right":
+		if m.streamUI.completedFocused && !m.streamUI.completedExpanded {
+			m.toggleCompleted()
+		}
 	case "up", "[":
 		m.moveStream(-1)
 	case "down", "]":
@@ -209,7 +246,7 @@ func (m *model) streamKey(key tea.KeyMsg) bool {
 	case "home":
 		m.selectStream("")
 	case "end":
-		m.selectStream(m.streamUI.order[len(m.streamUI.order)-1])
+		m.moveStream(len(m.rosterChoices()))
 	case "ctrl+c", "ctrl+d", "ctrl+t", "f2", "ctrl+home", "ctrl+end":
 		return false
 	}

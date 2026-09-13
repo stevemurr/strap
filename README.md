@@ -13,8 +13,8 @@ go run ./cmd/strap
 ```
 
 Model endpoints and defaults live in [`cmd/strap/models.json`](cmd/strap/models.json).
-The bundled default is `nemotron-lightning`; select the saved Qwen endpoint with
-`-profile qwen3.6`. A profile pairs a server's model alias with its endpoint,
+The bundled default is `qwen3.6`; select the saved Nemotron endpoint with
+`-profile nemotron-lightning`. A profile pairs a server's model alias with its endpoint,
 request timeout, and generation settings.
 
 For personal settings, copy that catalog to `~/.config/strap/models.json`
@@ -100,16 +100,22 @@ Commands run with host permissions, without a sandbox or approval prompt.
 Type a message and press Enter. Input stays available while agents work and always
 addresses Strap's root, regardless of which agent you are watching. The root's
 live stream opens by default. At 100 columns or wider, a persistent agent list
-shows roles, execution state, assigned work, current activity, and unread counts.
+keeps each task on its first line, with the agent ID and status beneath it.
+Agents are grouped by attention needed, working, idle, inactive, and completed,
+in discovery order within each group. Root stays at the top. Completed work is
+expanded by default; idle agents with unfinished work remain visible.
 Work awaiting review or blocked work remains distinct from an agent being idle;
-`!` also flags execution errors. Context measurements show the last available
-count, with unknown or unavailable values shown explicitly.
+`!` also flags execution errors. The selected stream header shows role, execution
+state, parent, and the last context measurement; its live status line shows
+current activity or error/blocker details. Unknown counts remain explicit.
 
 Press F6 to focus the agent list, use Up / Down to select a live stream, and press
 Enter, Tab, Escape, or F6 to return to the composer. Click an agent to select it;
 scrolling over the list moves between agents. In narrower terminals, F6 opens
-the list in place of the transcript. The list becomes compact and scrolls to
-keep the selected agent visible when there are many agents. `/focus [id]` selects
+the list in place of the transcript. The list scrolls to keep the selection
+visible without dropping task names. Select the Completed heading and press
+Enter, or press `c` anywhere in the focused list, to expand or collapse it.
+Clicking its disclosure does the same. `/focus [id]` selects
 a live stream, `/focus root` returns to root, and `/focus all` shows All activity.
 Viewing a stream never pauses an agent, changes its context, or redirects input.
 
@@ -121,12 +127,12 @@ includes messages routed to or from root; a child's unaddressed live output and
 tools stay in that child's stream and All activity. `/transcript [id]` remains
 the separate model-history inspector.
 
-The colorized transcript shows tool calls with the calling agent. Consecutive calls
-collapse into one line, grouped by agent and tool name with repeat counts:
-`agent-2 · Read file ×3, Write file`. A conversation message or error starts a new
-group. Long rows end with an ellipsis to fit the terminal width.
-Agent creation, assignments, messages, and errors remain visible. Raw tool arguments, call
-IDs, and result payloads stay out of the display. Routine delivery receipts are
+The colorized transcript keeps every progress update, message, and tool call in
+order without folding or automatic summaries. Each tool call has its own row,
+including repeated calls, labeled with the calling agent. Long tool rows wrap
+to fit the terminal width. Scroll back to read earlier activity.
+Raw tool arguments, call IDs, and result payloads stay out of the display.
+Routine delivery receipts are
 tracked internally; they are not printed as conversation output.
 
 Conversation messages render Markdown with headings, emphasis, lists, links,
@@ -161,10 +167,9 @@ Failed partial output remains visible. A reattached view can replay the entire
 session and recover active output; see [streaming and recovery](harness/RECOVERY.md).
 
 After a tool batch finishes, its tool line shows the agent's context size, for
-example `agent-1 · Read file ×2 · 12,345 context tokens`. The TUI counts that exact
+example `agent-1 · Read file · 12,345 context tokens`. The TUI counts that exact
 history snapshot through the provider, including system instructions, tool
-definitions, messages, and the completed tool results. Grouped tool lines show
-the latest completed batch's count, not a sum or the size of tool output alone.
+definitions, messages, and the completed tool results. Each tool row keeps its own batch's count, not a sum or the size of tool output alone.
 Counting runs in the background with a ten-second timeout. Unsupported providers
 and counting failures show `context tokens unavailable`; agents keep running.
 

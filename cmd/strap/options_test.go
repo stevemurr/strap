@@ -54,7 +54,7 @@ func TestCatalogDiscovery(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	m, err := loadModel("", "", time.Hour)
-	if err != nil || m.Model != "nemotron-lightning" {
+	if err != nil || m.Model != "qwen3.6" || m.Preset != "qwen3.6-coding" {
 		t.Fatalf("bundled fallback: %+v, %v", m, err)
 	}
 	for _, dir := range []string{filepath.Join(home, ".config"), t.TempDir()} {

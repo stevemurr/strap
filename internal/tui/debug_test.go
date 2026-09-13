@@ -215,7 +215,7 @@ func TestToolTimelineContainsNamesOnly(t *testing.T) {
 		m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	}
 	got := m.View()
-	for _, want := range []string{"├─ worker · Create agent, Read PDF, Some custom tool"} {
+	for _, want := range []string{"├─ worker · Create agent", "├─ worker · Read PDF", "├─ worker · Some custom tool"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %s", want, got)
 		}
