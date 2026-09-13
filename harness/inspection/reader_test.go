@@ -116,3 +116,49 @@ func TestClosingBorrowedReaderLeavesStoreUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReaderCloseCancelsAndJoinsActiveSourceReads(t *testing.T) {
+	ctx := context.Background()
+	store, err := eventlog.NewMemory("session", eventlog.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close(ctx)
+	_, err = store.Append(ctx, eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"session"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &blockingSource{Source: store, entered: make(chan struct{}), exited: make(chan struct{})}
+	r, err := inspection.New(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { _, err := r.At(ctx, eventlog.Cursor{}); result <- err }()
+	<-source.entered
+	closeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err = r.Close(closeCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-source.exited:
+	default:
+		t.Fatal("close returned before read exited")
+	}
+	if err = <-result; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+type blockingSource struct {
+	inspection.Source
+	entered, exited chan struct{}
+}
+
+func (s *blockingSource) Read(ctx context.Context, q eventlog.Query) (eventlog.Page, error) {
+	close(s.entered)
+	<-ctx.Done()
+	close(s.exited)
+	return eventlog.Page{}, ctx.Err()
+}

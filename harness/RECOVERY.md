@@ -60,6 +60,14 @@ at fixed cursors, including calls with no committed assistant-history entry.
 Reads run asynchronously; snapshots refresh with `r` and page through older calls.
 Clearing main display rows does not clear the shared projector or retained log.
 
+## Independent artifact inspection
+
+[`harness/inspection`](inspection/README.md) opens JSONL archives without creating
+sessions or executing recorded actions. `Session.Trace(ctx)` provides the same
+reader over a borrowed live log. `Reader.At` pins one exact prefix for queries,
+including historical tool/output state and per-call usage. The HTTP service exposes
+these queries at `/sessions/{id}/trace` under its existing authorization.
+
 ## Reasoning and answer channels
 
 `provider.Delta.Channel` distinguishes `content` from `reasoning`. Existing Go

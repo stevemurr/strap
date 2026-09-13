@@ -14,6 +14,7 @@ import (
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
@@ -211,6 +212,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := parts[2:]
+	if path[0] == "trace" {
+		reader, err := session.Trace(r.Context())
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		defer reader.Close(context.Background())
+		http.StripPrefix("/sessions/"+id+"/trace", inspection.Handler(reader)).ServeHTTP(w, r)
+		return
+	}
 	if len(path) == 1 {
 		switch path[0] {
 		case "agents":

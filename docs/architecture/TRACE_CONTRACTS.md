@@ -1,6 +1,9 @@
 # Session trace improvements: types and contracts
 
-Status: proposed; implementation has not begun. This sketch incorporates the
+Status: evidence extensions proposed. The prerequisite
+[inspection package](../../harness/inspection/README.md) now provides independent
+archive/live readers, fixed-prefix queries, and HTTP access. The remaining
+instrumentation stages below follow this inspection foundation. This sketch incorporates the
 successful trace audit and both subsequent contract audits. It extends the
 implemented [recoverable session log](../../harness/RECOVERY.md) and
 [streaming contracts](STREAMING_CONTRACTS.md).

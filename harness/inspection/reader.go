@@ -10,6 +10,7 @@ import (
 
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/projection"
+	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/identity"
 )
 
@@ -129,6 +130,7 @@ type View struct {
 	id         string
 	through    eventlog.Cursor
 	projection *projection.Projector
+	indexes    viewIndex
 }
 
 func (v *View) Through() eventlog.Cursor { return v.through }
@@ -158,6 +160,7 @@ func (r *Reader) At(ctx context.Context, through eventlog.Cursor) (*View, error)
 		return nil, eventlog.ErrFuture
 	}
 	p := projection.New(identity.SessionID(r.session))
+	v := &View{reader: r, log: r.source, id: r.session, through: through, projection: p, indexes: newIndex()}
 	for p.Cursor().Sequence < through.Sequence {
 		after := p.Cursor().Sequence
 		page, err := r.source.Read(ctx, eventlog.Query{After: after, Limit: int(min(uint64(64), through.Sequence-after)), MaxBytes: 4 << 20})
@@ -174,9 +177,12 @@ func (r *Reader) At(ctx context.Context, through eventlog.Cursor) (*View, error)
 			if err = p.Apply(e); err != nil {
 				return nil, fmt.Errorf("project record %d: %w", e.Sequence, err)
 			}
+			if err = v.index(e); err != nil {
+				return nil, fmt.Errorf("index record %d: %w", e.Sequence, err)
+			}
 		}
 	}
-	return &View{reader: r, log: r.source, id: r.session, through: through, projection: p}, nil
+	return v, nil
 }
 
 // ReadRecord reads the immutable stored record, without materializing a framed body.
@@ -203,4 +209,33 @@ func (v *View) readRecord(ctx context.Context, cursor eventlog.Cursor) (eventlog
 		return eventlog.Record{}, errors.New("missing inspection record")
 	}
 	return page.Events[0].Clone(), nil
+}
+
+// ResolveRecord resolves one stored record without constructing a full view when
+// the body is inline. Framed bodies require validation through their commit cursor.
+func (r *Reader) ResolveRecord(ctx context.Context, e eventlog.Record) (eventlog.Record, error) {
+	ctx, done, err := r.begin(ctx)
+	if err != nil {
+		return eventlog.Record{}, err
+	}
+	defer done()
+	if e.Session != r.session || e.Sequence == 0 {
+		return eventlog.Record{}, eventlog.ErrSession
+	}
+	page, err := r.source.Read(ctx, eventlog.Query{After: e.Sequence - 1, Limit: 1})
+	if err != nil {
+		return eventlog.Record{}, err
+	}
+	if len(page.Events) != 1 || page.Events[0].Cursor() != e.Cursor() {
+		return eventlog.Record{}, eventlog.ErrFuture
+	}
+	stored := page.Events[0]
+	if _, framed := record.Frame(stored.Payload); !framed {
+		return stored.Clone(), nil
+	}
+	v, err := r.At(ctx, e.Cursor())
+	if err != nil {
+		return eventlog.Record{}, err
+	}
+	return v.ResolveRecord(ctx, stored)
 }

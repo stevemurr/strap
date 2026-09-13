@@ -40,3 +40,42 @@ committed:
 ```sh
 STRAP_LENGTH_TRACE=/absolute/path/to/trace-20260912-175308.jsonl go test ./harness/inspection -run TestLengthFailureArchive
 ```
+
+## Queries and HTTP
+
+A fixed view exposes `Session`, `InspectAgent`/`ListAgents`,
+`InspectTool`/`ListTools`, `InspectOutput`/`ListOutputs`, and
+`InspectAgentContext` for paginated model history. Tool metadata includes stable
+invocation identity, available provider-call/output correlation, timestamps,
+errors, and start/finish record references. Output metadata includes the call's
+reported usage and lifecycle; missing legacy evidence remains unavailable.
+
+Lists use `PageQuery{After, Limit}` (default 100, maximum 1000), ordered by start
+sequence. Tool lists may filter `Agent` and `Name`; output lists may filter
+`Agent`. `Next` is an exclusive scanned position, and `End` means the fixed prefix
+is exhausted. Returned values own their mutable fields.
+
+`Session.Trace(ctx)` returns a borrowed reader. Existing session output, content,
+and transcript methods delegate to inspection. Direct inline record resolution
+avoids replaying the log for each streaming event. Historical views currently
+replay their prefix on construction; reuse a view for related queries and pages.
+
+`inspection.Handler(reader)` serves a borrowed reader and requires the embedding
+host to authorize access. It never opens paths from requests. The harness HTTP
+service mounts it under its existing authorization at `/sessions/{id}/trace`.
+Standalone hosts can use the same handler for an already-opened archive.
+
+| GET route | Result |
+| --- | --- |
+| `/session` | Recorded configuration and session outcome |
+| `/agents`, `/agents/{id}` | Agent list or inspection |
+| `/tools`, `/tools/{invocation-id}` | Tool list or inspection (IDs may include `/`) |
+| `/outputs`, `/outputs/{agent}/{call}` | Output list or inspection |
+| `/outputs/{agent}/{call}/text` | Bounded content/reasoning page |
+| `/records/{sequence}` | Stored record, without materializing framed content |
+
+HTTP queries accept `through` (omitted captures current head), optional `session`
+identity validation, `after`, and `limit`. Reuse the returned `through.sequence`
+for all subsequent pages. Text reads additionally accept `channel`, `offset`, and
+`max_bytes`. A future or wrong-session boundary is rejected. The existing session
+HTTP endpoints and subscription contract remain available.
