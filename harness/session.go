@@ -43,7 +43,15 @@ type AgentConfig struct {
 
 type WorkProgressReportingConfig = workflow.WorkProgressReportingConfig
 
+type ResearchExecutionConfig struct {
+	Enabled     bool          `json:"enabled"`
+	Timeout     time.Duration `json:"timeout"`
+	MaxTimeout  time.Duration `json:"max_timeout"`
+	OutputLimit int           `json:"output_limit"`
+	Env         []string      `json:"env"`
+}
 type Config struct {
+	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Telemetry             TelemetryConfig             `json:"telemetry"`
 	Events                EventConfig                 `json:"events"`
@@ -60,7 +68,7 @@ type Config struct {
 // DefaultConfig returns independent library defaults without acquiring resources.
 // The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
-	return Config{WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	return Config{ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, Researcher: AgentConfig{Prompt: researcherPrompt.Clone()}}
 }
 
@@ -164,6 +172,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
+	}
+	if cfg.ResearchExecution.Enabled && (cfg.ResearchExecution.Timeout < time.Millisecond || cfg.ResearchExecution.MaxTimeout < cfg.ResearchExecution.Timeout || cfg.ResearchExecution.OutputLimit < 2) {
+		return nil, errors.New("invalid research execution limits")
 	}
 	if err = cfg.WorkProgressReporting.Validate(); err != nil {
 		return nil, err
@@ -310,9 +321,16 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
 	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
+	var researchShell tool.Tool
+	if cfg.LocalTools && cfg.ResearchExecution.Enabled {
+		researchShell, err = tool.NewShell(tool.ShellConfig{Dir: cfg.Dir, Timeout: cfg.ResearchExecution.Timeout, MaxTimeout: cfg.ResearchExecution.MaxTimeout, OutputLimit: cfg.ResearchExecution.OutputLimit, Env: cfg.ResearchExecution.Env})
+		if err != nil {
+			return nil, err
+		}
+	}
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
 		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
 	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
@@ -333,7 +351,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
+	s.effective = EffectiveConfig{ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err
@@ -426,6 +444,7 @@ func localTools(dir string) ([]tool.Tool, error) {
 }
 
 func cloneConfig(c Config) Config {
+	c.ResearchExecution.Env = slices.Clone(c.ResearchExecution.Env)
 	c.Model = cloneModel(c.Model)
 	if c.Web != nil {
 		v := *c.Web

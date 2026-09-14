@@ -2,11 +2,13 @@ package harness_test
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
+	"strings"
 	"testing"
 )
 
@@ -29,11 +31,26 @@ func TestResearcherCreationAndConfiguration(t *testing.T) {
 	if effective.Prompt.Role != cfg.Researcher.Prompt.Role || !effective.InjectedProvider {
 		t.Fatal(effective)
 	}
+	foundShell := false
 	for _, tool := range effective.Tools {
+		if tool.Name == "shell" {
+			foundShell = true
+			var params map[string]any
+			if err := json.Unmarshal(tool.Parameters, &params); err != nil {
+				t.Fatal(err)
+			}
+			raw := string(tool.Parameters)
+			if !strings.Contains(raw, "assigned_at_revision") || !strings.Contains(raw, "60000") {
+				t.Fatal(raw)
+			}
+		}
 		switch tool.Name {
-		case "shell", "write_file", "edit_file", "assign_work", "submit_work", "submit_audit":
+		case "write_file", "edit_file", "assign_work", "submit_work", "submit_audit":
 			t.Fatalf("researcher received %s", tool.Name)
 		}
+	}
+	if !foundShell {
+		t.Fatal("researcher diagnostic shell missing")
 	}
 }
 

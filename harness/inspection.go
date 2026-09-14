@@ -17,6 +17,7 @@ type RoleConfiguration struct {
 	Tools            []provider.ToolDefinition `json:"tools"`
 }
 type EffectiveConfig struct {
+	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Dir                   string                      `json:"dir"`
 	Telemetry             TelemetryConfig             `json:"telemetry"`
@@ -56,6 +57,7 @@ func describeRole(cfg Config, role AgentConfig, spec agent.Spec, injected bool) 
 // inferred from the unused model defaults. Dynamic CreateAgent specs are separate.
 func (s *Session) Configuration() EffectiveConfig {
 	c := s.effective
+	c.ResearchExecution.Env = append([]string(nil), c.ResearchExecution.Env...)
 	for _, r := range []*RoleConfiguration{&c.Root, &c.Implementor, &c.Auditor, &c.Researcher} {
 		r.Prompt = r.Prompt.Clone()
 		if r.Model != nil {

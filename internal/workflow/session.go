@@ -29,13 +29,15 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
-	publish         func(conversation.Event) error
-	progressReads   []tool.Tool
-	progressConfig  WorkProgressReportingConfig
-	progressCurrent func(identity.ActorID, work.ID) (work.Work, error)
-	closing         atomic.Bool
-	admission       *admission.Gate
-	stopOwner       func() bool
+	researchShell      tool.Tool
+	researchMaxTimeout time.Duration
+	publish            func(conversation.Event) error
+	progressReads      []tool.Tool
+	progressConfig     WorkProgressReportingConfig
+	progressCurrent    func(identity.ActorID, work.ID) (work.Work, error)
+	closing            atomic.Bool
+	admission          *admission.Gate
+	stopOwner          func() bool
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
@@ -94,6 +96,9 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 		return result(v, e)
 	}))
 	if s.researcher.Provider != nil {
+		if s.researchShell != nil {
+			s.researcher.Tools = append(s.researcher.Tools, s.researchDiagnosticTool())
+		}
 		s.researcher.Tools = append(s.researcher.Tools, s.commonTools()...)
 		s.researcher.Tools = append(s.researcher.Tools, s.progressTool(), tool.WaitForInput())
 		s.researcher.Tools = append(s.researcher.Tools, tool.SubmitResearch(func(ctx context.Context, c tool.Call, r work.SubmitResearchRequest) (tool.Result, error) {

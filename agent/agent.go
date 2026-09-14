@@ -334,8 +334,8 @@ func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected
 		return tool.Result{}, fmt.Errorf("unknown tool: %s", call.Name)
 	}
 	return t.Call(ctx, tool.Call{
-		Arguments: append(json.RawMessage(nil), call.Arguments...),
-		Actor:     a.config.ID,
-		Sender:    a.config.Outbox,
+		InvocationID: invocation, Arguments: append(json.RawMessage(nil), call.Arguments...),
+		Actor:  a.config.ID,
+		Sender: a.config.Outbox,
 	})
 }

@@ -18,8 +18,8 @@ is promoted into production instructions.
 | 7. Current authorization for live read continuations | Complete — 79185f3; readers exposed to all roles and HTTP |
 | 8. Selective progress notifications | Complete — 414366a; bounded references, activity silence, timed findings, immediate attention/delivery |
 | 9. Notification coverage and exchange admission | Complete — 101034f; accepted-prefix admission, secondary-work coverage, preserved tool continuations |
-| 10. Explicit inbox yielding | Complete in this checkpoint; sole-call capability, matched errors, correlated passive yield records |
-| 11. Assignment-bound researcher diagnostics | Pending |
+| 10. Explicit inbox yielding | Complete — 7f63746; sole-call capability, matched errors, correlated passive yield records |
+| 11. Assignment-bound researcher diagnostics | Complete in this checkpoint; separate configured shell, atomic binding capture, no inferred assignment |
 | 12. Host-issued execution evidence and validation | Pending |
 | 13. Cancellation and error evidence preservation | Pending |
 | 14. Role prompts and progress presentation | Pending |

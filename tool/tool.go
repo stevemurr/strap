@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/stevemurr/strap/content"
+	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 )
@@ -14,9 +15,10 @@ import (
 // Call separates model-generated arguments from runtime-supplied identity and routing.
 // Actor and Sender belong to the executing agent; they are not model inputs.
 type Call struct {
-	Arguments json.RawMessage
-	Actor     message.ActorID
-	Sender    message.Sender
+	InvocationID string // Host-generated invocation, never a model argument.
+	Arguments    json.RawMessage
+	Actor        message.ActorID
+	Sender       message.Sender
 }
 
 // Tool implementations must honor cancellation. Errors become model-visible
@@ -104,7 +106,15 @@ func (f Func[A]) Call(ctx context.Context, call Call) (Result, error) {
 }
 
 // Result carries ordered text and images into the calling agent's model history.
-type Result struct{ Content content.Content }
+type ExecutionBinding struct {
+	WorkID             string           `json:"work_id"`
+	AssignedAtRevision uint64           `json:"assigned_at_revision"`
+	Actor              identity.ActorID `json:"actor"`
+}
+type Result struct {
+	Content   content.Content
+	Execution *ExecutionBinding `json:"execution,omitempty"` // Host attribution; not model content.
+}
 
 func Text(text string) Result { return Result{Content: content.Text(text)} }
 

@@ -30,6 +30,10 @@ type ToolBatch struct {
 func (a *Agent) reportTool(activity ToolActivity) error {
 	activity.Call = provider.CopyCalls([]provider.ToolCall{activity.Call})[0]
 	activity.Result.Content = activity.Result.Content.Clone()
+	if activity.Result.Execution != nil {
+		v := *activity.Result.Execution
+		activity.Result.Execution = &v
+	}
 	if activity.Diagnostic != nil {
 		d := activity.Diagnostic.Clone()
 		activity.Diagnostic = &d
