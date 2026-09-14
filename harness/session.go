@@ -41,23 +41,26 @@ type AgentConfig struct {
 	Model  *ModelConfig  `json:"model,omitempty"` // Nil uses the session model configuration.
 }
 
+type WorkProgressReportingConfig = workflow.WorkProgressReportingConfig
+
 type Config struct {
-	Telemetry   TelemetryConfig `json:"telemetry"`
-	Events      EventConfig     `json:"events"`
-	Dir         string          `json:"dir"`
-	Model       ModelConfig     `json:"model"`
-	LocalTools  bool            `json:"local_tools"`
-	Web         *tool.WebConfig `json:"web"` // Nil disables browser/search tools.
-	Root        AgentConfig     `json:"root"`
-	Implementor AgentConfig     `json:"implementor"`
-	Auditor     AgentConfig     `json:"auditor"`
-	Researcher  AgentConfig     `json:"researcher"`
+	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
+	Telemetry             TelemetryConfig             `json:"telemetry"`
+	Events                EventConfig                 `json:"events"`
+	Dir                   string                      `json:"dir"`
+	Model                 ModelConfig                 `json:"model"`
+	LocalTools            bool                        `json:"local_tools"`
+	Web                   *tool.WebConfig             `json:"web"` // Nil disables browser/search tools.
+	Root                  AgentConfig                 `json:"root"`
+	Implementor           AgentConfig                 `json:"implementor"`
+	Auditor               AgentConfig                 `json:"auditor"`
+	Researcher            AgentConfig                 `json:"researcher"`
 }
 
 // DefaultConfig returns independent library defaults without acquiring resources.
 // The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
-	return Config{Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	return Config{WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, Researcher: AgentConfig{Prompt: researcherPrompt.Clone()}}
 }
 
@@ -160,6 +163,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err = cfg.WorkProgressReporting.Validate(); err != nil {
 		return nil, err
 	}
 	var id [16]byte
@@ -306,7 +312,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
 	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {
@@ -325,7 +331,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
+	s.effective = EffectiveConfig{WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err

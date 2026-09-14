@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -28,11 +29,12 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
-	publish       func(conversation.Event) error
-	progressReads []tool.Tool
-	closing       atomic.Bool
-	admission     *admission.Gate
-	stopOwner     func() bool
+	publish        func(conversation.Event) error
+	progressReads  []tool.Tool
+	progressConfig WorkProgressReportingConfig
+	closing        atomic.Bool
+	admission      *admission.Gate
+	stopOwner      func() bool
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
@@ -64,7 +66,7 @@ func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admis
 func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec, options ...Option) *Session {
 	owner := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]roster.Registration{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]roster.Registration{}, progressConfig: DefaultWorkProgressReporting(), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	for _, option := range options {
 		option(s)
 	}
@@ -227,7 +229,36 @@ func (s *Session) run() {
 	attempted := map[work.EventID]bool{}
 	published := map[work.EventID]bool{}
 	revoked := map[work.EventID]bool{}
-	notifications := map[message.MessageID]work.EventID{}
+	notifications := map[message.MessageID][]work.EventID{}
+	queue := newNoticeQueue(s.progressConfig)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+	var timerC <-chan time.Time
+	resetTimer := func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerC = nil
+		if due := queue.next(); !due.IsZero() {
+			timer.Reset(max(time.Until(due), time.Nanosecond))
+			timerC = timer.C
+		}
+	}
+	sendNotice := func(owner identity.ActorID, n message.WorkProgressNotice, ids []work.EventID) bool {
+		receipt, err := s.Controller.Deliver(owner, message.Draft{To: owner, Kind: message.Notification, Progress: &n})
+		if err != nil {
+			s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Progress notice delivery failed: %v", err)}})
+			return false
+		}
+		notifications[receipt.MessageID] = append([]work.EventID(nil), ids...)
+		return true
+	}
 	drain := func() {
 		for _, e := range s.Store.PendingEvents(0) {
 			if !published[e.ID] {
@@ -240,6 +271,22 @@ func (s *Session) run() {
 				continue
 			}
 			w := e.Work
+			if e.Kind == work.WorkProgressReported || e.Kind == work.ResearchDelivered {
+				if attempted[e.ID] {
+					continue
+				}
+				attempted[e.ID] = true
+				if e.Kind == work.ResearchDelivered {
+					sendNotice(w.Owner, message.WorkProgressNotice{Briefs: []message.ResearchBriefRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, BriefID: w.LatestResearchBriefID}}, Attention: true}, []work.EventID{e.ID})
+				} else if e.Actionable {
+					sendNotice(w.Owner, message.WorkProgressNotice{Reports: []message.ProgressReportRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, ReportID: w.LatestProgressReportID}}, Attention: true}, []work.EventID{e.ID})
+				} else if e.Change != nil && len(e.Change.ProgressReports) > 0 && len(e.Change.ProgressReports[0].Findings) > 0 {
+					queue.add(e, time.Now())
+				} else {
+					_ = s.Store.AcknowledgeEvent(e.ID)
+				}
+				continue
+			}
 			if !revoked[e.ID] && (e.Kind == work.WorkCancelled || e.Kind == work.WorkReassigned) {
 				revoked[e.ID] = true
 				recipients := map[identity.ActorID]bool{}
@@ -298,7 +345,7 @@ func (s *Session) run() {
 					s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s for %s remains pending: %v", e.Kind, w.ID, err)}})
 					continue
 				}
-				notifications[receipt.MessageID] = e.ID
+				notifications[receipt.MessageID] = []work.EventID{e.ID}
 				continue // Keep owner events pending until actually consumed.
 			}
 			_ = s.Store.AcknowledgeEvent(e.ID)
@@ -313,6 +360,12 @@ func (s *Session) run() {
 			return
 		case <-s.Store.Ready():
 			drain()
+			resetTimer()
+		case now := <-timerC:
+			if !s.closing.Load() {
+				queue.flush(now, sendNotice)
+				resetTimer()
+			}
 		case e, ok := <-incoming:
 			if !ok {
 				s.closing.Store(true)
@@ -324,16 +377,18 @@ func (s *Session) run() {
 			}
 			switch event := e.(type) {
 			case conversation.AckEvent:
-				if id, ok := notifications[event.Receipt.MessageID]; ok {
-					if event.Receipt.Status == message.Consumed {
-						_ = s.Store.AcknowledgeEvent(id)
-						delete(notifications, event.Receipt.MessageID)
-						delete(attempted, id)
-						delete(published, id)
-						delete(revoked, id)
-					} else if event.Receipt.Status == message.Undelivered {
-						delete(notifications, event.Receipt.MessageID)
-						s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s remains pending: owner did not consume notification %s", id, event.Receipt.MessageID)}})
+				if ids, ok := notifications[event.Receipt.MessageID]; ok {
+					for _, id := range ids {
+						if event.Receipt.Status == message.Consumed {
+							_ = s.Store.AcknowledgeEvent(id)
+							delete(notifications, event.Receipt.MessageID)
+							delete(attempted, id)
+							delete(published, id)
+							delete(revoked, id)
+						} else if event.Receipt.Status == message.Undelivered {
+							delete(notifications, event.Receipt.MessageID)
+							s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s remains pending: owner did not consume notification %s", id, event.Receipt.MessageID)}})
+						}
 					}
 				}
 				if event.Receipt.Status == message.Undelivered {

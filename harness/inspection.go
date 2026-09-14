@@ -17,13 +17,14 @@ type RoleConfiguration struct {
 	Tools            []provider.ToolDefinition `json:"tools"`
 }
 type EffectiveConfig struct {
-	Dir         string            `json:"dir"`
-	Telemetry   TelemetryConfig   `json:"telemetry"`
-	Events      EventConfig       `json:"events"`
-	Root        RoleConfiguration `json:"root"`
-	Implementor RoleConfiguration `json:"implementor"`
-	Auditor     RoleConfiguration `json:"auditor"`
-	Researcher  RoleConfiguration `json:"researcher"`
+	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
+	Dir                   string                      `json:"dir"`
+	Telemetry             TelemetryConfig             `json:"telemetry"`
+	Events                EventConfig                 `json:"events"`
+	Root                  RoleConfiguration           `json:"root"`
+	Implementor           RoleConfiguration           `json:"implementor"`
+	Auditor               RoleConfiguration           `json:"auditor"`
+	Researcher            RoleConfiguration           `json:"researcher"`
 }
 
 func describeRole(cfg Config, role AgentConfig, spec agent.Spec, injected bool) RoleConfiguration {

@@ -11,12 +11,12 @@ is promoted into production instructions.
 | Progress ledger and passive inspection foundation | Complete — 2e4b611 |
 | 1. Researcher registration and role configuration | Complete — d041026 |
 | 2. Research assignment and terminal lifecycle | Complete — 977d471 |
-| 3. Immutable research briefs and delivery | Complete — see preceding commit |
+| 3. Immutable research briefs and delivery | Complete — eb3910d |
 | 4. Session and HTTP progress APIs | Complete — 93bbfd9; collection pagination follows in area 6 |
 | 5. Worker progress API migration | Complete — 80b11b1 |
 | 6. Bounded progress and brief model readers | Complete — c897f2d |
-| 7. Current authorization for live read continuations | Complete in this checkpoint; readers exposed to all roles and HTTP |
-| 8. Selective progress notifications | Pending |
+| 7. Current authorization for live read continuations | Complete — 79185f3; readers exposed to all roles and HTTP |
+| 8. Selective progress notifications | Complete in this checkpoint; bounded references, activity silence, timed findings, immediate attention/delivery |
 | 9. Notification coverage and exchange admission | Pending |
 | 10. Explicit inbox yielding | Pending |
 | 11. Assignment-bound researcher diagnostics | Pending |

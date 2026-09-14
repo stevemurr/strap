@@ -28,15 +28,16 @@ const (
 // Message is an immutable, controller-addressed envelope. A user's message is
 // input to the conversation, not a new execution owner.
 type Message struct {
-	Output  *identity.OutputID `json:"-"`
-	ID      MessageID          `json:"id"`
-	From    ActorID            `json:"from"`
-	To      ActorID            `json:"to"`
-	Kind    MessageKind        `json:"kind"`
-	ReplyTo MessageID          `json:"reply_to,omitempty"`
-	Content string             `json:"content,omitempty"`
-	Work    *work.Work         `json:"work,omitempty"`
-	Event   *work.Event        `json:"event,omitempty"`
+	Progress *WorkProgressNotice `json:"progress,omitempty"`
+	Output   *identity.OutputID  `json:"-"`
+	ID       MessageID           `json:"id"`
+	From     ActorID             `json:"from"`
+	To       ActorID             `json:"to"`
+	Kind     MessageKind         `json:"kind"`
+	ReplyTo  MessageID           `json:"reply_to,omitempty"`
+	Content  string              `json:"content,omitempty"`
+	Work     *work.Work          `json:"work,omitempty"`
+	Event    *work.Event         `json:"event,omitempty"`
 }
 
 type DeliveryStatus string
@@ -58,13 +59,14 @@ type Receipt struct {
 
 // Draft leaves sender identity and message identity to the controller.
 type Draft struct {
-	Output  *identity.OutputID // Host correlation; never encoded in the model envelope.
-	To      ActorID
-	Kind    MessageKind
-	ReplyTo MessageID
-	Content string
-	Work    *work.Work
-	Event   *work.Event
+	Progress *WorkProgressNotice
+	Output   *identity.OutputID // Host correlation; never encoded in the model envelope.
+	To       ActorID
+	Kind     MessageKind
+	ReplyTo  MessageID
+	Content  string
+	Work     *work.Work
+	Event    *work.Event
 }
 
 // Sender is bound to one actor. All agent-to-agent messages use this path.
@@ -74,6 +76,10 @@ type Sender interface {
 
 // Clone gives the recipient its own structured payload.
 func (m Message) Clone() Message {
+	if m.Progress != nil {
+		n := m.Progress.Clone()
+		m.Progress = &n
+	}
 	if m.Output != nil {
 		v := *m.Output
 		m.Output = &v
@@ -91,6 +97,12 @@ func (m Message) Clone() Message {
 
 // Validate checks the payload before it is routed.
 func (d Draft) Validate() error {
+	if d.Progress != nil {
+		if d.Kind != Notification || d.Work != nil || d.Event != nil || d.Content != "" {
+			return errors.New("progress requires an exclusive notification envelope")
+		}
+		return d.Progress.Validate()
+	}
 	if d.Event != nil {
 		if d.Work != nil || d.Content != "" || (d.Kind != Notification && d.Kind != Observation) {
 			return errors.New("event requires a notification or observation envelope")

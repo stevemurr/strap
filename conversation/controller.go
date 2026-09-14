@@ -220,7 +220,7 @@ func (c *Controller) deliverLocked(from message.ActorID, draft message.Draft) (m
 	m := message.Message{
 		ID:   message.MessageID(fmt.Sprintf("message-%d", c.nextMessage)),
 		From: from, To: draft.To, Kind: draft.Kind, ReplyTo: draft.ReplyTo, Content: draft.Content,
-		Work: draft.Work, Event: draft.Event, Output: draft.Output,
+		Work: draft.Work, Event: draft.Event, Output: draft.Output, Progress: draft.Progress,
 	}
 	m = m.Clone()
 	r := message.Receipt{MessageID: m.ID, Recipient: m.To, Status: message.Queued}
@@ -443,6 +443,9 @@ type sender struct {
 }
 
 func (s sender) Send(ctx context.Context, draft message.Draft) (message.Receipt, error) {
+	if draft.Progress != nil {
+		return message.Receipt{}, errors.New("progress notices require host delivery")
+	}
 	c := s.controller
 	c.emission.Lock()
 	defer c.emission.Unlock()
