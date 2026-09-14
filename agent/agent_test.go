@@ -125,7 +125,7 @@ func TestToolBatchSettlesBeforeSteeringAndPreservesReplyTarget(t *testing.T) {
 			c.Inbox.Send(message.Message{ID: "notification", Kind: message.Notification, Content: "notice"})
 			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "one", Name: "read", Arguments: json.RawMessage(`{}`)}, {ID: "two", Name: "broken", Arguments: json.RawMessage(`{}`)}, {ID: "three", Name: "missing", Arguments: json.RawMessage(`{}`)}}}, nil
 		}
-		if len(r.Messages) != 9 || r.Messages[4].Content.Text() != "result" || r.Messages[5].Content.Text() != "Tool error: disk unavailable" || r.Messages[6].Content.Text() != "Tool error: unknown tool: missing" || r.Messages[7].Envelope.ID != "steer" {
+		if len(r.Messages) != 9 || r.Messages[4].Content.Text() != "result" || r.Messages[5].Content.Text() != "result\nTool error: disk unavailable" || r.Messages[6].Content.Text() != "Tool error: unknown tool: missing" || r.Messages[7].Envelope.ID != "steer" {
 			t.Errorf("batch history: %+v", r.Messages)
 		}
 		return provider.Response{Content: "answer"}, nil

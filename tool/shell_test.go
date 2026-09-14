@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -153,5 +154,28 @@ func TestShellStartFailure(t *testing.T) {
 	}
 	if _, err := s.Call(context.Background(), Call{Arguments: json.RawMessage(`{"command":"true"}`)}); err == nil {
 		t.Fatal("start failure was reported as a command result")
+	}
+}
+
+func TestShellCancellationKeepsPartialOutputAndCleanupFailure(t *testing.T) {
+	s := shellTool(t, ShellConfig{Dir: t.TempDir()})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(100*time.Millisecond, cancel)
+	raw, err := s.Call(ctx, Call{Arguments: json.RawMessage(`{"command":"printf partial-evidence; sleep 10"}`)})
+	var result ShellResult
+	if e := json.Unmarshal([]byte(raw.Content.Text()), &result); e != nil {
+		t.Fatal(e)
+	}
+	if !errors.Is(err, context.Canceled) || !result.Cancelled || !result.Started || result.Output != "partial-evidence" || result.ExitCode != nil || result.OutputLimit != 64*1024 {
+		t.Fatal(result, err)
+	}
+	s.stop = func(cmd *exec.Cmd) error { _ = stopProcessGroup(cmd); return errors.New("cleanup rejected") }
+	raw, err = s.Call(context.Background(), Call{Arguments: json.RawMessage(`{"command":"printf retained"}`)})
+	if e := json.Unmarshal([]byte(raw.Content.Text()), &result); e != nil {
+		t.Fatal(e)
+	}
+	if err == nil || result.CleanupError != "cleanup rejected" || result.Output != "retained" || result.ExitCode == nil {
+		t.Fatal(result, err)
 	}
 }

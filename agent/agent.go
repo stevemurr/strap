@@ -246,7 +246,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 					return ctx.Err()
 				}
 				if err != nil && result.Execution == nil {
-					result = tool.Text("Tool error: " + err.Error())
+					result.Content = append(result.Content, tool.Text("Tool error: "+err.Error()).Content...)
 				}
 				toolRevision, err = a.appendHistory(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,

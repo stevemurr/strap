@@ -30,6 +30,7 @@ type ShellConfig struct {
 // Shell is immutable after construction and can be shared by agents. Commands
 // run with host permissions: Dir is a working directory, not a sandbox.
 type Shell struct {
+	stop   func(*exec.Cmd) error
 	config ShellConfig
 	bound  Func[shellArgs]
 }
@@ -42,10 +43,16 @@ type shellArgs struct {
 }
 
 type ShellResult struct {
-	Output    string `json:"output"`
-	ExitCode  *int   `json:"exit_code"` // nil when terminated without a normal exit
-	TimedOut  bool   `json:"timed_out"`
-	Truncated bool   `json:"truncated"`
+	Started      bool   `json:"started"`
+	Cancelled    bool   `json:"cancelled"`
+	OutputLimit  int    `json:"output_limit"`
+	StartError   string `json:"start_error,omitempty"`
+	WaitError    string `json:"wait_error,omitempty"`
+	CleanupError string `json:"cleanup_error,omitempty"`
+	Output       string `json:"output"`
+	ExitCode     *int   `json:"exit_code"` // nil when terminated without a normal exit
+	TimedOut     bool   `json:"timed_out"`
+	Truncated    bool   `json:"truncated"`
 	// A descendant kept an output pipe open beyond the drain deadline.
 	OutputIncomplete bool `json:"output_incomplete,omitempty"`
 }
@@ -89,7 +96,7 @@ func NewShell(config ShellConfig) (*Shell, error) {
 	} else {
 		config.Env = append([]string{}, config.Env...)
 	}
-	s := &Shell{config: config}
+	s := &Shell{config: config, stop: stopProcessGroup}
 	params, err := NewParameters[shellArgs](MinLength("command", 1), Minimum("timeout_ms", 1), Maximum("timeout_ms", config.MaxTimeout.Milliseconds()))
 	if err != nil {
 		return nil, err
@@ -128,29 +135,49 @@ func (s *Shell) handle(ctx context.Context, _ Call, args shellArgs) (Result, err
 	cmd.Stdout, cmd.Stderr = output, output
 	// Bound draining even when a descendant inherits a pipe and the shell exits.
 	cmd.WaitDelay = 250 * time.Millisecond
+
 	configureProcessGroup(cmd)
-	if err := cmd.Start(); err != nil {
-		return Result{}, fmt.Errorf("start shell: %w", err)
+	var cancelCleanup error
+	cmd.Cancel = func() error { cancelCleanup = s.stop(cmd); return cancelCleanup }
+	result := ShellResult{OutputLimit: s.config.OutputLimit}
+	if startErr := cmd.Start(); startErr != nil {
+		result.StartError = startErr.Error()
+		result.Cancelled = ctx.Err() != nil
+		result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+		encoded, encodeErr := JSON(result)
+		return encoded, errors.Join(fmt.Errorf("start shell: %w", startErr), encodeErr)
 	}
-	defer stopProcessGroup(cmd)
-	err := cmd.Wait()
-	if ctx.Err() != nil {
-		return Result{}, ctx.Err()
+	result.Started = true
+	waitErr := cmd.Wait()
+	cleanupErr := s.stop(cmd)
+	if errors.Is(cleanupErr, os.ErrProcessDone) {
+		cleanupErr = nil
 	}
-	result := ShellResult{
-		Output: output.String(), Truncated: output.truncated,
-		TimedOut:         errors.Is(runCtx.Err(), context.DeadlineExceeded),
-		OutputIncomplete: errors.Is(err, exec.ErrWaitDelay),
+	if errors.Is(cancelCleanup, os.ErrProcessDone) {
+		cancelCleanup = nil
 	}
+	cleanupErr = errors.Join(cancelCleanup, cleanupErr)
+	result.Output = output.String()
+	result.Truncated = output.truncated
+	result.Cancelled = ctx.Err() != nil
+	result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+	result.OutputIncomplete = errors.Is(waitErr, exec.ErrWaitDelay)
 	if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
 		code := cmd.ProcessState.ExitCode()
 		result.ExitCode = &code
 	}
-	var exit *exec.ExitError
-	if err != nil && !errors.As(err, &exit) && !result.TimedOut && !result.OutputIncomplete {
-		return Result{}, fmt.Errorf("wait for shell: %w", err)
+	if cleanupErr != nil {
+		result.CleanupError = cleanupErr.Error()
 	}
-	return JSON(result)
+	var exit *exec.ExitError
+	var unexpected error
+	if waitErr != nil && !errors.As(waitErr, &exit) && !result.TimedOut && !result.OutputIncomplete && !result.Cancelled {
+		result.WaitError = waitErr.Error()
+		unexpected = fmt.Errorf("wait for shell: %w", waitErr)
+	}
+	encoded, encodeErr := JSON(result)
+	return encoded, errors.Join(ctx.Err(), unexpected, cleanupErr, encodeErr)
+
 }
 
 // os/exec serializes writes when stdout and stderr share this writer. Always

@@ -20,8 +20,8 @@ is promoted into production instructions.
 | 9. Notification coverage and exchange admission | Complete — 101034f; accepted-prefix admission, secondary-work coverage, preserved tool continuations |
 | 10. Explicit inbox yielding | Complete — 7f63746; sole-call capability, matched errors, correlated passive yield records |
 | 11. Assignment-bound researcher diagnostics | Complete — 407ae05; separate configured shell, atomic binding capture, no inferred assignment |
-| 12. Host-issued execution evidence and validation | Complete in this checkpoint; accepted finish references, bounded captures, same-work validation and archive resolution |
-| 13. Cancellation and error evidence preservation | Pending |
+| 12. Host-issued execution evidence and validation | Complete — fc0f73b; accepted finish references, bounded captures, same-work validation and archive resolution |
+| 13. Cancellation and error evidence preservation | Complete in this checkpoint; retained partial output, explicit cancellation/start/cleanup outcomes, stopped-agent archive test |
 | 14. Role prompts and progress presentation | Pending |
 | 15. End-to-end acceptance and bounded live evaluation | Pending |
 
