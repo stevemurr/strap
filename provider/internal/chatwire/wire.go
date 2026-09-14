@@ -154,7 +154,7 @@ func decode(input completion) (provider.Response, error) {
 		result.Content = *choice.Message.Content
 	}
 	seen := make(map[string]bool)
-	for _, call := range choice.Message.ToolCalls {
+	for i, call := range choice.Message.ToolCalls {
 		if call.Type != "function" || call.ID == "" || call.Function.Name == "" || seen[call.ID] {
 			return provider.Response{Usage: usage}, fmt.Errorf("invalid or duplicate tool call identity")
 		}
@@ -162,6 +162,7 @@ func decode(input completion) (provider.Response, error) {
 		if !strings.HasPrefix(args, "{") || !json.Valid([]byte(args)) {
 			return provider.Response{Usage: usage}, &provider.ToolArgumentsError{
 				CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments,
+				FinishReason: choice.FinishReason, Index: i, Calls: len(choice.Message.ToolCalls),
 			}
 		}
 		seen[call.ID] = true
