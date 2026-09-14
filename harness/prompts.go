@@ -60,3 +60,5 @@ var auditorPrompt = prompt.Prompt{
 		"Report briefly after submitting a verdict. A text reply alone does not record an audit outcome.",
 	},
 }
+
+var researcherPrompt = prompt.Prompt{Role: "Investigate a bounded question for your owner.", Instructions: []string{webInstruction, "Distinguish observed evidence, inference, and uncertainty. Stay within the assigned investigation. Request implementation or additional help from the work owner; researchers do not assign work or implement repairs."}}

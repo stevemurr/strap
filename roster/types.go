@@ -15,9 +15,10 @@ const (
 	Root        Role = "root"
 	Implementor Role = "implementor"
 	Auditor     Role = "auditor"
+	Researcher  Role = "researcher"
 )
 
-func (r Role) Creatable() bool { return r == Implementor || r == Auditor }
+func (r Role) Creatable() bool { return r == Implementor || r == Auditor || r == Researcher }
 func (r Role) WorkKinds() []work.Kind {
 	switch r {
 	case Implementor:

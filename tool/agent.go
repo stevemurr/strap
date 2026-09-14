@@ -48,8 +48,8 @@ func MessageStatus(lookup func(message.MessageID) (message.Receipt, bool)) Tool 
 }
 
 var creationParameters = parameters[roster.CreateRequest](
-	Enum("role", "implementor", "auditor"),
-	Description("role", "implementor executes tasks and repairs; auditor independently reviews submitted work."),
+	Enum("role", "implementor", "auditor", "researcher"),
+	Description("role", "implementor executes tasks and repairs; auditor independently reviews submitted work; researcher investigates a bounded question."),
 )
 
 // DecodeAgentCreation validates the same wire contract advertised by CreateAgent.
@@ -60,7 +60,7 @@ func DecodeAgentCreation(raw json.RawMessage) (roster.CreateRequest, error) {
 // CreateAgent creates an idle registered execution agent; assignment is separate.
 func CreateAgent(handle Handler[roster.CreateRequest]) Tool {
 	return Func[roster.CreateRequest]{Spec: Definition[roster.CreateRequest]{
-		Name: "create_agent", Description: "Create an idle agent. Choose implementor for tasks or repairs, or auditor for independent review. Returns agent_id and role. Then call assign_work with agent_id as assignee. Creation alone does not start a task.", Parameters: creationParameters,
+		Name: "create_agent", Description: "Create an idle agent. Choose implementor for tasks or repairs, auditor for independent review, or researcher for investigation. Returns agent_id and role. Then call assign_work with agent_id as assignee. Creation alone does not start a task.", Parameters: creationParameters,
 	}, Invoke: func(ctx context.Context, c Call, r roster.CreateRequest) (Result, error) { return handle(ctx, c, r) }}
 }
 

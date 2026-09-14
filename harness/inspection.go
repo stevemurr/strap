@@ -23,6 +23,7 @@ type EffectiveConfig struct {
 	Root        RoleConfiguration `json:"root"`
 	Implementor RoleConfiguration `json:"implementor"`
 	Auditor     RoleConfiguration `json:"auditor"`
+	Researcher  RoleConfiguration `json:"researcher"`
 }
 
 func describeRole(cfg Config, role AgentConfig, spec agent.Spec, injected bool) RoleConfiguration {
@@ -54,7 +55,7 @@ func describeRole(cfg Config, role AgentConfig, spec agent.Spec, injected bool) 
 // inferred from the unused model defaults. Dynamic CreateAgent specs are separate.
 func (s *Session) Configuration() EffectiveConfig {
 	c := s.effective
-	for _, r := range []*RoleConfiguration{&c.Root, &c.Implementor, &c.Auditor} {
+	for _, r := range []*RoleConfiguration{&c.Root, &c.Implementor, &c.Auditor, &c.Researcher} {
 		r.Prompt = r.Prompt.Clone()
 		if r.Model != nil {
 			m := cloneModel(*r.Model)

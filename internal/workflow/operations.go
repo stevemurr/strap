@@ -153,11 +153,17 @@ func (s *Session) CreateAgent(ctx context.Context, actor identity.ActorID, r ros
 		return roster.Registration{}, work.ErrForbidden
 	}
 	if !r.Role.Creatable() {
-		return roster.Registration{}, fmt.Errorf("%w: role must be implementor or auditor", work.ErrInvalid)
+		return roster.Registration{}, fmt.Errorf("%w: role must be implementor, auditor, or researcher", work.ErrInvalid)
 	}
 	spec := s.implementor
 	if r.Role == roster.Auditor {
 		spec = s.auditor
+	}
+	if r.Role == roster.Researcher {
+		spec = s.researcher
+	}
+	if spec.Provider == nil {
+		return roster.Registration{}, fmt.Errorf("%w: role is not configured", work.ErrInvalid)
 	}
 	if err = run.Err(); err != nil {
 		return roster.Registration{}, err

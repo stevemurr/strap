@@ -35,6 +35,7 @@ type Session struct {
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
+	researcher           agent.Spec
 	mu                   sync.Mutex
 	roles                map[identity.ActorID]roster.Registration
 	ctx                  context.Context
@@ -44,6 +45,9 @@ type Session struct {
 }
 
 type Option func(*Session)
+
+func WithResearcher(spec agent.Spec) Option   { return func(s *Session) { s.researcher = spec.Clone() } }
+func (s *Session) ResearcherSpec() agent.Spec { return s.researcher.Clone() }
 
 // WithPublisher replaces the legacy host relay. It acknowledges required work records independently of the dispatcher.
 func WithPublisher(p func(conversation.Event) error) Option {
@@ -77,6 +81,9 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 		v, e := s.SubmitAudit(ctx, c.Actor, r)
 		return result(v, e)
 	}))
+	if s.researcher.Provider != nil {
+		s.researcher.Tools = append(s.researcher.Tools, s.commonTools()...)
+	}
 	s.stopOwner = context.AfterFunc(owner, func() { _ = s.Close(context.Background()) })
 	go s.run()
 	return s
