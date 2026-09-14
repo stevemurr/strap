@@ -4,9 +4,9 @@ Status: revised design, 2026-09-13. Incorporates the taxonomy audit and subseque
 plan/todo clarification, the seven contract audit findings, bounded researcher
 execution, and the follow-up audit of wakeups, yielding, and cursor access.
 Implementation checkpoints are recorded in [RESEARCH_IMPLEMENTATION.md](RESEARCH_IMPLEMENTATION.md).
-The runtime areas through cancellation evidence are implemented. Role prompts,
-progress presentation and optional response disclosure are implemented in the next
-checkpoint. End-to-end acceptance and bounded live evaluation remain the final gate.
+Runtime, role prompts, progress presentation and optional response disclosure
+are implemented. Deterministic end-to-end acceptance passes; the bounded live
+comparison is pending a reachable model server. See [validation results](RESEARCH_VALIDATION.md).
 
 ### Implementation status
 

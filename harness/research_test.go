@@ -76,3 +76,22 @@ func TestResearchAssignmentAndListing(t *testing.T) {
 		t.Fatal("researcher received implementation")
 	}
 }
+
+func TestResearchExecutionConfigurationIsDetached(t *testing.T) {
+	cfg := harness.DefaultConfig()
+	cfg.Dir = t.TempDir()
+	cfg.Web = nil
+	cfg.LocalTools = false
+	cfg.ResearchExecution.Env = []string{"RESEARCH_VALUE=original"}
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Dispose(context.Background())
+	cfg.ResearchExecution.Env[0] = "RESEARCH_VALUE=caller"
+	snapshot := s.Configuration()
+	snapshot.ResearchExecution.Env[0] = "RESEARCH_VALUE=reader"
+	if got := s.Configuration().ResearchExecution.Env[0]; got != "RESEARCH_VALUE=original" {
+		t.Fatal(got)
+	}
+}

@@ -22,10 +22,16 @@ is promoted into production instructions.
 | 11. Assignment-bound researcher diagnostics | Complete — 407ae05; separate configured shell, atomic binding capture, no inferred assignment |
 | 12. Host-issued execution evidence and validation | Complete — fc0f73b; accepted finish references, bounded captures, same-work validation and archive resolution |
 | 13. Cancellation and error evidence preservation | Complete — 78e4a5b; retained partial output, explicit cancellation/start/cleanup outcomes, stopped-agent archive test |
-| 14. Role prompts and progress presentation | Complete in this checkpoint; unified role instructions, attributed progress, distinct delivery, passive response disclosure |
-| 15. End-to-end acceptance and bounded live evaluation | Pending |
+| 14. Role prompts and progress presentation | Complete — 8dfa53c; unified role instructions, attributed progress, distinct delivery, passive response disclosure |
+| 15. End-to-end acceptance and bounded live evaluation | Deterministic acceptance complete; live comparison pending a reachable model server. See RESEARCH_VALIDATION.md |
 
-The initial researcher has file/PDF/web reads and messaging. Diagnostics are
-added only with their explicit execution contract. Creation alone starts no work.
+The researcher has configured file/PDF/web reads, messaging and a separate
+assignment-bound diagnostic shell. Creation alone starts no work.
 The existing `submit_work` name is retained for implementation/repair delivery;
 research uses its own submission. `wait_for_input` is the selected wait spelling.
+
+
+[Validation results and live-evaluation command](RESEARCH_VALIDATION.md).
+The original rejected-argument trace remains untracked and unchanged. Each row's
+commit can be checked out to inspect that stage; later stages build on earlier ones.
+The small CLI expectation repair is isolated in `0087d84`.

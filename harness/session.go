@@ -145,6 +145,7 @@ func (e *StartupError) Unwrap() error                   { return e.cause }
 func (e *StartupError) Close(ctx context.Context) error { return e.cleanup.Close(ctx) }
 
 func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err error) {
+	cfg = cloneConfig(cfg)
 	execution, cancelExecution := context.WithCancel(context.WithoutCancel(ctx))
 	s := &Session{projectionGate: make(chan struct{}, 1), config: cloneConfig(cfg), resources: resource.New(), state: Open, cancelExecution: cancelExecution, admission: admission.New(execution)}
 	defer func() {
