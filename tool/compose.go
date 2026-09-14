@@ -100,7 +100,7 @@ func (t *composedTool) prepare(ctx context.Context, c Call) (func() (Result, err
 	for i, branch := range t.branches {
 		invoke, err := branch.prepare(ctx, c)
 		if err != nil {
-			failures = append(failures, fmt.Sprintf("arguments variant %d: %v", i+1, err))
+			failures = append(failures, fmt.Sprintf("%s: %v", formLabel(i, branch.Definition().Description), err))
 			continue
 		}
 		if selected != nil {
@@ -120,6 +120,16 @@ func (t *composedTool) Call(ctx context.Context, c Call) (Result, error) {
 	}
 	return invoke()
 }
+
+// formLabel names an alternative by its description so a rejection says which
+// operation the arguments were closest to. Branch names stay internal.
+func formLabel(i int, description string) string {
+	if first, _, ok := strings.Cut(description, "."); ok && strings.TrimSpace(first) != "" {
+		return fmt.Sprintf("form %d, %s", i+1, strings.TrimSpace(first))
+	}
+	return fmt.Sprintf("form %d", i+1)
+}
+
 func compose(def provider.ToolDefinition, branches ...Tool) Tool {
 	result, err := Compose(def, branches...)
 	if err != nil {

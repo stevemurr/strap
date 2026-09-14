@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stevemurr/strap/work"
@@ -338,6 +339,24 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 		}
 		if verdict == "fail" && (!required || findings.MinItems == nil || *findings.MinItems != 1) {
 			t.Fatal("fail must require nonempty findings")
+		}
+	}
+}
+
+func TestPlanRejectionNamesTheClosestForm(t *testing.T) {
+	op := UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }, nil)
+	_, err := op.Call(context.Background(), Call{Arguments: []byte(`{"title":"p","steps":[{"title":"s","step_id":"step-1","status":"completed"}]}`)})
+	if err == nil {
+		t.Fatal("accepted step IDs on creation")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"update_plan arguments match no operation: ",
+		"form 1, Create a plan with a title and new steps: arguments.steps[0].status is not an allowed field (also not allowed: step_id)",
+		"form 2, Edit owned structure using plan_id and expected_revision: arguments.expected_revision is required (also required: plan_id)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rejection %q lacks %q", got, want)
 		}
 	}
 }
