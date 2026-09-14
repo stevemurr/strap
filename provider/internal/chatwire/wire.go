@@ -160,7 +160,9 @@ func decode(input completion) (provider.Response, error) {
 		}
 		args := strings.TrimSpace(call.Function.Arguments)
 		if !strings.HasPrefix(args, "{") || !json.Valid([]byte(args)) {
-			return provider.Response{Usage: usage}, fmt.Errorf("tool %s arguments must be a JSON object", call.Function.Name)
+			return provider.Response{Usage: usage}, &provider.ToolArgumentsError{
+				CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments,
+			}
 		}
 		seen[call.ID] = true
 		result.ToolCalls = append(result.ToolCalls, provider.ToolCall{

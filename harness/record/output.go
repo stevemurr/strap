@@ -5,15 +5,17 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/provider"
 	"time"
 )
 
 type OutputFinished struct {
-	ReasoningBytes  uint64             `json:"reasoning_bytes"`
-	Output          identity.OutputID  `json:"output"`
-	Status          agent.OutputStatus `json:"status"`
-	Bytes           uint64             `json:"bytes"`
-	HistoryPosition *uint64            `json:"history_position,omitempty"`
-	Error           *eventlog.Problem  `json:"error,omitempty"`
-	FinishedAt      time.Time          `json:"finished_at"`
+	ReasoningBytes   uint64                       `json:"reasoning_bytes"`
+	Output           identity.OutputID            `json:"output"`
+	Status           agent.OutputStatus           `json:"status"`
+	Bytes            uint64                       `json:"bytes"`
+	HistoryPosition  *uint64                      `json:"history_position,omitempty"`
+	Error            *eventlog.Problem            `json:"error,omitempty"`
+	RejectedToolCall *provider.ToolArgumentsError `json:"rejected_tool_call,omitempty"`
+	FinishedAt       time.Time                    `json:"finished_at"`
 }

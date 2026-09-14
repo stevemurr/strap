@@ -44,6 +44,11 @@ func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
 				code = "canceled"
 			}
 			p.Error = &eventlog.Problem{Code: code, Message: e.Err.Error()}
+			var rejected *provider.ToolArgumentsError
+			if errors.As(e.Err, &rejected) {
+				copy := *rejected
+				p.RejectedToolCall = &copy
+			}
 		}
 		payload = p
 	default:
@@ -90,11 +95,23 @@ func decodeAgent(e eventlog.Event) (conversation.Event, error) {
 		f := agent.OutputFinished{Output: v.Output, Status: v.Status, Bytes: v.Bytes, ReasoningBytes: v.ReasoningBytes, HistoryPosition: v.HistoryPosition, FinishedAt: v.FinishedAt}
 		if v.Error != nil {
 			f.Err = errors.New(v.Error.Message)
+			if v.RejectedToolCall != nil {
+				f.Err = recordedOutputError{error: f.Err, rejected: v.RejectedToolCall}
+			}
 		}
 		fact = f
 	}
 	return conversation.AgentEvent{Agent: identity.ActorID(e.Agent), Event: fact}, nil
 }
+
+// Preserve the recorded provider/error-join message while restoring structured
+// rejection evidence for errors.As and subsequent re-encoding.
+type recordedOutputError struct {
+	error
+	rejected *provider.ToolArgumentsError
+}
+
+func (e recordedOutputError) Unwrap() error { return e.rejected }
 
 // OutputChannel interprets legacy content records without modifying stored bytes.
 func OutputChannel(schema int, c provider.OutputChannel) (provider.OutputChannel, error) {
