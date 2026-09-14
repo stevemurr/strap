@@ -52,6 +52,13 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 		m.activeTools[key] = activity
 		m.streamUI.nextEntry++
 		m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: []message.ActorID{event.Agent}, label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key})
+		for i := len(m.entries) - 2; i >= 0; i-- {
+			if m.entries[i].output != nil && m.entries[i].output.Agent == event.Agent {
+				id := *m.entries[i].output
+				m.entries[len(m.entries)-1].activityOutput = &id
+				break
+			}
+		}
 		m.noteStreamEntry(&m.entries[len(m.entries)-1])
 		if !m.selecting {
 			m.renderTranscript(false)

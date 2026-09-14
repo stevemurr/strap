@@ -3,31 +3,21 @@
 Status: revised design, 2026-09-13. Incorporates the taxonomy audit and subsequent
 plan/todo clarification, the seven contract audit findings, bounded researcher
 execution, and the follow-up audit of wakeups, yielding, and cursor access.
-Implementation has started with the ledger foundation described below; the complete
-feature is not yet available to agents. The core boundaries reflect the agreed direction. Section 12
-separates remaining naming and execution choices from those boundaries.
+Implementation checkpoints are recorded in [RESEARCH_IMPLEMENTATION.md](RESEARCH_IMPLEMENTATION.md).
+The runtime areas through cancellation evidence are implemented. Role prompts,
+progress presentation and optional response disclosure are implemented in the next
+checkpoint. End-to-end acceptance and bounded live evaluation remain the final gate.
 
 ### Implementation status
 
-- Implemented in the work domain: immutable progress reports/findings, correction
-  and retraction, assignment/revision checks, replacement positions, atomic scoped
-  step changes, current-versus-historical inspection, and detached snapshots.
-- Implemented in recording/inspection: complete report changes, report control
-  headers, passive reconstruction, and typed exact report/finding reads at a
-  captured log prefix. Reassignment clears current report pointers and cancellation
-  clears active blockers while recorded evidence remains intact.
-- Tests cover concurrent reports, scope/role authority, invalid and oversized
-  reports, publication failure, reassignment back to the same actor, and JSONL
-  archive parity. These tests establish the foundation, not end-to-end behavior.
-- Next: bounded model readers and the deliberate progress API migration, including
-  replacement of legacy model-facing names. The legacy paths remain during this
-  intermediate implementation stage; no compatibility adapter is being added.
-- Still pending: researcher role/delivery, notice batching/coverage, progress-notice
-  admission policy, diagnostic assignment/evidence validation, complete role prompts,
-  view grouping, and live evaluation of the new research/progress feature. New
-  domain reports are not registered as model tools.
-  Progress evidence references currently receive shape validation only; execution
-  lookup and host validation must be in place before exposing the complete contract.
+The implementation includes the researcher role and Delivered lifecycle, immutable
+briefs and progress, explicit worker API migration, bounded authorized readers,
+selective notices, coverage and new-exchange admission, inbox yielding,
+assignment-bound diagnostics, host-issued evidence, and partial cancellation capture.
+The selected names are `submit_work` and `wait_for_input`. The proposed generic
+execution-work kind and automatic dependency scheduler remain outside v1.
+Detailed tests and commit boundaries are in the checkpoint tracker; static
+validation alone does not establish live-model behavior.
 
 The researcher/planner investigates a bounded question and reports evidence,
 uncertainty, and next steps. All worker roles use the same work-progress vocabulary.
@@ -69,10 +59,10 @@ A plan step has one authoritative current status. A report can record the change
 and its explanation, but the progress read view obtains current step status from
 the plan. It does not maintain a second independently editable step table.
 
-Today an implementor calls `update_plan` with a work ID and revision. The operation
+Before this revision an implementor called `update_plan` with a work ID and revision. The operation
 already writes statuses/notes directly to its scoped plan steps through
 [Store.UpdateProgress](../../work/store.go). The root does not copy that report
-into the plan. Auditors report notes/blockers through `update_work`, reaching the
+into the plan. Auditors previously reported notes/blockers through `update_work`, reaching the
 same domain operation with narrower capabilities. A passing
 [audit](../../work/review.go) marks implementation accepted and scoped steps completed.
 
@@ -84,7 +74,7 @@ the root decides whether to change structure or assign further work.
 
 Current foundations:
 
-- [Role registration](../../roster/types.go) supports implementor and auditor.
+- [Role registration](../../roster/types.go) supports implementor, auditor and researcher.
 - [Work commands](../../work/commands.go) separate creation, assignment, inspection,
   and revision-checked mutations.
 - [Work reporting](../../work/reporting.go) publishes complete accepted changes
@@ -958,8 +948,8 @@ gains evidence-bearing reports, including research without any plan scope.
 | Root `update_plan(plan_id, ...)` | Retain `update_plan` | Root owns plan structure and must respect reserved steps |
 | Proposed `report_status` | Replace with `report_work_progress` | Structured work reports; no agent lifecycle authority |
 | Proposed `get_research` / status umbrella | Replace with `get_work_progress` and explicit outcome reads | Passive progress inspection with bounded detail |
-| Existing `submit_work` | Recommend `submit_implementation`; final naming open | Implementation/repair delivery still requests audit |
-| Earlier `yield_control` | Working name `wait_for_input`; final naming open | Return to inbox, no final reply or work completion |
+| Existing `submit_work` | Retain `submit_work` | Implementation/repair delivery still requests audit |
+| Earlier `yield_control` | Selected `wait_for_input` | Return to inbox, no final reply or work completion |
 
 ### Explicit progress API break (audit concern 6)
 

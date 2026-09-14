@@ -22,7 +22,7 @@ func TestSlashCompletionFiltersAndAcceptsWithoutSubmitting(t *testing.T) {
 	if got := m.completionMatches(); len(got) != len(slashCommands) {
 		t.Fatal(got)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "› /agents") {
+	if !strings.Contains(ansi.Strip(m.View()), "› /activity") {
 		t.Fatal(m.View())
 	}
 	typeText(m, "tr")
@@ -57,7 +57,7 @@ func TestSlashSelectionWrapsAndScrollsToSelectedCommand(t *testing.T) {
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.input.Value() != "/clear " {
+	if m.input.Value() != "/agents " {
 		t.Fatal(m.input.Value())
 	}
 }

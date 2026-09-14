@@ -23,6 +23,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/work"
 )
 
 // Session is the host control surface. The UI requests lifecycle changes; the
@@ -63,6 +64,7 @@ type received struct {
 }
 
 type entry struct {
+	activityOutput    *identity.OutputID
 	serial            uint64
 	actors            []message.ActorID // Empty for local UI notices visible in every stream.
 	reasoning         string
@@ -82,6 +84,7 @@ type entry struct {
 }
 
 type model struct {
+	activityCollapsed map[identity.OutputID]bool
 	reasoningExpanded bool // Thinking is hidden until explicitly shown.
 	transcript        *transcriptView
 	ctx               context.Context
@@ -354,7 +357,13 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nProgress updates, replies, and individual tool calls stay in the transcript without folding. Each tool row shows its completed batch context count, including tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nProgress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s thinking and tool detail; chronological segments stay in place. Each tool row shows its completed batch context count, including tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+		case "/activity":
+			if len(fields) != 2 {
+				m.add("Help", "Use /activity agent-id/response-number", true)
+			} else if err := m.toggleActivity(fields[1]); err != nil {
+				m.add("Error", err.Error(), true)
+			}
 		case "/clear":
 			m.entries = nil
 			m.clearStreams()
@@ -457,6 +466,14 @@ func (m *model) observe(event conversation.Event) {
 		}
 		m.addAttributed(label, string(e.Agent)+" · progress", e.Content, false, e.Agent)
 	case conversation.WorkEvent:
+		if e.Event.Kind == work.WorkProgressReported {
+			m.addAttributed("Progress", string(e.Event.Work.Assignee), progressBody(e.Event), false, e.Event.Work.Assignee)
+			return
+		}
+		if e.Event.Kind == work.ResearchDelivered {
+			m.addAttributed("Research", string(e.Event.Work.ID), progressBody(e.Event), false, e.Event.Work.Owner, e.Event.Work.Assignee)
+			return
+		}
 		change := e.Event
 		title := toolName(string(change.Kind))
 		meta := string(change.Work.ID)
@@ -557,7 +574,10 @@ func (m *model) observe(event conversation.Event) {
 			return
 		} // Already rendered from the workflow event.
 		label, body := "Message", msg.Content
-		if msg.Work != nil {
+		if msg.Progress != nil {
+			label = "Progress notice"
+			body = noticeBody(msg.Progress)
+		} else if msg.Work != nil {
 			label = "Work"
 			body = "Task: " + msg.Work.Task
 			if msg.Work.Context != "" {
@@ -660,6 +680,20 @@ func (m *model) renderTranscript(follow bool) {
 	for i := 0; i < len(entries); i++ {
 		e := entries[i]
 		if e.label == "Tool" {
+			if e.activityOutput != nil {
+				id := *e.activityOutput
+				first := i == 0 || entries[i-1].label != "Tool" || entries[i-1].activityOutput == nil || *entries[i-1].activityOutput != id
+				if first {
+					state := "expanded"
+					if m.activityCollapsed[id] {
+						state = "collapsed"
+					}
+					block(e, dimStyle.Render("Activity "+activitySelector(id)+" · "+state+" · /activity "+activitySelector(id)))
+				}
+				if m.activityCollapsed[id] {
+					continue
+				}
+			}
 			block(e, toolStyle.Render(toolRow(e, max(1, m.viewport.Width-1))))
 			continue
 		}
@@ -679,7 +713,21 @@ func (m *model) renderTranscript(follow bool) {
 		case "State", "Agent", "Agents":
 			style = stateStyle
 		}
-		body := m.renderBody(e)
+		display := e
+		if e.output != nil && m.activityCollapsed[*e.output] {
+			copy := *e
+			copy.reasoningExpanded = false
+			copy.renderWidth = 0
+			display = &copy
+		}
+		body := m.renderBody(display)
+		if e.output != nil {
+			state := "expanded"
+			if m.activityCollapsed[*e.output] {
+				state = "collapsed"
+			}
+			body = "Activity " + activitySelector(*e.output) + " · " + state + " · /activity " + activitySelector(*e.output) + "\n" + body
+		}
 		heading := style.Render(e.label) + "  " + dimStyle.Render(e.at.Format("15:04"))
 		if e.meta != "" {
 			heading += "  " + dimStyle.Render(e.meta)

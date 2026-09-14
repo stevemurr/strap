@@ -341,6 +341,9 @@ func workStatus(w work.Work) string {
 		}
 		return "repair in progress"
 	}
+	if w.Kind == work.Research {
+		return "researching"
+	}
 	if w.Kind == work.AuditWork {
 		return "auditing"
 	}

@@ -13,6 +13,7 @@ type slashCommand struct {
 }
 
 var slashCommands = []slashCommand{
+	{"/activity", "Toggle response detail · agent-id/response-number"},
 	{"/agents", "List agents"},
 	{"/clear", "Clear the display"},
 	{"/exit", "Exit Strap"},

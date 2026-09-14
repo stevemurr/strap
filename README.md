@@ -91,7 +91,7 @@ Shell and file tools run in the current directory, or the directory selected wit
 prompt and omit the write/edit-file tools; shell access still has host permissions.
 The CLI also provides `read_pdf`; see the PDF example below for its image-model
 and Poppler requirements.
-`web_search` and `open_url` are enabled for all three agent roles; see
+`web_search` and `open_url` are enabled for all four agent roles; see
 [Web research](#web-research) for their browser dependencies. Use `-web=false`
 to omit them. Missing backends produce a tool error when called; startup does not
 launch a browser.
@@ -128,7 +128,9 @@ tools stay in that child's stream and All activity. `/transcript [id]` remains
 the separate model-history inspector.
 
 The colorized transcript keeps every progress update, message, and tool call in
-order without folding or automatic summaries. Each tool call has its own row,
+order. Response activity starts expanded; `/activity agent-id/response-number`
+toggles that response’s thinking and tool detail. Commentary, replies and errors
+remain visible, and interleaved chronological segments stay in place. Each tool call has its own row,
 including repeated calls, labeled with the calling agent. Long tool rows wrap
 to fit the terminal width. Scroll back to read earlier activity.
 Raw tool arguments, call IDs, and result payloads stay out of the display.
@@ -816,3 +818,61 @@ Worker progress uses `report_work_progress` with explicit `assigned_at_revision`
 Legacy worker `update_plan`, `update_work`, and Go/HTTP `UpdateProgress` mutations
 are rejected without changing work. A supplied position replaces all its fields;
 omit it for finding-only or step-only reports. HTTP uses `POST /sessions/{id}/work/report-progress`.
+
+
+## Research and recorded progress
+
+`create_agent` supports `researcher`, `implementor`, and `auditor`. Creation is
+idle; `assign_work` starts an assignment. Research takes a bounded question,
+context and expected output without plan scope. `submit_research` stores an
+immutable brief and moves research to `delivered`. Implementation and repair
+still use `submit_work` and require independent audit for acceptance.
+
+| Surface | Root | Researcher | Implementor | Auditor |
+| --- | --- | --- | --- | --- |
+| `get_work`, `get_plan`, `get_audit`, `get_work_progress`, `get_research_brief` | Yes | Yes | Yes | Yes |
+| `report_work_progress` | — | Yes | Yes | Yes |
+| `update_plan`, create/assign/reassign/cancel work | Yes | — | — | — |
+| `submit_research` / `submit_work` / `submit_audit` | — | Research | Work | Audit |
+| `wait_for_input` | Yes | Yes | — | — |
+| Local shell | Standard | Assignment-bound diagnostic | Standard | Standard |
+| File editing | Yes | — | Yes | — |
+| Messaging and configured file/PDF/web reads | Yes | Yes | Yes | Yes |
+
+Worker progress requires `work_id`, current `expected_revision`, and the exact
+`assigned_at_revision`. A supplied `position` replaces the entire prior position;
+omitting it preserves that position. Findings are immutable, with observed or
+inferred basis, evidence, limitations and explicit supersession. Step progress
+updates the authoritative scoped plan immediately. Legacy worker `update_plan`
+and `update_work` mutations reject requests without changing state.
+
+The dispatcher records every report. Activity-only reports stay in inspection;
+finding notices batch for two seconds and normally occur at most once per owner
+per fifteen seconds. Changed blockers/decisions and delivery are immediate.
+Notices carry bounded references, not report bodies. Submission, cancellation and
+reassignment retire obsolete report wakeups. Queued messages remain in history;
+recorded admission decisions suppress stale-only new exchanges while preserving
+ordinary tool continuations. Runtime waiting and reported blockers remain distinct.
+
+Research diagnostics use a separate shell configured by `ResearchExecution`
+(default 30 seconds, maximum 60 seconds, 16 KiB retained output). Every command
+requires an explicit work/assignment binding; a later reassignment cannot relabel
+its evidence. These are execution bounds, not a read-only sandbox. Host-issued
+`evidence_ref` receipts follow accepted finish records, including failed/cancelled
+outcomes and partial captures. Findings may cite prior-assignment evidence from
+the same work, preserving attribution; unknown and cross-work execution references
+are rejected. Large model receipts direct the reader to the complete retained
+capture; bytes discarded by the shell are not recoverable.
+
+`get_work_progress` reads current progress, reports, findings or execution evidence.
+`get_research_brief` reads brief records. Both use bounded fixed-prefix pages and
+signed cursors, with current live authorization checked on every continuation.
+The live HTTP equivalents are `/sessions/{id}/progress-view` and `brief-view`.
+Passive archive readers reconstruct the same records without starting agents.
+
+`wait_for_input` must be the sole call in a batch. It settles the tool history
+and waits without a final reply or extra generation. A root answer to a waiting
+researcher must be sent explicitly to that researcher through `send_message`.
+
+Implementation checkpoints and validation are tracked in
+[RESEARCH_IMPLEMENTATION.md](docs/architecture/RESEARCH_IMPLEMENTATION.md).

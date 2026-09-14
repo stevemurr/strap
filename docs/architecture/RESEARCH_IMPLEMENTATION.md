@@ -21,8 +21,8 @@ is promoted into production instructions.
 | 10. Explicit inbox yielding | Complete — 7f63746; sole-call capability, matched errors, correlated passive yield records |
 | 11. Assignment-bound researcher diagnostics | Complete — 407ae05; separate configured shell, atomic binding capture, no inferred assignment |
 | 12. Host-issued execution evidence and validation | Complete — fc0f73b; accepted finish references, bounded captures, same-work validation and archive resolution |
-| 13. Cancellation and error evidence preservation | Complete in this checkpoint; retained partial output, explicit cancellation/start/cleanup outcomes, stopped-agent archive test |
-| 14. Role prompts and progress presentation | Pending |
+| 13. Cancellation and error evidence preservation | Complete — 78e4a5b; retained partial output, explicit cancellation/start/cleanup outcomes, stopped-agent archive test |
+| 14. Role prompts and progress presentation | Complete in this checkpoint; unified role instructions, attributed progress, distinct delivery, passive response disclosure |
 | 15. End-to-end acceptance and bounded live evaluation | Pending |
 
 The initial researcher has file/PDF/web reads and messaging. Diagnostics are
