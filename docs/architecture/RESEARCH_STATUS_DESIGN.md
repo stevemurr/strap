@@ -106,6 +106,22 @@ any code fix. Preserve these input/output expectations when adding research:
 | Researcher / research | Bounded question or planning assignment | Evidence-backed brief, uncertainty, and proposed next steps; delivery grants no implementation acceptance |
 | Root / coordination | User request and the above reports/outcomes | Explicit assignments, plan decisions, and user-facing synthesis |
 
+The default root prompt requires a shared plan for requests beyond a direct
+conversational answer, and delegated execution of that plan. Root owns user
+communication, assignment decisions and acceptance tracking; researchers investigate,
+implementors change code, and independent auditors verify submitted implementation.
+Brief root inspection can support coordination and evidence verification. Planning
+and delegation are behavioral instructions; the underlying APIs still permit
+unscoped implementation and expose local tools to root.
+
+Mandatory planning also applies to research-only requests. The current lifecycle
+cannot mark research plan steps completed: research assignments are unscoped,
+root edits only plan structure, and implementation audit acceptance alone completes
+steps. Delivered research plus root synthesis can fulfill a research request,
+while those plan steps remain pending. The prompt must describe that result
+accurately rather than invent an implementation audit or a status mutation.
+Supporting completed research steps requires a separate lifecycle design change.
+
 The implementation cycle is:
 
 ```text
