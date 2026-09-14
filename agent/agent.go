@@ -117,6 +117,12 @@ func New(config Config) (*Agent, error) {
 	return a, nil
 }
 
+// maxMalformedCalls bounds regeneration after the provider rejects a tool call
+// whose arguments never became complete JSON. The call was not dispatched and
+// nothing entered history, so asking again is safe; a persistent failure still
+// ends the agent.
+const maxMalformedCalls = 2
+
 // Run starts exactly one loop. A text response ends an exchange, not the agent.
 // Each tool batch settles before inbox input is consumed and another model call
 // begins. There is deliberately no revision validation or proposal loop here.
@@ -165,6 +171,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		}
 		inputs := []message.Message{incoming}
 		admitted := false
+		malformed := 0
 		for {
 			if err := a.checkpoint(ctx); err != nil {
 				return err
@@ -195,9 +202,19 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 			}
 			request, revision := a.request()
 			response, output, err := a.generate(ctx, request, revision)
+			var rejected *provider.ToolArgumentsError
+			if errors.As(err, &rejected) && ctx.Err() == nil && malformed < maxMalformedCalls {
+				malformed++
+				notice := fmt.Sprintf("Your previous %s call was discarded and nothing ran: %v. Emit the call again with every parameter closed, one tool call per block.", rejected.Name, err)
+				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, &output); err != nil {
+					return err
+				}
+				continue
+			}
 			if err != nil {
 				return err
 			}
+			malformed = 0
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
