@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/stevemurr/strap/identity"
@@ -209,6 +210,18 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 			return result, invalid("at most 8 evidence references per finding")
 		}
 		for _, e := range f.Evidence {
+			if strings.HasPrefix(e.URI, "execution:") {
+				if s.evidenceLookup == nil {
+					return result, ErrNotFound
+				}
+				evidence, err := s.evidenceLookup(e.URI)
+				if err != nil {
+					return result, err
+				}
+				if evidence.WorkID != w.ID || evidence.AssignedAtRevision == 0 || evidence.AssignedAtRevision > w.AssignedAtRevision || evidence.AssignedAtRevision == w.AssignedAtRevision && evidence.Actor != actor {
+					return result, ErrForbidden
+				}
+			}
 			if blank(e.URI) {
 				return result, invalid("evidence URI required")
 			}

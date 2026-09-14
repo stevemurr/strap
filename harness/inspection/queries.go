@@ -3,6 +3,7 @@ package inspection
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/stevemurr/strap/conversation"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/tool"
 )
 
 type SessionView struct {
@@ -24,6 +26,7 @@ type SessionView struct {
 }
 
 type ToolView struct {
+	Execution      *tool.ExecutionBinding    `json:"execution,omitempty"`
 	InvocationID   identity.ToolInvocationID `json:"invocation_id"`
 	Agent          identity.ActorID          `json:"agent"`
 	Output         *identity.OutputID        `json:"output,omitempty"`
@@ -69,6 +72,7 @@ type OutputPage = Page[OutputView]
 type AgentPage = Page[projection.AgentInspection]
 
 type viewIndex struct {
+	evidence    map[string]identity.ToolInvocationID
 	tools       map[identity.ToolInvocationID]ToolView
 	outputs     map[identity.OutputID]OutputView
 	toolOrder   []identity.ToolInvocationID
@@ -81,7 +85,7 @@ type viewIndex struct {
 }
 
 func newIndex() viewIndex {
-	return viewIndex{tools: map[identity.ToolInvocationID]ToolView{}, outputs: map[identity.OutputID]OutputView{}, agentStarts: map[identity.ActorID]uint64{}, callOutputs: map[string]identity.OutputID{}}
+	return viewIndex{evidence: map[string]identity.ToolInvocationID{}, tools: map[identity.ToolInvocationID]ToolView{}, outputs: map[identity.OutputID]OutputView{}, agentStarts: map[identity.ActorID]uint64{}, callOutputs: map[string]identity.OutputID{}}
 }
 
 // index records compact query metadata; full bodies stay in the source. Legacy
@@ -147,15 +151,17 @@ func (v *View) index(e eventlog.Record) error {
 		var t ToolView
 		if framed {
 			var c struct {
-				Invocation string    `json:"invocation_id"`
-				Name       string    `json:"name"`
-				FinishedAt time.Time `json:"finished_at"`
+				Execution  *tool.ExecutionBinding `json:"execution,omitempty"`
+				Invocation string                 `json:"invocation_id"`
+				Name       string                 `json:"name"`
+				FinishedAt time.Time              `json:"finished_at"`
 			}
 			if err := json.Unmarshal(raw, &c); err != nil {
 				return err
 			}
 			t.InvocationID = identity.ToolInvocationID(c.Invocation)
 			t.Name = c.Name
+			t.Execution = c.Execution
 			if !c.FinishedAt.IsZero() {
 				t.FinishedAt = &c.FinishedAt
 			}
@@ -167,6 +173,7 @@ func (v *View) index(e eventlog.Record) error {
 			a := decoded.(conversation.ToolEvent).Activity
 			t.InvocationID = identity.ToolInvocationID(a.InvocationID)
 			t.Name = a.Call.Name
+			t.Execution = a.Result.Execution
 			t.ProviderCallID = a.Call.ID
 			if !a.StartedAt.IsZero() {
 				s := a.StartedAt
@@ -201,6 +208,12 @@ func (v *View) index(e eventlog.Record) error {
 			}
 			c := e.Cursor()
 			t.FinishRecord = &c
+		}
+		if t.Execution != nil && t.FinishRecord != nil {
+			if _, exists := v.indexes.evidence[t.Execution.EvidenceRef]; exists {
+				return errors.New("duplicate execution evidence")
+			}
+			v.indexes.evidence[t.Execution.EvidenceRef] = t.InvocationID
 		}
 		v.indexes.tools[t.InvocationID] = t
 	}
@@ -251,6 +264,10 @@ func (v *View) InspectTool(ctx context.Context, id identity.ToolInvocationID) (T
 	return cloneTool(t), nil
 }
 func cloneTool(t ToolView) ToolView {
+	if t.Execution != nil {
+		b := *t.Execution
+		t.Execution = &b
+	}
 	if t.Output != nil {
 		x := *t.Output
 		t.Output = &x

@@ -79,7 +79,7 @@ func NewProgressReader(r *Reader) (*ProgressReader, error) {
 	if r == nil {
 		return nil, fmt.Errorf("reader required")
 	}
-	p := &ProgressReader{Reader: r}
+	p := &ProgressReader{Reader: r, Evidence: ReadExecutionEvidence}
 	if _, err := rand.Read(p.key[:]); err != nil {
 		return nil, err
 	}

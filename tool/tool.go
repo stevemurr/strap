@@ -107,11 +107,13 @@ func (f Func[A]) Call(ctx context.Context, call Call) (Result, error) {
 
 // Result carries ordered text and images into the calling agent's model history.
 type ExecutionBinding struct {
+	EvidenceRef        string           `json:"evidence_ref"`
 	WorkID             string           `json:"work_id"`
 	AssignedAtRevision uint64           `json:"assigned_at_revision"`
 	Actor              identity.ActorID `json:"actor"`
 }
 type Result struct {
+	Captured  content.Content `json:"captured,omitempty"` // Complete retained host capture, not model history.
 	Content   content.Content
 	Execution *ExecutionBinding `json:"execution,omitempty"` // Host attribution; not model content.
 }

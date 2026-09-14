@@ -12,6 +12,7 @@ import (
 // Store owns one conversation's work. It never calls external code under its lock.
 // Creation is not deduplicated; state/revision checks fence repeated transitions.
 type Store struct {
+	evidenceLookup   EvidenceLookup
 	emission         sync.Mutex
 	reporter         Reporter
 	change           Change

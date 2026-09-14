@@ -16,6 +16,7 @@ import (
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 	"hash"
 	"sort"
@@ -65,6 +66,8 @@ type WorkView struct {
 	Record  eventlog.Cursor `json:"record"`
 }
 type Projector struct {
+	executionRefs map[string]bool
+	bindings      map[string]identity.ActorID
 	lastBatch     map[identity.ActorID]agent.ToolBatch
 	registrations map[identity.ActorID]roster.Registration
 	workViews     map[work.ID]WorkView
@@ -89,7 +92,7 @@ type Projector struct {
 }
 
 func New(session identity.SessionID) *Projector {
-	return &Projector{lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
+	return &Projector{executionRefs: map[string]bool{}, bindings: map[string]identity.ActorID{}, lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
 }
 func (p *Projector) Cursor() eventlog.Cursor { p.mu.RLock(); defer p.mu.RUnlock(); return p.cursor }
 func (p *Projector) Apply(e eventlog.Record) error {
@@ -377,16 +380,19 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		commit = func() { p.usage[actor] = u }
 
 	case "tool":
+		var execution *tool.ExecutionBinding
 		var invocation string
 		var started, finished time.Time
 		if isFramed {
 			var v struct {
-				Invocation string    `json:"invocation_id"`
-				FinishedAt time.Time `json:"finished_at"`
+				Execution  *tool.ExecutionBinding `json:"execution,omitempty"`
+				Invocation string                 `json:"invocation_id"`
+				FinishedAt time.Time              `json:"finished_at"`
 			}
 			if err := json.Unmarshal(e.Payload, &v); err != nil {
 				return err
 			}
+			execution = v.Execution
 			invocation = v.Invocation
 			finished = v.FinishedAt
 		} else {
@@ -398,12 +404,19 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			if t.Agent != actor {
 				return errors.New("tool agent mismatch")
 			}
+			execution = t.Activity.Result.Execution
 			invocation = t.Activity.InvocationID
 			started = t.Activity.StartedAt
 			finished = t.Activity.FinishedAt
 		}
 		if invocation == "" {
 			return errors.New("tool requires invocation identity")
+		}
+		if execution != nil {
+			key := fmt.Sprintf("%s/%d", execution.WorkID, execution.AssignedAtRevision)
+			if finished.IsZero() || execution.EvidenceRef == "" || execution.Actor != actor || p.bindings[key] != actor || p.executionRefs[execution.EvidenceRef] {
+				return errors.New("invalid execution attribution")
+			}
 		}
 		prior, exists := p.toolStates[invocation]
 		if finished.IsZero() {
@@ -415,7 +428,13 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			if !exists || prior.Finished || prior.Agent != actor {
 				return errors.New("tool finish without matching start")
 			}
-			commit = func() { prior.Finished = true; p.toolStates[invocation] = prior }
+			commit = func() {
+				prior.Finished = true
+				p.toolStates[invocation] = prior
+				if execution != nil {
+					p.executionRefs[execution.EvidenceRef] = true
+				}
+			}
 		}
 
 	case "work":
@@ -511,6 +530,9 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			p.workEvents[c.ID] = true
 			for _, w := range c.Works {
 				p.workViews[w.ID] = WorkView{WorkHeader: w, Record: e.Cursor()}
+				if w.Kind == work.Research && w.State == work.Active && w.AssignedAtRevision > 0 {
+					p.bindings[fmt.Sprintf("%s/%d", w.ID, w.AssignedAtRevision)] = w.Assignee
+				}
 			}
 		}
 

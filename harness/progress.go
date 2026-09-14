@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"github.com/stevemurr/strap/agent"
+	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/internal/workflow"
@@ -90,4 +91,17 @@ func (s *Session) inboxAdmission(actor identity.ActorID) agent.InboxAdmission {
 		}
 		return decision, nil
 	}
+}
+
+func (s *Session) lookupExecutionEvidence(ref string) (work.ExecutionEvidence, error) {
+	v, err := s.progressReads.Reader.At(context.Background(), eventlog.Cursor{})
+	if err != nil {
+		return work.ExecutionEvidence{}, err
+	}
+	e, err := v.GetExecutionEvidence(context.Background(), s.Root(), ref)
+	if err != nil {
+		return work.ExecutionEvidence{}, err
+	}
+	b := e.Execution.Activity.Result.Execution
+	return work.ExecutionEvidence{WorkID: work.ID(b.WorkID), AssignedAtRevision: work.Revision(b.AssignedAtRevision), Actor: b.Actor}, nil
 }

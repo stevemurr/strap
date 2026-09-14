@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -32,7 +33,7 @@ func (s *Session) researchDiagnosticTool() tool.Tool {
 		if err != nil {
 			return tool.Result{}, err
 		}
-		binding := &tool.ExecutionBinding{WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
+		binding := &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
 		args, err := json.Marshal(struct {
 			Command   string `json:"command"`
 			TimeoutMS *int64 `json:"timeout_ms,omitempty"`
@@ -42,7 +43,7 @@ func (s *Session) researchDiagnosticTool() tool.Tool {
 		}
 		c.Arguments = args
 		result, err := s.researchShell.Call(run, c)
-		result.Execution = binding
-		return result, err
+		captured, encodeErr := tool.ExecutionResult(result, binding, err)
+		return captured, errors.Join(err, encodeErr)
 	})
 }

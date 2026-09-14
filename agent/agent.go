@@ -245,7 +245,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				if err != nil {
+				if err != nil && result.Execution == nil {
 					result = tool.Text("Tool error: " + err.Error())
 				}
 				toolRevision, err = a.appendHistory(provider.Message{
@@ -324,7 +324,11 @@ func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected
 		if observedErr == nil {
 			observedErr = ctx.Err()
 		}
-		err = errors.Join(err, a.reportTool(ToolActivity{InvocationID: invocation, Diagnostic: tool.DiagnosticFrom(observedErr), Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr}))
+		publishErr := a.reportTool(ToolActivity{InvocationID: invocation, Diagnostic: tool.DiagnosticFrom(observedErr), Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr})
+		err = errors.Join(err, publishErr)
+		if publishErr != nil {
+			result = tool.Result{}
+		}
 	}()
 	if rejected != nil {
 		return tool.Result{}, rejected

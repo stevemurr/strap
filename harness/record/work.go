@@ -1,14 +1,19 @@
 package record
 
-import "github.com/stevemurr/strap/work"
+import (
+	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/work"
+)
 
 // WorkControl keeps changed entity identities and statuses inline even when the
 // complete ledger values and evidence are framed into content chunks.
 type WorkHeader struct {
-	ID       work.ID       `json:"id"`
-	Kind     work.Kind     `json:"kind"`
-	State    work.State    `json:"state"`
-	Revision work.Revision `json:"revision"`
+	Assignee           identity.ActorID `json:"assignee,omitempty"`
+	AssignedAtRevision work.Revision    `json:"assigned_at_revision,omitempty"`
+	ID                 work.ID          `json:"id"`
+	Kind               work.Kind        `json:"kind"`
+	State              work.State       `json:"state"`
+	Revision           work.Revision    `json:"revision"`
 }
 type PlanHeader struct {
 	ID       work.PlanID   `json:"id"`
@@ -62,7 +67,7 @@ func DescribeWork(e work.Event) WorkControl {
 		}
 	}
 	for _, w := range change.Works {
-		c.Works = append(c.Works, WorkHeader{ID: w.ID, Kind: w.Kind, State: w.State, Revision: w.Revision})
+		c.Works = append(c.Works, WorkHeader{Assignee: w.Assignee, AssignedAtRevision: w.AssignedAtRevision, ID: w.ID, Kind: w.Kind, State: w.State, Revision: w.Revision})
 	}
 	for _, p := range change.Plans {
 		c.Plans = append(c.Plans, PlanHeader{ID: p.ID, Revision: p.Revision})

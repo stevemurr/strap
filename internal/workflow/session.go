@@ -29,6 +29,7 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
+	evidenceLookup     work.EvidenceLookup
 	researchShell      tool.Tool
 	researchMaxTimeout time.Duration
 	publish            func(conversation.Event) error
@@ -52,6 +53,9 @@ type Session struct {
 
 type Option func(*Session)
 
+func WithEvidenceLookup(f work.EvidenceLookup) Option {
+	return func(s *Session) { s.evidenceLookup = f }
+}
 func WithProgressCurrent(f func(identity.ActorID, work.ID) (work.Work, error)) Option {
 	return func(s *Session) { s.progressCurrent = f }
 }
@@ -78,7 +82,7 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 		option(s)
 	}
 	if s.publish != nil {
-		s.Store = work.New(work.WithReporter(work.ReporterFunc(func(_ context.Context, e work.Event) error { return s.publish(conversation.WorkEvent{Event: e}) })))
+		s.Store = work.New(work.WithEvidenceLookup(s.evidenceLookup), work.WithReporter(work.ReporterFunc(func(_ context.Context, e work.Event) error { return s.publish(conversation.WorkEvent{Event: e}) })))
 	}
 	if s.publish == nil {
 		s.events = inbox.New[conversation.Event]()

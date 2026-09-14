@@ -314,6 +314,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err != nil {
 		return nil, err
 	}
+	s.progressReads.Evidence = inspection.ReadExecutionEvidence
 	s.progressReads.Authorize = func(ctx context.Context, actor identity.ActorID, id work.ID) error {
 		_, err := s.GetWork(ctx, actor, id)
 		return err
@@ -330,7 +331,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
 		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
 	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
