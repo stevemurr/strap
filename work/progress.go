@@ -2,6 +2,7 @@ package work
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -139,7 +140,7 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 		return result, err
 	}
 	if u.AssignedAtRevision == 0 || u.AssignedAtRevision != w.AssignedAtRevision {
-		return result, ErrConflict
+		return result, fmt.Errorf("%w: assigned_at_revision %d does not match this assignment's %d; it never changes during an assignment", ErrConflict, u.AssignedAtRevision, w.AssignedAtRevision)
 	}
 	if w.State != Active {
 		return result, ErrState
@@ -310,7 +311,7 @@ func (s *Store) progressSteps(w Work, changes []StepProgress) (Plan, error) {
 		}
 		i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == change.ID })
 		if i < 0 {
-			return Plan{}, ErrNotFound
+			return Plan{}, fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, change.ID, p.ID)
 		}
 		if change.Status != nil {
 			p.Steps[i].Status = *change.Status

@@ -3,6 +3,7 @@ package work
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/stevemurr/strap/identity"
 )
@@ -35,10 +36,14 @@ func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Subm
 		}
 	}
 	steps := s.steps(original.Scope)
+	var pending []string
 	for _, step := range steps {
 		if step.Status != ReadyForReview {
-			return SubmitReceipt{}, invalid("all scoped steps must be ready_for_review")
+			pending = append(pending, fmt.Sprintf("%s is %s", step.ID, step.Status))
 		}
+	}
+	if len(pending) > 0 {
+		return SubmitReceipt{}, invalid("all scoped steps must be ready_for_review before submit_work: " + strings.Join(pending, ", ") + "; report them through report_work_progress steps, then submit with the returned work_revision")
 	}
 	sub := Submission{ID: SubmissionID(s.id("submission")), WorkID: original.ID, SubmittedVia: w.ID, SubmittedBy: actor, Supersedes: original.LatestSubmissionID, Task: original.Task, ExpectedOutput: original.ExpectedOutput, Steps: steps, Summary: r.Summary, Evidence: r.Evidence, Artifacts: r.Artifacts}.Clone()
 	if w.Kind == Repair {

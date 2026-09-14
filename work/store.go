@@ -106,7 +106,7 @@ func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, 
 		return Work{}, ErrForbidden
 	}
 	if t.ExpectedRevision == 0 || w.Revision != t.ExpectedRevision {
-		return Work{}, ErrConflict
+		return Work{}, fmt.Errorf("%w: %s is at revision %d but expected_revision was %d; use the work_revision from your last receipt or read get_work", ErrConflict, w.ID, w.Revision, t.ExpectedRevision)
 	}
 	return w.Clone(), nil
 }
@@ -131,13 +131,13 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 		var ok bool
 		p, ok = s.plans[*u.PlanID]
 		if !ok {
-			return Plan{}, ErrNotFound
+			return Plan{}, fmt.Errorf("%w: plan %s", ErrNotFound, *u.PlanID)
 		}
 		if p.Owner != actor {
 			return Plan{}, ErrForbidden
 		}
 		if u.ExpectedRevision == nil || *u.ExpectedRevision != p.Revision {
-			return Plan{}, ErrConflict
+			return Plan{}, fmt.Errorf("%w: plan %s is at revision %d; use the revision from get_plan as expected_revision", ErrConflict, p.ID, p.Revision)
 		}
 		p = p.Clone()
 	}
@@ -166,13 +166,13 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 		seen[*edit.ID] = true
 		i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == *edit.ID })
 		if i < 0 {
-			return Plan{}, ErrNotFound
+			return Plan{}, fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, *edit.ID, p.ID)
 		}
-		if s.reserved[*edit.ID] != "" {
-			return Plan{}, ErrReserved
+		if by := s.reserved[*edit.ID]; by != "" {
+			return Plan{}, fmt.Errorf("%w: step %s is reserved by %s; omit reserved steps from edits", ErrReserved, *edit.ID, by)
 		}
 		if p.Steps[i].Status == Completed {
-			return Plan{}, ErrState
+			return Plan{}, fmt.Errorf("%w: step %s is completed; omit completed steps from edits", ErrState, *edit.ID)
 		}
 		if edit.Title != nil {
 			if blank(*edit.Title) {
@@ -191,13 +191,13 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 		seen[id] = true
 		i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == id })
 		if i < 0 {
-			return Plan{}, ErrNotFound
+			return Plan{}, fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, id, p.ID)
 		}
-		if s.reserved[id] != "" {
-			return Plan{}, ErrReserved
+		if by := s.reserved[id]; by != "" {
+			return Plan{}, fmt.Errorf("%w: step %s is reserved by %s and cannot be cancelled", ErrReserved, id, by)
 		}
 		if p.Steps[i].Status == Completed {
-			return Plan{}, ErrState
+			return Plan{}, fmt.Errorf("%w: step %s is completed and cannot be cancelled", ErrState, id)
 		}
 		p.Steps[i].Status = CancelledStep
 	}
@@ -251,13 +251,13 @@ func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work
 			seen[id] = true
 			i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == id })
 			if i < 0 {
-				return Work{}, ErrNotFound
+				return Work{}, fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, id, p.ID)
 			}
-			if s.reserved[id] != "" {
-				return Work{}, ErrReserved
+			if by := s.reserved[id]; by != "" {
+				return Work{}, fmt.Errorf("%w: step %s is reserved by %s; scope only available steps", ErrReserved, id, by)
 			}
 			if p.Steps[i].Status == Completed || p.Steps[i].Status == CancelledStep {
-				return Work{}, ErrState
+				return Work{}, fmt.Errorf("%w: step %s is %s and cannot be assigned", ErrState, id, p.Steps[i].Status)
 			}
 		}
 	}

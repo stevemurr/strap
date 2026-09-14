@@ -2,9 +2,12 @@ package work
 
 import (
 	"encoding/json"
-	"github.com/stevemurr/strap/identity"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
+
+	"github.com/stevemurr/strap/identity"
 )
 
 type ResearchAssignRequest struct {
@@ -110,7 +113,7 @@ func (s *Store) SubmitResearch(actor identity.ActorID, r SubmitResearchRequest) 
 	for _, id := range r.FindingIDs {
 		f, ok := s.progressFindings[id]
 		if !ok {
-			return result, ErrNotFound
+			return result, fmt.Errorf("%w: finding %s was never recorded for %s; finding IDs are issued in report_work_progress receipts, so omit finding_ids if none were recorded", ErrNotFound, id, w.ID)
 		}
 		if f.WorkID != w.ID {
 			return result, ErrForbidden
@@ -145,7 +148,10 @@ func (s *Store) GetResearchBrief(actor identity.ActorID, id ResearchBriefID) (Re
 	defer s.mu.Unlock()
 	b, ok := s.researchBriefs[id]
 	if !ok {
-		return ResearchBrief{}, ErrNotFound
+		if strings.HasPrefix(string(id), "report-") {
+			return ResearchBrief{}, fmt.Errorf("%w: %s is a progress report id, not a brief id; brief IDs start with brief- and arrive in the work progress notice and get_work", ErrNotFound, id)
+		}
+		return ResearchBrief{}, fmt.Errorf("%w: research brief %s", ErrNotFound, id)
 	}
 	w := s.works[b.WorkID]
 	if actor == "" || actor != w.Owner && actor != w.Assignee {
