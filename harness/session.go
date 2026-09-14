@@ -19,6 +19,7 @@ import (
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/eventcodec"
+	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/internal/admission"
@@ -88,6 +89,7 @@ type Dependencies struct {
 }
 
 type Session struct {
+	progressReads    *inspection.ProgressReader
 	hostMessage      atomic.Uint64
 	encoder          *eventcodec.Publisher
 	projectionGate   chan struct{}
@@ -286,12 +288,25 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	s.workflowReadLife, stopReads = context.WithCancel(context.Background())
 	go func() { <-c.Done(); stopReads() }()
 	s.telemetry = newTelemetry(s)
+	readSource, readErr := inspection.New(ctx, s.log)
+	if readErr != nil {
+		return nil, readErr
+	}
+	s.resources.Add("progress reader", readSource)
+	s.progressReads, err = inspection.NewProgressReader(readSource)
+	if err != nil {
+		return nil, err
+	}
+	s.progressReads.Authorize = func(ctx context.Context, actor identity.ActorID, id work.ID) error {
+		_, err := s.GetWork(ctx, actor, id)
+		return err
+	}
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
 	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
 	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {

@@ -2,7 +2,9 @@ package harness
 
 import (
 	"context"
+	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -29,4 +31,34 @@ func (s *Session) GetProgressFinding(ctx context.Context, actor identity.ActorID
 		return work.ProgressFinding{}, err
 	}
 	return v.GetProgressFinding(actor, id)
+}
+
+func progressQuery(a tool.ProgressReadArgs) inspection.ProgressQuery {
+	return inspection.ProgressQuery{Mode: a.Mode, WorkID: a.WorkID, ReportID: a.ReportID, FindingID: a.FindingID, BriefID: a.BriefID, EvidenceRef: a.EvidenceRef, Cursor: a.Cursor, Limit: a.Limit, MaxBytes: a.MaxBytes}
+}
+func (s *Session) readProgressTool(ctx context.Context, c tool.Call, a tool.ProgressReadArgs) (tool.Result, error) {
+	v, e := s.progressReads.ReadFamily(ctx, c.Actor, progressQuery(a), false)
+	if e != nil {
+		return tool.Result{}, e
+	}
+	return tool.JSON(v)
+}
+func (s *Session) readBriefTool(ctx context.Context, c tool.Call, a tool.ProgressReadArgs) (tool.Result, error) {
+	v, e := s.progressReads.ReadFamily(ctx, c.Actor, progressQuery(a), true)
+	if e != nil {
+		return tool.Result{}, e
+	}
+	return tool.JSON(v)
+}
+func (s *Session) ReadWorkProgress(ctx context.Context, actor identity.ActorID, q inspection.ProgressQuery) (inspection.ProgressPage, error) {
+	return s.progressReads.ReadFamily(ctx, actor, q, false)
+}
+func (s *Session) ReadResearchBrief(ctx context.Context, actor identity.ActorID, q inspection.ProgressQuery) (inspection.ProgressPage, error) {
+	return s.progressReads.ReadFamily(ctx, actor, q, true)
+}
+func (s *Session) ListWorkProgressReports(ctx context.Context, actor identity.ActorID, q work.ReportQuery) (work.ReportPage, error) {
+	return s.progressReads.ListWorkProgressReports(ctx, actor, q)
+}
+func (s *Session) ListWorkProgressFindings(ctx context.Context, actor identity.ActorID, q work.ReportQuery) (work.ProgressFindingPage, error) {
+	return s.progressReads.ListWorkProgressFindings(ctx, actor, q)
 }

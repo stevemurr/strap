@@ -14,8 +14,8 @@ is promoted into production instructions.
 | 3. Immutable research briefs and delivery | Complete — see preceding commit |
 | 4. Session and HTTP progress APIs | Complete — 93bbfd9; collection pagination follows in area 6 |
 | 5. Worker progress API migration | Complete — 80b11b1 |
-| 6. Bounded progress and brief model readers | Complete in this checkpoint; live assembly follows in area 7 |
-| 7. Current authorization for live read continuations | Pending |
+| 6. Bounded progress and brief model readers | Complete — c897f2d |
+| 7. Current authorization for live read continuations | Complete in this checkpoint; readers exposed to all roles and HTTP |
 | 8. Selective progress notifications | Pending |
 | 9. Notification coverage and exchange admission | Pending |
 | 10. Explicit inbox yielding | Pending |

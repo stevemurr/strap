@@ -8,6 +8,7 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/harness/inspection"
+	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/work"
 	"path/filepath"
 	"strings"
@@ -130,5 +131,51 @@ func TestProgressCollectionPinsPrefixAndRejectsCursorMutation(t *testing.T) {
 	}
 	if _, err = r.ListWorkProgressFindings(ctx, "root", work.ReportQuery{Cursor: reports.NextCursor}); !errors.Is(err, work.ErrInvalid) {
 		t.Fatal("collection cursor changed type", err)
+	}
+}
+
+func TestLiveProgressRevokesCollectionsAndFragmentsWhileArchiveStaysPassive(t *testing.T) {
+	s, r, w := progressFixture(t)
+	ctx := context.Background()
+	r.Authorize = func(_ context.Context, actor identity.ActorID, id work.ID) error {
+		_, err := s.GetWork(actor, id)
+		return err
+	}
+	var id work.ProgressReportID
+	for i := 0; i < 2; i++ {
+		receipt, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AssignedAtRevision: w.AssignedAtRevision, Position: &work.WorkPosition{Objective: strings.Repeat("x", 4000)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Revision = receipt.WorkRevision
+		id = receipt.ReportID
+	}
+	collection, err := r.Read(ctx, "worker", inspection.ProgressQuery{Mode: "reports", WorkID: w.ID, Limit: 1})
+	if err != nil || collection.NextCursor == "" {
+		t.Fatal(collection, err)
+	}
+	record, err := r.Read(ctx, "worker", inspection.ProgressQuery{Mode: "report", ReportID: id, MaxBytes: 2048})
+	if err != nil || record.Oversized == nil {
+		t.Fatal(record, err)
+	}
+	if _, err = s.Reassign("root", work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Assignee: "replacement"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, cursor := range []string{collection.NextCursor, record.NextCursor} {
+		if _, err = r.Read(ctx, "worker", inspection.ProgressQuery{Mode: "continue", Cursor: cursor}); !errors.Is(err, work.ErrForbidden) {
+			t.Fatal("live cursor retained authority", err)
+		}
+	}
+	archive, err := inspection.NewProgressReader(r.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive.Through = record.Through
+	old, err := archive.Read(ctx, "worker", inspection.ProgressQuery{Mode: "report", ReportID: id})
+	if err != nil || len(old.Items) != 1 {
+		t.Fatal(old, err)
+	}
+	if _, err = r.ReadFamily(ctx, "worker", inspection.ProgressQuery{Mode: "continue", Cursor: record.NextCursor}, true); !errors.Is(err, work.ErrInvalid) {
+		t.Fatal("brief reader accepted report cursor", err)
 	}
 }

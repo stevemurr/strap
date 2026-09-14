@@ -69,6 +69,7 @@ type progressCursor struct {
 // use it directly; live hosts supply a current-work authorization callback.
 type ProgressReader struct {
 	Reader    *Reader
+	Through   eventlog.Cursor // Optional trusted archive prefix; never supplied by model selectors.
 	key       [32]byte
 	Authorize func(context.Context, identity.ActorID, work.ID) error
 	Evidence  func(context.Context, *View, identity.ActorID, string) (work.ID, json.RawMessage, error)
@@ -173,6 +174,12 @@ func (p *ProgressReader) initial(ctx context.Context, actor identity.ActorID, q 
 	}
 	head, err := p.Reader.Head(ctx)
 	c.Session, c.Prefix = head.Cursor.Session, head.Cursor.Sequence
+	if p.Through != (eventlog.Cursor{}) {
+		if p.Through.Session != c.Session || p.Through.Sequence > c.Prefix {
+			return c, work.ErrInvalid
+		}
+		c.Prefix = p.Through.Sequence
+	}
 	return c, err
 }
 func rawRecord(v any) json.RawMessage {
@@ -427,4 +434,15 @@ func (p *ProgressReader) ListWorkProgressFindings(ctx context.Context, actor ide
 		out.Items = append(out.Items, f)
 	}
 	return out, nil
+}
+
+func (p *ProgressReader) ReadFamily(ctx context.Context, actor identity.ActorID, q ProgressQuery, brief bool) (ProgressPage, error) {
+	c, err := p.initial(ctx, actor, q)
+	if err != nil {
+		return ProgressPage{}, err
+	}
+	if (c.Mode == "brief") != brief {
+		return ProgressPage{}, work.ErrInvalid
+	}
+	return p.Read(ctx, actor, q)
 }

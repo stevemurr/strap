@@ -28,10 +28,11 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
-	publish   func(conversation.Event) error
-	closing   atomic.Bool
-	admission *admission.Gate
-	stopOwner func() bool
+	publish       func(conversation.Event) error
+	progressReads []tool.Tool
+	closing       atomic.Bool
+	admission     *admission.Gate
+	stopOwner     func() bool
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
@@ -45,6 +46,10 @@ type Session struct {
 }
 
 type Option func(*Session)
+
+func WithProgressTools(ops []tool.Tool) Option {
+	return func(s *Session) { s.progressReads = append([]tool.Tool(nil), ops...) }
+}
 
 func WithResearcher(spec agent.Spec) Option   { return func(s *Session) { s.researcher = spec.Clone() } }
 func (s *Session) ResearcherSpec() agent.Spec { return s.researcher.Clone() }
@@ -100,7 +105,7 @@ func result(v any, err error) (tool.Result, error) {
 	return tool.JSON(v)
 }
 func (s *Session) commonTools() []tool.Tool {
-	return []tool.Tool{
+	return append([]tool.Tool{
 		tool.GetAudit(func(ctx context.Context, c tool.Call, id work.AuditID) (tool.Result, error) {
 			v, e := s.GetAudit(ctx, c.Actor, id)
 			return result(v, e)
@@ -113,7 +118,7 @@ func (s *Session) commonTools() []tool.Tool {
 			v, err := s.InspectWork(ctx, c.Actor, id)
 			return result(v, err)
 		}),
-	}
+	}, s.progressReads...)
 }
 func (s *Session) updateProgress(ctx context.Context, c tool.Call, u work.ProgressUpdate) (tool.Result, error) {
 	v, e := s.UpdateProgress(ctx, c.Actor, u)

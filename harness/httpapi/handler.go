@@ -301,6 +301,22 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serveAgent(w, r, session, path[1:])
 		return
 	}
+	if r.Method == "GET" && len(path) == 1 && (path[0] == "progress-view" || path[0] == "brief-view") {
+		q, err := inspection.ProgressQueryFromValues(r.URL.Query(), path[0] == "brief-view")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		actor := identity.ActorID(r.URL.Query().Get("actor"))
+		var page inspection.ProgressPage
+		if path[0] == "brief-view" {
+			page, err = session.ReadResearchBrief(r.Context(), actor, q)
+		} else {
+			page, err = session.ReadWorkProgress(r.Context(), actor, q)
+		}
+		respond(w, page, err)
+		return
+	}
 	if r.Method == "GET" && len(path) == 2 {
 		actor := identity.ActorID(r.URL.Query().Get("actor"))
 		var v any
