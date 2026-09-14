@@ -27,6 +27,18 @@ func (v *ReadModel) Apply(c Change) {
 	for _, a := range c.Audits {
 		s.audits[a.ID] = a.Clone()
 	}
+	for _, r := range c.ProgressReports {
+		s.progressReports[r.ID] = r.Clone()
+		for _, f := range r.Findings {
+			s.progressFindings[f.ID] = f.Clone()
+		}
+	}
+}
+func (v *ReadModel) GetWorkProgressReport(actor identity.ActorID, id ProgressReportID) (WorkProgressReport, error) {
+	return v.store.GetWorkProgressReport(actor, id)
+}
+func (v *ReadModel) GetProgressFinding(actor identity.ActorID, id ProgressFindingID) (ProgressFinding, error) {
+	return v.store.GetProgressFinding(actor, id)
 }
 func (v *ReadModel) GetPlan(actor identity.ActorID, id PlanID) (Plan, error) {
 	return v.store.GetPlan(actor, id)

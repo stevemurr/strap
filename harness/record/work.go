@@ -24,13 +24,21 @@ type AuditHeader struct {
 	Submission work.SubmissionID `json:"submission"`
 	Verdict    work.Verdict      `json:"verdict"`
 }
+type ProgressReportHeader struct {
+	ID                 work.ProgressReportID    `json:"id"`
+	Work               work.ID                  `json:"work"`
+	Revision           work.Revision            `json:"revision"`
+	AssignedAtRevision work.Revision            `json:"assigned_at_revision"`
+	Findings           []work.ProgressFindingID `json:"findings,omitempty"`
+}
 type WorkControl struct {
-	ID          work.EventID       `json:"event_id"`
-	Kind        work.EventKind     `json:"kind"`
-	Works       []WorkHeader       `json:"works,omitempty"`
-	Plans       []PlanHeader       `json:"plans,omitempty"`
-	Submissions []SubmissionHeader `json:"submissions,omitempty"`
-	Audits      []AuditHeader      `json:"audits,omitempty"`
+	ID              work.EventID           `json:"event_id"`
+	Kind            work.EventKind         `json:"kind"`
+	Works           []WorkHeader           `json:"works,omitempty"`
+	Plans           []PlanHeader           `json:"plans,omitempty"`
+	Submissions     []SubmissionHeader     `json:"submissions,omitempty"`
+	Audits          []AuditHeader          `json:"audits,omitempty"`
+	ProgressReports []ProgressReportHeader `json:"progress_reports,omitempty"`
 }
 
 func DescribeWork(e work.Event) WorkControl {
@@ -57,6 +65,13 @@ func DescribeWork(e work.Event) WorkControl {
 	}
 	for _, a := range change.Audits {
 		c.Audits = append(c.Audits, AuditHeader{ID: a.ID, Work: a.WorkID, Submission: a.SubmissionID, Verdict: a.Verdict})
+	}
+	for _, r := range change.ProgressReports {
+		h := ProgressReportHeader{ID: r.ID, Work: r.WorkID, Revision: r.WorkRevision, AssignedAtRevision: r.AssignedAtRevision}
+		for _, f := range r.Findings {
+			h.Findings = append(h.Findings, f.ID)
+		}
+		c.ProgressReports = append(c.ProgressReports, h)
 	}
 	return c
 }

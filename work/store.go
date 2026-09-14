@@ -12,24 +12,28 @@ import (
 // Store owns one conversation's work. It never calls external code under its lock.
 // Creation is not deduplicated; state/revision checks fence repeated transitions.
 type Store struct {
-	emission      sync.Mutex
-	reporter      Reporter
-	change        Change
-	visibleEvents int
-	failure       error
-	mu            sync.Mutex
-	next          uint64
-	plans         map[PlanID]Plan
-	works         map[ID]Work
-	submissions   map[SubmissionID]Submission
-	audits        map[AuditID]Audit
-	reserved      map[StepID]ID
-	events        []Event
-	ready         chan struct{}
+	emission         sync.Mutex
+	reporter         Reporter
+	change           Change
+	visibleEvents    int
+	failure          error
+	mu               sync.Mutex
+	next             uint64
+	plans            map[PlanID]Plan
+	works            map[ID]Work
+	submissions      map[SubmissionID]Submission
+	audits           map[AuditID]Audit
+	progressReports  map[ProgressReportID]WorkProgressReport
+	progressFindings map[ProgressFindingID]ProgressFinding
+	reserved         map[StepID]ID
+	events           []Event
+	ready            chan struct{}
 }
 
 func New(options ...Option) *Store {
 	s := &Store{plans: map[PlanID]Plan{}, works: map[ID]Work{}, submissions: map[SubmissionID]Submission{}, audits: map[AuditID]Audit{}, reserved: map[StepID]ID{}, ready: make(chan struct{}, 1)}
+	s.progressReports = map[ProgressReportID]WorkProgressReport{}
+	s.progressFindings = map[ProgressFindingID]ProgressFinding{}
 	for _, o := range options {
 		o(s)
 	}
@@ -276,35 +280,9 @@ func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (result
 	if w.State != Active {
 		return Work{}, ErrState
 	}
-	if len(u.Steps) > 0 && (w.Kind == AuditWork || w.Scope == nil) {
-		return Work{}, ErrForbidden
-	}
-	var p Plan
-	if w.Scope != nil {
-		p = s.plans[w.Scope.PlanID].Clone()
-	}
-	seen := map[StepID]bool{}
-	for _, change := range u.Steps {
-		if seen[change.ID] {
-			return Work{}, invalid("repeated progress step")
-		}
-		seen[change.ID] = true
-		if !slices.Contains(w.Scope.StepIDs, change.ID) {
-			return Work{}, ErrForbidden
-		}
-		if change.Status != nil && *change.Status != Pending && *change.Status != InProgress && *change.Status != Blocked && *change.Status != ReadyForReview {
-			return Work{}, invalid("progress cannot accept or cancel work")
-		}
-		i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == change.ID })
-		if i < 0 {
-			return Work{}, ErrNotFound
-		}
-		if change.Status != nil {
-			p.Steps[i].Status = *change.Status
-		}
-		if change.Note != nil {
-			p.Steps[i].Note = *change.Note
-		}
+	p, err := s.progressSteps(w, u.Steps)
+	if err != nil {
+		return Work{}, err
 	}
 	actionable := u.Blocker != nil && *u.Blocker != w.Blocker
 	if u.Note != nil {

@@ -8,10 +8,11 @@ import (
 // Change contains the complete values changed by one ledger mutation, including
 // secondary work, plan, submission and audit updates needed by a replay view.
 type Change struct {
-	Works       []Work       `json:"works,omitempty"`
-	Plans       []Plan       `json:"plans,omitempty"`
-	Submissions []Submission `json:"submissions,omitempty"`
-	Audits      []Audit      `json:"audits,omitempty"`
+	Works           []Work               `json:"works,omitempty"`
+	Plans           []Plan               `json:"plans,omitempty"`
+	Submissions     []Submission         `json:"submissions,omitempty"`
+	Audits          []Audit              `json:"audits,omitempty"`
+	ProgressReports []WorkProgressReport `json:"progress_reports,omitempty"`
 }
 
 func (c Change) Clone() Change {
@@ -27,6 +28,9 @@ func (c Change) Clone() Change {
 	}
 	for _, x := range c.Audits {
 		v.Audits = append(v.Audits, x.Clone())
+	}
+	for _, x := range c.ProgressReports {
+		v.ProgressReports = append(v.ProgressReports, x.Clone())
 	}
 	return v
 }

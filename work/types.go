@@ -78,26 +78,28 @@ type Scope struct {
 	StepIDs []StepID `json:"step_ids"`
 }
 type Work struct {
-	ID                  ID               `json:"work_id"`
-	Kind                Kind             `json:"kind"`
-	State               State            `json:"state"`
-	Revision            Revision         `json:"revision"`
-	Owner               identity.ActorID `json:"owner"`
-	RequestedBy         identity.ActorID `json:"requested_by"`
-	Assignee            identity.ActorID `json:"assignee"`
-	AssignedAtRevision  Revision         `json:"assigned_at_revision"`
-	Task                string           `json:"task"`
-	Context             string           `json:"context,omitempty"`
-	ExpectedOutput      string           `json:"expected_output,omitempty"`
-	Scope               *Scope           `json:"scope,omitempty"`
-	Note                string           `json:"note,omitempty"`
-	Blocker             string           `json:"blocker,omitempty"`
-	ParentID            ID               `json:"parent_id,omitempty"`
-	SubjectSubmissionID SubmissionID     `json:"subject_submission_id,omitempty"`
-	RequestedByAuditID  AuditID          `json:"requested_by_audit_id,omitempty"`
-	LatestAuditID       AuditID          `json:"latest_audit_id,omitempty"`
-	ActiveRepairID      ID               `json:"active_repair_id,omitempty"`
-	LatestSubmissionID  SubmissionID     `json:"latest_submission_id,omitempty"`
+	ID                     ID               `json:"work_id"`
+	Kind                   Kind             `json:"kind"`
+	State                  State            `json:"state"`
+	Revision               Revision         `json:"revision"`
+	Owner                  identity.ActorID `json:"owner"`
+	RequestedBy            identity.ActorID `json:"requested_by"`
+	Assignee               identity.ActorID `json:"assignee"`
+	AssignedAtRevision     Revision         `json:"assigned_at_revision"`
+	Task                   string           `json:"task"`
+	Context                string           `json:"context,omitempty"`
+	ExpectedOutput         string           `json:"expected_output,omitempty"`
+	Scope                  *Scope           `json:"scope,omitempty"`
+	Note                   string           `json:"note,omitempty"`
+	Blocker                string           `json:"blocker,omitempty"`
+	ParentID               ID               `json:"parent_id,omitempty"`
+	SubjectSubmissionID    SubmissionID     `json:"subject_submission_id,omitempty"`
+	RequestedByAuditID     AuditID          `json:"requested_by_audit_id,omitempty"`
+	LatestAuditID          AuditID          `json:"latest_audit_id,omitempty"`
+	ActiveRepairID         ID               `json:"active_repair_id,omitempty"`
+	LatestSubmissionID     SubmissionID     `json:"latest_submission_id,omitempty"`
+	LatestProgressReportID ProgressReportID `json:"latest_progress_report_id,omitempty"`
+	LatestPositionReportID ProgressReportID `json:"latest_position_report_id,omitempty"`
 }
 type WorkTarget struct {
 	ID               ID       `json:"work_id"`

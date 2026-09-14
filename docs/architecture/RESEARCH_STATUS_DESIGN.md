@@ -3,9 +3,31 @@
 Status: revised design, 2026-09-13. Incorporates the taxonomy audit and subsequent
 plan/todo clarification, the seven contract audit findings, bounded researcher
 execution, and the follow-up audit of wakeups, yielding, and cursor access.
-This is a proposal; no runtime implementation accompanies
-this document. The core boundaries below reflect the agreed direction. Section 12
+Implementation has started with the ledger foundation described below; the complete
+feature is not yet available to agents. The core boundaries reflect the agreed direction. Section 12
 separates remaining naming and execution choices from those boundaries.
+
+### Implementation status
+
+- Implemented in the work domain: immutable progress reports/findings, correction
+  and retraction, assignment/revision checks, replacement positions, atomic scoped
+  step changes, current-versus-historical inspection, and detached snapshots.
+- Implemented in recording/inspection: complete report changes, report control
+  headers, passive reconstruction, and typed exact report/finding reads at a
+  captured log prefix. Reassignment clears current report pointers and cancellation
+  clears active blockers while recorded evidence remains intact.
+- Tests cover concurrent reports, scope/role authority, invalid and oversized
+  reports, publication failure, reassignment back to the same actor, and JSONL
+  archive parity. These tests establish the foundation, not end-to-end behavior.
+- Next: bounded model readers and the deliberate progress API migration, including
+  replacement of legacy model-facing names. The legacy paths remain during this
+  intermediate implementation stage; no compatibility adapter is being added.
+- Still pending: researcher role/delivery, notice batching/coverage, progress-notice
+  admission policy, diagnostic assignment/evidence validation, complete role prompts,
+  view grouping, and live evaluation of the new research/progress feature. New
+  domain reports are not registered as model tools.
+  Progress evidence references currently receive shape validation only; execution
+  lookup and host validation must be in place before exposing the complete contract.
 
 The researcher/planner investigates a bounded question and reports evidence,
 uncertainty, and next steps. All worker roles use the same work-progress vocabulary.

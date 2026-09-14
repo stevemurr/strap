@@ -249,6 +249,9 @@ func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (result Work
 	w.Revision++
 	w.AssignedAtRevision = w.Revision
 	w.Blocker = ""
+	w.Note = ""
+	w.LatestProgressReportID = ""
+	w.LatestPositionReportID = ""
 	s.putWork(w.ID, w)
 	s.emit(WorkReassigned, actor, w, true)
 	return w.Clone(), nil
@@ -257,6 +260,7 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 	for _, child := range s.works {
 		if child.ParentID == w.ID && live(child) {
 			child.State = Cancelled
+			child.Blocker = ""
 			child.Revision++
 			child.Note = reason
 			s.putWork(child.ID, child)
@@ -275,6 +279,7 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 	}
 	w.ActiveRepairID = ""
 	w.State = Cancelled
+	w.Blocker = ""
 	w.Revision++
 	w.Note = reason
 	s.putWork(w.ID, w)
@@ -301,6 +306,7 @@ func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, er
 		s.cancelImplementation(actor, s.works[w.ParentID], r.Reason)
 	} else {
 		w.State = Cancelled
+		w.Blocker = ""
 		w.Revision++
 		w.Note = r.Reason
 		s.putWork(w.ID, w)

@@ -434,7 +434,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			return errors.New("missing or duplicate work event identity")
 		}
 		switch c.Kind {
-		case work.PlanChanged, work.WorkAssigned, work.WorkReassigned, work.WorkCancelled, work.ProgressChanged, work.ReviewRequested, work.AuditCompleted:
+		case work.PlanChanged, work.WorkAssigned, work.WorkReassigned, work.WorkCancelled, work.ProgressChanged, work.WorkProgressReported, work.ReviewRequested, work.AuditCompleted:
 		default:
 			return errors.New("invalid work event kind")
 		}
@@ -466,6 +466,30 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		for _, a := range c.Audits {
 			if a.ID == "" || a.Work == "" || a.Submission == "" || a.Verdict != work.Pass && a.Verdict != work.Fail {
 				return errors.New("invalid audit header")
+			}
+		}
+		if c.Kind == work.WorkProgressReported && len(c.ProgressReports) != 1 {
+			return errors.New("progress event requires one report")
+		}
+		for _, r := range c.ProgressReports {
+			if r.ID == "" || r.Work == "" || r.Revision == 0 || r.AssignedAtRevision == 0 || r.AssignedAtRevision > r.Revision {
+				return errors.New("invalid progress report header")
+			}
+			matched := false
+			for _, w := range c.Works {
+				if w.ID == r.Work && w.Revision == r.Revision {
+					matched = true
+				}
+			}
+			if !matched {
+				return errors.New("progress report does not match changed work")
+			}
+			seen := map[work.ProgressFindingID]bool{}
+			for _, id := range r.Findings {
+				if id == "" || seen[id] {
+					return errors.New("invalid progress finding identity")
+				}
+				seen[id] = true
 			}
 		}
 		commit = func() {

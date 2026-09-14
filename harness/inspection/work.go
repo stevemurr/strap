@@ -71,6 +71,30 @@ func (v *View) InspectWork(ctx context.Context, actor identity.ActorID, id work.
 	return model.InspectWork(actor, id)
 }
 
+// Progress reads reconstruct only accepted records at this view's prefix. Model
+// pagination and its separate live authorization boundary are added by adapters.
+func (v *View) GetWorkProgress(ctx context.Context, actor identity.ActorID, id work.ID) (work.WorkProgress, error) {
+	model, _, err := v.workModel(ctx)
+	if err != nil {
+		return work.WorkProgress{}, err
+	}
+	return model.GetWorkProgress(actor, id)
+}
+func (v *View) GetWorkProgressReport(ctx context.Context, actor identity.ActorID, id work.ProgressReportID) (work.WorkProgressReport, error) {
+	model, _, err := v.workModel(ctx)
+	if err != nil {
+		return work.WorkProgressReport{}, err
+	}
+	return model.GetWorkProgressReport(actor, id)
+}
+func (v *View) GetProgressFinding(ctx context.Context, actor identity.ActorID, id work.ProgressFindingID) (work.ProgressFinding, error) {
+	model, _, err := v.workModel(ctx)
+	if err != nil {
+		return work.ProgressFinding{}, err
+	}
+	return model.GetProgressFinding(actor, id)
+}
+
 type workCursor struct {
 	Session  string         `json:"session"`
 	Prefix   uint64         `json:"prefix"`
