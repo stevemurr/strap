@@ -72,6 +72,7 @@ type entry struct {
 	contentStarted    bool
 	progress          bool
 	outputFailed      bool
+	outputFinished    bool
 	output            *identity.OutputID
 	message           identity.MessageID
 	label, meta, body string
@@ -79,11 +80,13 @@ type entry struct {
 	renderWidth       int
 	rendered          string
 	tool              toolKey
+	toolInfo          *toolDisplay
 	tokens            *contextTokens
 	agents            *agentsTable
 }
 
 type model struct {
+	folds             foldState
 	activityCollapsed map[identity.OutputID]bool
 	reasoningExpanded bool // Thinking is hidden until explicitly shown.
 	transcript        *transcriptView
@@ -141,7 +144,7 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 	}
 	m.initStreams()
 	m.resize(80, 24)
-	m.addAttributed("Welcome", "", "Send a message to get started. You can keep typing while agents work.\nF6 to browse agent streams · Drag to select and copy · /help for commands", true, session.Root())
+	m.addAttributed("Welcome", "", "Send a message to get started. You can keep typing while agents work.\nF6 agents · F7 activity folds · /help for commands", true, session.Root())
 	return m
 }
 
@@ -165,6 +168,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		if !m.selecting && m.mouseSelection == nil && m.busy() {
+			m.renderTranscript(false)
+		}
 		return m, cmd
 	case tea.WindowSizeMsg:
 		m.mouseSelection = nil
@@ -198,6 +204,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case received:
 		if msg.err != nil {
 			m.closed = true
+			m.endToolActivity("", "Event observation stopped before the result arrived")
 			for id := range m.working {
 				delete(m.working, id)
 			}
@@ -221,6 +228,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.transcript == nil && m.streamMouse(msg) {
 			return m, nil
+		}
+		if m.transcript == nil {
+			if handled, cmd := m.composerMouse(msg); handled {
+				return m, cmd
+			}
+			if m.foldMouse(msg) {
+				return m, nil
+			}
 		}
 		if tea.MouseEvent(msg).IsWheel() {
 			m.mouseSelection = nil
@@ -261,6 +276,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.transcriptKey(msg)
 		}
 		if !m.selecting && m.streamKey(msg) {
+			return m, textarea.Blink
+		}
+		if !m.selecting && m.foldKey(msg.String()) {
 			return m, textarea.Blink
 		}
 		if !m.selecting && m.completionKey(msg.String()) {
@@ -357,7 +375,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nProgress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s thinking and tool detail; chronological segments stay in place. Each tool row shows its completed batch context count, including tool results. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool-only calls start folded with status, counts, and target previews. Click a triangle, or F7 then ↑/↓ and Enter, to inspect groups and tool results. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s segments; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -593,6 +611,7 @@ func (m *model) observe(event conversation.Event) {
 		}
 		m.addAttributed(label, meta, body, false, msg.From, msg.To)
 	case conversation.AgentExited:
+		m.endToolActivity(e.Agent, "Agent stopped before the result arrived")
 		if !m.states[e.Agent].Terminal() {
 			m.states[e.Agent] = agent.Stopped
 		}
@@ -640,7 +659,7 @@ func (m *model) resize(width, height int) {
 	// Keep two text columns internally so wide runes remain navigable even
 	// when the terminal is smaller; renderView clips each displayed row.
 	m.viewport.Width = max(1, m.width-2-m.sidebarWidth())
-	m.input.SetWidth(max(4, m.viewport.Width))
+	m.input.SetWidth(max(4, m.viewport.Width-m.composerInset()))
 	m.syncCompletion()
 	m.renderTranscript(false)
 	if m.transcript != nil {
@@ -659,12 +678,6 @@ func (m *model) renderTranscript(follow bool) {
 	if m.selecting {
 		source = m.frozenEntries
 	}
-	var entries []*entry
-	for i := range source {
-		if source[i].inStream(m.streamUI.selected) {
-			entries = append(entries, &source[i])
-		}
-	}
 	var rows []string
 	m.streamUI.lines = nil
 	block := func(e *entry, text string) {
@@ -677,23 +690,27 @@ func (m *model) renderTranscript(follow bool) {
 			m.streamUI.lines = append(m.streamUI.lines, streamAnchor{entry: e.serial, line: i})
 		}
 	}
-	for i := 0; i < len(entries); i++ {
-		e := entries[i]
-		if e.label == "Tool" {
-			if e.activityOutput != nil {
-				id := *e.activityOutput
-				first := i == 0 || entries[i-1].label != "Tool" || entries[i-1].activityOutput == nil || *entries[i-1].activityOutput != id
-				if first {
-					state := "expanded"
-					if m.activityCollapsed[id] {
-						state = "collapsed"
-					}
-					block(e, dimStyle.Render("Activity "+activitySelector(id)+" · "+state+" · /activity "+activitySelector(id)))
-				}
-				if m.activityCollapsed[id] {
-					continue
-				}
+	m.folds.targets = nil
+	m.folds.parents = make(map[uint64]uint64)
+	for i := 0; i < len(source); i++ {
+		e := &source[i]
+		if !e.inStream(m.streamUI.selected) {
+			continue
+		}
+		if actor := activityActor(e); actor != "" {
+			group := []*entry{e}
+			for i+1 < len(source) && activityActor(&source[i+1]) == actor {
+				i++
+				group = append(group, &source[i])
 			}
+			firstRow := len(rows)
+			if len(rows) > 0 {
+				firstRow++
+			}
+			block(e, m.renderActivity(group, firstRow))
+			continue
+		}
+		if e.label == "Tool" {
 			block(e, toolStyle.Render(toolRow(e, max(1, m.viewport.Width-1))))
 			continue
 		}
@@ -714,26 +731,22 @@ func (m *model) renderTranscript(follow bool) {
 			style = stateStyle
 		}
 		display := e
-		if e.output != nil && m.activityCollapsed[*e.output] {
+		if e.reasoningExpanded && e.output != nil && m.activityCollapsed[*e.output] {
 			copy := *e
 			copy.reasoningExpanded = false
 			copy.renderWidth = 0
 			display = &copy
 		}
 		body := m.renderBody(display)
-		if e.output != nil {
-			state := "expanded"
-			if m.activityCollapsed[*e.output] {
-				state = "collapsed"
-			}
-			body = "Activity " + activitySelector(*e.output) + " · " + state + " · /activity " + activitySelector(*e.output) + "\n" + body
-		}
 		heading := style.Render(e.label) + "  " + dimStyle.Render(e.at.Format("15:04"))
-		if e.meta != "" {
+		if e.output != nil {
+			heading = style.Render(m.activityName(e.output.Agent)) + "  " + dimStyle.Render(e.at.Format("15:04"))
+		}
+		if e.meta != "" && (e.output == nil || e.outputFailed) {
 			heading += "  " + dimStyle.Render(e.meta)
 		}
 		if e.progress && !e.outputFailed {
-			heading = routeStyle.Render(inlineText(string(e.actors[0])) + " · Progress")
+			heading = routeStyle.Render(m.activityName(e.actors[0]) + " · Progress")
 			stamp := e.at.Format("15:04")
 			room := m.viewport.Width - 1 - ansi.StringWidth(heading) - len(stamp)
 			if room >= 2 {
@@ -811,15 +824,7 @@ func (m *model) renderView() string {
 	for _, suggestion := range m.completionView() {
 		lines = append(lines, suggestion)
 	}
-	composerLabel := "─ To Strap (root) "
-	lines = append(lines, dimStyle.Render(composerLabel+strings.Repeat("─", max(0, m.viewport.Width-ansi.StringWidth(composerLabel)))))
-	for _, row := range strings.Split(m.input.View(), "\n") {
-		lines = append(lines, row)
-	}
-	lines = append(lines,
-		m.activityLine(),
-		dimStyle.Render(m.footer()),
-	)
+	lines = append(lines, m.renderComposer()...)
 	var roster []rosterLine
 	if m.sidebarWidth() != 0 {
 		roster = m.rosterLines(m.rosterHeight(), rosterColumns)

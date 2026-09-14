@@ -32,11 +32,8 @@ func (m *model) renderBody(e *entry) string {
 			}
 		}
 	}
-	if e.reasoning != "" {
-		heading := "▸ Thinking · Ctrl+T show"
-		if e.reasoningExpanded {
-			heading = "▾ Thinking · Ctrl+T hide\n" + e.reasoning
-		}
+	if e.reasoning != "" && e.reasoningExpanded {
+		heading := "▾ Thinking · Ctrl+T hide\n" + e.reasoning
 		// Keep the separator outside the styled block: Lip Gloss pads trailing
 		// blank lines to the heading width, which would indent the answer.
 		thinking := dimStyle.Render(heading)

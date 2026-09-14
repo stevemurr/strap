@@ -51,12 +51,15 @@ func TestActivityDisclosurePreservesTextChronologyAndExpansion(t *testing.T) {
 	if err := m.toggleActivity("root/1"); err != nil {
 		t.Fatal(err)
 	}
+	if err := m.toggleActivity("root/1"); err != nil {
+		t.Fatal(err)
+	}
 	add("second")
 	m.addAttributed("Message", "worker", "Interleaved reply", false, "worker")
 	add("third")
 	m.addAttributed("Error", "root", "Visible failure", false, "root")
 	view := ansi.Strip(m.viewport.View())
-	if strings.Contains(view, "root · First") || strings.Contains(view, "root · Third") || !strings.Contains(view, "Visible root commentary") || !strings.Contains(view, "Visible failure") {
+	if len(m.folds.targets) != 2 || !strings.Contains(view, "Visible root commentary") || !strings.Contains(view, "Visible failure") {
 		t.Fatal(view)
 	}
 	before := len(m.entries)
@@ -64,7 +67,7 @@ func TestActivityDisclosurePreservesTextChronologyAndExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 	view = ansi.Strip(m.viewport.View())
-	a, b, c := strings.Index(view, "root · First"), strings.Index(view, "Interleaved reply"), strings.Index(view, "root · Third")
+	a, b, c := strings.Index(view, "  ▸ ● First"), strings.Index(view, "Interleaved reply"), strings.Index(view, "  ▸ ● Third")
 	if a < 0 || b < a || c < b || len(m.entries) != before {
 		t.Fatal(view)
 	}

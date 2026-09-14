@@ -204,7 +204,7 @@ func TestCompletedExchangeShowsIdleWithoutReceiptNoise(t *testing.T) {
 	}
 }
 
-func TestToolTimelineContainsNamesOnly(t *testing.T) {
+func TestToolTimelineShowsPreviewsButHidesRawDetails(t *testing.T) {
 	m, _ := setup(t)
 	m.entries = nil
 	for _, name := range []string{"create_agent", "read_pdf", "some_custom_tool"} {
@@ -215,12 +215,12 @@ func TestToolTimelineContainsNamesOnly(t *testing.T) {
 		m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	}
 	got := m.View()
-	for _, want := range []string{"├─ worker · Create agent", "├─ worker · Read PDF", "├─ worker · Some custom tool"} {
+	for _, want := range []string{"Create agent", "Read PDF", "3 calls", "private.pdf"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %s", want, got)
 		}
 	}
-	for _, raw := range []string{"raw-call-id", "private.pdf", "raw-result", "create_agent", "read_pdf"} {
+	for _, raw := range []string{"raw-call-id", "raw-result", "create_agent", "read_pdf"} {
 		if strings.Contains(got, raw) {
 			t.Errorf("raw tool information shown: %s", raw)
 		}

@@ -141,11 +141,23 @@ func (m *model) restoreStreamPosition(p streamPosition) {
 	}
 	offset := p.offset
 	if p.anchor.entry != 0 {
+		found := false
 		for i, a := range m.streamUI.lines {
 			if a.entry == p.anchor.entry {
+				found = true
 				offset = i
 				if a.line >= p.anchor.line {
 					break
+				}
+			}
+		}
+		if !found {
+			if parent, ok := m.folds.parents[p.anchor.entry]; ok {
+				for i, a := range m.streamUI.lines {
+					if a.entry == parent {
+						offset = i
+						break
+					}
 				}
 			}
 		}
@@ -154,6 +166,7 @@ func (m *model) restoreStreamPosition(p streamPosition) {
 }
 
 func (m *model) selectStream(id message.ActorID) {
+	m.folds.focused = false
 	m.streamUI.completedFocused = false
 	if m.rosterGroup(id) == "Completed" {
 		m.streamUI.completedExpanded = true
@@ -171,6 +184,8 @@ func (m *model) selectStream(id message.ActorID) {
 }
 
 func (m *model) clearStreams() {
+	m.folds = foldState{}
+	m.activityCollapsed = nil
 	for _, v := range m.streamUI.views {
 		v.position = streamPosition{follow: true}
 		clear(v.unread)
@@ -179,6 +194,9 @@ func (m *model) clearStreams() {
 }
 
 func (m *model) focusRoster(focus bool) {
+	if focus {
+		m.folds.focused = false
+	}
 	m.streamUI.rosterFocused = focus
 	if focus {
 		m.input.Blur()

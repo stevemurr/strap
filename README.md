@@ -131,15 +131,19 @@ includes messages routed to or from root; a child's unaddressed live output and
 tools stay in that child's stream and All activity. `/transcript [id]` remains
 the separate model-history inspector.
 
-The colorized transcript keeps every progress update, message, and tool call in
-order. Response activity starts expanded; `/activity agent-id/response-number`
-toggles that response’s thinking and tool detail. Commentary, replies and errors
-remain visible, and interleaved chronological segments stay in place. Each tool call has its own row,
-including repeated calls, labeled with the calling agent. Long tool rows wrap
-to fit the terminal width. Scroll back to read earlier activity.
-Raw tool arguments, call IDs, and result payloads stay out of the display.
-Routine delivery receipts are
-tracked internally; they are not printed as conversation output.
+The colorized transcript groups consecutive tool-only responses from the same
+agent into a collapsed activity fold. Its summary shows tool counts, status,
+elapsed time, and the latest target. Commentary, replies, errors, and another
+agent's activity always separate groups; the underlying history stays intact.
+Click a disclosure triangle to expand it, or press F7 and use Up / Down and Enter.
+Escape returns to composing. Expand an individual tool to inspect its arguments,
+result, and context-token measurement. Large payloads are capped in this view;
+`/transcript [id]` provides the full model history. Repeated calls keep separate
+rows and their original order. Calls within an agent currently execute sequentially.
+`/activity agent-id/response-number` also toggles that response's activity segments.
+Blue identifies assistant messages, cyan tools and progress, amber running work,
+green completion, and red failures. Status symbols also work without color.
+Routine delivery receipts are tracked internally rather than printed as messages.
 
 Conversation messages render Markdown with headings, emphasis, lists, links,
 tables, and code blocks using [Glamour](https://github.com/charmbracelet/glamour).
@@ -152,9 +156,8 @@ Source messages remain unchanged; rendering is cached until the width changes.
 After an exchange, `Idle` means the agent is waiting for another message.
 `queued` counts pending messages; it is a delivery status, not an agent state.
 
-An animated spinner tracks the current active period, including delegated work,
-with separate elapsed times for running tools. The last active duration remains
-visible when idle. Assistant text accompanying tool calls appears as an attributed
+Activity folds show elapsed time and update while tools run; the agent list shows
+which agents are working or need attention. Assistant text accompanying tool calls appears as an attributed
 progress paragraph before that batch's tool rows. Agents are prompted to explain
 their first action and meaningful findings between batches. These host-only
 updates do not enter agent inboxes or mark work complete; the original text stays
@@ -219,6 +222,11 @@ Tab inserts four spaces outside slash completion. Slash commands run only from
 a single-line draft, so pasted multiline text beginning with `/` is sent as a
 message. Leading indentation and trailing newlines are preserved when sending.
 
+The shaded composer always sends to Strap (root), regardless of the stream being
+viewed. It grows with the draft, has a clickable send arrow, and shows brief
+shortcut hints while typing. Operational status stays with the activity above.
+Type `/` to reveal commands; there is no permanent command toolbar.
+
 | Key or command | Action |
 |---|---|
 | Enter | Send the draft, or complete / run a slash command |
@@ -227,6 +235,10 @@ message. Leading indentation and trailing newlines are preserved when sending.
 | Alt+Up / Alt+Down | Recall history / restore the unfinished draft |
 | Tab / Escape | Complete / dismiss suggestions; Tab otherwise inserts four spaces |
 | F6 | Focus the agent list / return to the root composer |
+| F7 | Focus activity folds / return to the root composer |
+| Up / Down, then Enter (folds focused) | Select and expand a group or tool result |
+| Click a disclosure triangle | Expand / collapse an activity group or tool result |
+| Click ↑ in the composer | Send the draft through the same path as Enter |
 | Up / Down, then Enter (agent list focused) | Select a live stream, then return to composing |
 | `/focus [id\|root\|all]` | Watch an agent's live stream or All activity; defaults to root |
 | Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |

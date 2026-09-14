@@ -34,7 +34,7 @@ func TestCommentarySeparatesToolGroupsAndKeepsAgentsWorking(t *testing.T) {
 			}
 			addTool(m, actor, "read_file")
 			view := ansi.Strip(m.viewport.View())
-			if strings.Count(view, "├─") != 2 || strings.Index(view, "DAW") < strings.Index(view, "├─") || strings.Index(view, "DAW") > strings.LastIndex(view, "├─") {
+			if strings.Count(view, "▸") != 2 || strings.Index(view, "DAW") < strings.Index(view, "▸") || strings.Index(view, "DAW") > strings.LastIndex(view, "▸") {
 				t.Fatal("commentary did not separate tool groups", view)
 			}
 			if !m.working[actor] || m.states[actor] != agent.Running || m.busySince != started || len(m.pending) != 0 {

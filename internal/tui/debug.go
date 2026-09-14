@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	toolStyle  = dimStyle
-	routeStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "30", Dark: "116"})
-	stateStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "136", Dark: "179"})
+	toolStyle    = dimStyle
+	routeStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "30", Dark: "116"})
+	stateStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "136", Dark: "179"})
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "114"})
 )
 
 type toolKey struct {
@@ -51,7 +52,7 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 	if activity.FinishedAt.IsZero() {
 		m.activeTools[key] = activity
 		m.streamUI.nextEntry++
-		m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: []message.ActorID{event.Agent}, label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key})
+		m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: []message.ActorID{event.Agent}, label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key, toolInfo: displayTool(activity)})
 		for i := len(m.entries) - 2; i >= 0; i-- {
 			if m.entries[i].output != nil && m.entries[i].output.Agent == event.Agent {
 				id := *m.entries[i].output
@@ -66,8 +67,33 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 		return
 	}
 	delete(m.activeTools, key)
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].label == "Tool" && m.entries[i].tool == key {
+			m.entries[i].toolInfo = displayTool(activity)
+			m.noteStreamEntry(&m.entries[i])
+			break
+		}
+	}
 	if activity.Err != nil {
 		m.addAttributed("Error", string(event.Agent), name+" failed: "+activity.Err.Error(), false, event.Agent)
+	}
+	if !m.selecting {
+		m.renderTranscript(false)
+	}
+}
+
+func (m *model) endToolActivity(actor message.ActorID, reason string) {
+	for i := range m.entries {
+		e := &m.entries[i]
+		if e.toolInfo != nil && e.toolInfo.finished.IsZero() && (actor == "" || e.tool.agent == actor) {
+			d := *e.toolInfo
+			d.finished, d.failure = m.now(), reason
+			e.toolInfo = &d
+			delete(m.activeTools, e.tool)
+		}
+	}
+	if !m.selecting {
+		m.renderTranscript(false)
 	}
 }
 

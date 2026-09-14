@@ -20,27 +20,43 @@ func addTool(m *model, actor message.ActorID, name string) {
 
 func TestToolRowsRemainSeparateWithAgentAttribution(t *testing.T) {
 	m, _ := setup(t)
-	m.resize(100, 60)
+	m.resize(120, 60)
 	m.entries = nil
 	for range 3 {
 		addTool(m, "agent-2", "read_file")
 	}
 	addTool(m, "agent-2", "write_file")
 	addTool(m, "agent-3", "shell")
-	got := ansi.Strip(m.viewport.View())
-	if strings.Count(got, "├─ agent-2 · Read file") != 3 || !strings.Contains(got, "├─ agent-2 · Write file") || !strings.Contains(got, "├─ agent-3 · Shell") || strings.Count(got, "├─") != 5 {
-		t.Fatal(got)
+	view := ansi.Strip(m.viewport.View())
+	if !strings.Contains(view, "4 calls · agent-2") || !strings.Contains(view, "1 call · agent-3") {
+		t.Fatal(view)
+	}
+	expandActivityForTest(m, false)
+	tools := 0
+	for _, target := range m.folds.targets {
+		if target.key.tool {
+			tools++
+		}
+	}
+	if tools != 5 {
+		t.Fatalf("expanded view lost repeated calls: %d", tools)
 	}
 	m.add("Strap", "A message between calls", false)
 	addTool(m, "agent-2", "read_file")
-	got = ansi.Strip(m.viewport.View())
-	if strings.Count(got, "├─") != 6 {
-		t.Fatal("message hid an earlier tool call", got)
+	expandActivityForTest(m, false)
+	tools = 0
+	for _, target := range m.folds.targets {
+		if target.key.tool {
+			tools++
+		}
+	}
+	if tools != 6 {
+		t.Fatal("message hid an earlier tool call")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 25, Height: 24})
 	for _, line := range strings.Split(m.View(), "\n") {
 		if lipgloss.Width(line) > 25 {
-			t.Fatal("tool row overflow", line)
+			t.Fatal("tool overflow", line)
 		}
 	}
 }
@@ -56,12 +72,12 @@ func TestToolCallsDoNotChangeFrozenView(t *testing.T) {
 		t.Fatal("new call changed frozen display")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
-	if strings.Count(ansi.Strip(m.viewport.View()), "├─ agent-2 · Read file") != 1 {
-		t.Fatal("resize revealed a new tool call")
+	if !strings.Contains(ansi.Strip(m.viewport.View()), "1 call · agent-2") {
+		t.Fatal("resize revealed a new call")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
-	if strings.Count(ansi.Strip(m.viewport.View()), "├─ agent-2 · Read file") != 2 {
-		t.Fatal("resume lost an individual tool call")
+	if !strings.Contains(ansi.Strip(m.viewport.View()), "2 calls · agent-2") {
+		t.Fatal("resume lost call")
 	}
 }
 

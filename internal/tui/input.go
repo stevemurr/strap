@@ -13,15 +13,17 @@ import (
 
 func newInput() textarea.Model {
 	input := textarea.New()
-	input.Prompt = "› "
+	input.Prompt = ""
 	input.ShowLineNumbers = false
 	input.FocusedStyle.Prompt = titleStyle
 	input.FocusedStyle.Placeholder = dimStyle
 	input.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	input.Placeholder = "Message Strap (root)…"
+	input.Placeholder = "Message Strap…"
 	input.CharLimit = 0
 	input.MaxWidth = 0
 	input.SetHeight(1)
+	input.FocusedStyle.Base = lipgloss.NewStyle().Background(composerBackground)
+	input.BlurredStyle.Base = lipgloss.NewStyle().Background(composerBackground)
 	input.KeyMap.InsertNewline = bindings.NewBinding(bindings.WithKeys("alt+enter", "ctrl+j"))
 	input.Focus()
 	return input

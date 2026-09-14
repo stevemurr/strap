@@ -53,6 +53,7 @@ func (m *model) observeOutput(fact agent.Event) {
 			return
 		}
 		row.meta = fmt.Sprintf("%s · %s", e.Output.Agent, e.Status)
+		row.outputFinished = true
 		row.outputFailed = e.Status != agent.OutputComplete || e.Err != nil
 		row.renderWidth = 0
 		m.noteStreamEntry(row)

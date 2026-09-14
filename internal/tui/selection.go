@@ -119,7 +119,7 @@ func (s *mouseSelection) view(width int) string {
 
 func (m *model) selectWithMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 	if event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress {
-		if m.transcript == nil && event.X >= 1+m.sidebarWidth() && event.Y >= m.height-m.input.Height()-2 && event.Y < m.height-2 {
+		if m.transcript == nil && event.X >= 1+m.sidebarWidth() && event.Y >= m.composerTop()+1 && event.Y < m.composerTop()+1+m.input.Height() {
 			m.focusRoster(false)
 		}
 		view := m.View()
@@ -131,14 +131,14 @@ func (m *model) selectWithMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 		m.mouseSelection = &mouseSelection{lines: lines, start: point, end: point, dragging: true, status: "Drag to select · release to copy"}
 		// A multiline transcript drag must not copy the neighboring roster.
 		if m.transcript == nil && m.sidebarWidth() != 0 {
-			left, top := 1+m.sidebarWidth(), 4
+			left, top := 1+m.sidebarWidth(), m.transcriptTop()
 			m.mouseSelection.footerLeft = left
 			bottom := top + m.viewport.Height
 			if point.x >= left && point.y >= top && point.y < bottom {
 				m.mouseSelection.region = &selectionRegion{left: left, right: left + m.viewport.Width, top: top, bottom: bottom}
 				m.focusRoster(false)
-			} else if inputTop := m.height - m.input.Height() - 2; point.x >= left && point.y >= inputTop && point.y < m.height-2 {
-				m.mouseSelection.region = &selectionRegion{left: left, right: left + m.viewport.Width, top: inputTop, bottom: m.height - 2}
+			} else if inputTop := m.composerTop() + 1; point.x >= left && point.y >= inputTop && point.y < inputTop+m.input.Height() {
+				m.mouseSelection.region = &selectionRegion{left: left, right: left + m.viewport.Width, top: inputTop, bottom: inputTop + m.input.Height()}
 			}
 		}
 		return true, textarea.Blink

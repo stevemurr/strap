@@ -15,7 +15,7 @@ const rosterColumns = 34
 
 func (m *model) streamChrome() int {
 	if m.height >= 12 {
-		return 3 // Stream title, inspector hints, and independent follow status.
+		return 3 // Title, agent context, and space for history/error status.
 	}
 	return 0
 }
@@ -272,20 +272,12 @@ func (m *model) streamDetails() string {
 	}
 	id := m.streamUI.selected
 	if id == "" {
-		return "Stream · all agents · F6 agents"
+		return "All agents"
 	}
-	context := "context unknown"
-	if c := m.ensureStream(id).context; c != nil {
-		context = c.label()
-		if !c.failed && !c.pending {
-			context = tokenDigits(c.count) + " ctx · last count"
-		}
-	}
-	parts := []string{m.streamRole(id), m.streamState(id), context}
+	parts := []string{inlineText(string(id)), m.streamRole(id)}
 	if parent := m.ensureStream(id).parent; parent != "" {
 		parts = append(parts, "parent "+inlineText(string(parent)))
 	}
-	parts = append(parts, "/transcript "+inlineText(string(id)))
 	return strings.Join(parts, " · ")
 }
 
@@ -295,13 +287,20 @@ func (m *model) streamTitle() string {
 	}
 	id := m.streamUI.selected
 	if id == "" {
-		return titleStyle.Render("All activity")
+		state := "idle"
+		if m.busy() {
+			state = "working"
+		}
+		return titleStyle.Render("All activity") + "  " + stateStyle.Render(state)
 	}
-	title := inlineText(string(id)) + " · " + m.streamRole(id)
+	title := m.streamRole(id)
 	if _, ok := m.streamWork(id); ok || id == m.session.Root() {
-		title = inlineText(string(id)) + " · " + m.streamTask(id)
+		title = m.streamTask(id)
 	}
 	state := m.rosterStatus(id)
+	if id == m.session.Root() && state == "idle" && len(m.working) > 0 {
+		state = fmt.Sprintf("%d agent(s) working", len(m.working))
+	}
 	width := max(1, m.viewport.Width-len(state)-3)
 	return titleStyle.Render(ansi.Truncate(title, width, "…")) + "  " + stateStyle.Render(state)
 }
@@ -324,10 +323,10 @@ func (m *model) streamFollowLabel() string {
 	if w, ok := m.streamWork(id); ok && !workFinished(w) && w.Blocker != "" {
 		return label + " · blocked: " + inlineText(w.Blocker)
 	}
-	if activity := m.streamActivity(id); activity != "" {
-		label += " · " + activity
+	if m.closed || m.rootStopped {
+		return m.status()
 	}
-	return label
+	return ""
 }
 
 func (m *model) streamBody() string {
