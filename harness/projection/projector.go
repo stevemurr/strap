@@ -443,12 +443,12 @@ func (p *Projector) Apply(e eventlog.Record) error {
 				return errors.New("invalid work revision")
 			}
 			switch w.Kind {
-			case work.Implementation, work.AuditWork, work.Repair:
+			case work.Implementation, work.AuditWork, work.Repair, work.Research:
 			default:
 				return errors.New("invalid work kind")
 			}
 			switch w.State {
-			case work.Active, work.NeedsCheck, work.Checking, work.ChangesRequested, work.Accepted, work.Closed, work.Cancelled:
+			case work.Active, work.NeedsCheck, work.Checking, work.ChangesRequested, work.Accepted, work.Closed, work.Cancelled, work.Delivered:
 			default:
 				return errors.New("invalid work state")
 			}

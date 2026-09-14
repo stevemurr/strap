@@ -42,7 +42,7 @@ func New(options ...Option) *Store {
 func (s *Store) id(prefix string) string { s.next++; return fmt.Sprintf("%s-%d", prefix, s.next) }
 func blank(v string) bool                { return strings.TrimSpace(v) == "" }
 func invalid(why string) error           { return fmt.Errorf("%w: %s", ErrInvalid, why) }
-func live(w Work) bool                   { return w.State != Cancelled && w.State != Closed && w.State != Accepted }
+func live(w Work) bool                   { return !w.State.Terminal() }
 func (s *Store) steps(scope *Scope) []Step {
 	if scope == nil {
 		return nil

@@ -72,7 +72,7 @@ func TestAssignmentSchemaDoesNotAdvertiseInternalCallableNames(t *testing.T) {
 	var schema struct {
 		OneOf []map[string]json.RawMessage `json:"oneOf"`
 	}
-	if e := json.Unmarshal([]byte(raw), &schema); e != nil || len(schema.OneOf) != 3 {
+	if e := json.Unmarshal([]byte(raw), &schema); e != nil || len(schema.OneOf) != 4 {
 		t.Fatal("lost variants", e)
 	}
 }

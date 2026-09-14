@@ -313,11 +313,13 @@ func (m *model) streamWork(id message.ActorID) (work.Work, bool) {
 }
 
 func workFinished(w work.Work) bool {
-	return w.State == work.Accepted || w.State == work.Closed || w.State == work.Cancelled
+	return w.State.Terminal()
 }
 
 func workStatus(w work.Work) string {
 	switch w.State {
+	case work.Delivered:
+		return "delivered"
 	case work.Accepted:
 		return "completed"
 	case work.Closed:

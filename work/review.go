@@ -300,11 +300,17 @@ func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, er
 	if !live(w) || blank(r.Reason) {
 		return Work{}, ErrState
 	}
-	if w.Kind == Implementation {
+	switch w.Kind {
+	case Implementation:
 		s.cancelImplementation(actor, w, r.Reason)
-	} else if w.Kind == Repair {
+	case Repair:
 		s.cancelImplementation(actor, s.works[w.ParentID], r.Reason)
-	} else {
+	case Research:
+		w.State, w.Blocker, w.Note = Cancelled, "", r.Reason
+		w.Revision++
+		s.putWork(w.ID, w)
+		s.emit(WorkCancelled, actor, w, true)
+	case AuditWork:
 		w.State = Cancelled
 		w.Blocker = ""
 		w.Revision++
@@ -316,6 +322,8 @@ func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, er
 		original.Revision++
 		s.putWork(original.ID, original)
 		s.emit(ReviewRequested, actor, original, true)
+	default:
+		return Work{}, invalid("unknown work kind")
 	}
 	return s.works[w.ID].Clone(), nil
 }

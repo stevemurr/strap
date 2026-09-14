@@ -82,8 +82,20 @@ var repairContract = assignmentBranch[repairArgs]{"assign_repair", parameters[re
 	},
 }
 
+type researchArgs struct {
+	Kind           work.Kind        `json:"kind"`
+	Assignee       identity.ActorID `json:"assignee"`
+	Task           string           `json:"task"`
+	Context        string           `json:"context,omitempty"`
+	ExpectedOutput string           `json:"expected_output,omitempty"`
+}
+
+var researchContract = assignmentBranch[researchArgs]{"assign_research", parameters[researchArgs](Enum("kind", "research"), MinLength("assignee", 1), MinLength("task", 1)), func(a researchArgs) work.AssignmentRequest {
+	return work.AssignmentRequest{Kind: a.Kind, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput}
+}}
+
 func assignmentContracts() []assignmentContract {
-	return []assignmentContract{implementationContract, auditContract, repairContract}
+	return []assignmentContract{implementationContract, auditContract, repairContract, researchContract}
 }
 func DecodeAssignment(raw json.RawMessage) (work.AssignmentRequest, error) {
 	var selected work.AssignmentRequest

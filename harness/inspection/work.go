@@ -128,12 +128,12 @@ func decodeWorkQuery(q work.ListQuery) (workCursor, error) {
 		}
 	}
 	switch c.Filters.Kind {
-	case "", work.Implementation, work.AuditWork, work.Repair:
+	case "", work.Implementation, work.AuditWork, work.Repair, work.Research:
 	default:
 		return c, fmt.Errorf("%w: invalid kind", work.ErrInvalid)
 	}
 	switch c.Filters.State {
-	case "", work.Active, work.NeedsCheck, work.ChangesRequested, work.Checking, work.Accepted, work.Closed, work.Cancelled:
+	case "", work.Active, work.NeedsCheck, work.ChangesRequested, work.Checking, work.Accepted, work.Closed, work.Cancelled, work.Delivered:
 	default:
 		return c, fmt.Errorf("%w: invalid state", work.ErrInvalid)
 	}

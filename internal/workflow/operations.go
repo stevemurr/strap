@@ -259,11 +259,14 @@ func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, r work
 	switch r.Kind {
 	case work.Implementation:
 		return s.Store.AssignWork(actor, work.AssignRequest{Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput, Scope: r.Scope})
+	case work.Research:
+		return s.Store.AssignResearch(actor, work.ResearchAssignRequest{Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput})
 	case work.AuditWork:
 		return s.Store.AssignAudit(actor, work.AssignAuditRequest{WorkTarget: work.WorkTarget{ID: r.WorkID, ExpectedRevision: r.ExpectedRevision}, SubmissionID: r.SubmissionID, Auditor: r.Assignee})
-	default:
+	case work.Repair:
 		return s.Store.AssignRepair(actor, work.AssignRepairRequest{WorkTarget: work.WorkTarget{ID: r.WorkID, ExpectedRevision: r.ExpectedRevision}, AuditID: r.AuditID, Assignee: r.Assignee})
 	}
+	return work.Work{}, work.ErrInvalid
 }
 
 func (s *Session) begin(ctx context.Context) (context.Context, func(), error) {

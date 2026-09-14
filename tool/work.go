@@ -85,7 +85,7 @@ func AssignWork(handle Handler[AssignWorkArgs]) Tool {
 	for _, b := range assignmentContracts() {
 		branches = append(branches, b.tool(handle))
 	}
-	return compose(provider.ToolDefinition{Name: "assign_work", Description: "Create NEW tracked implementation, audit, or repair work for a required existing assignee. To transfer an existing work item to a replacement agent, use reassign_work. Use create_agent first to create one. Implementation requires task; scope is optional. Omit work_id, expected_revision, submission_id, and audit_id for implementation, including when reusing an agent. Audit and repair use the original implementation work_id and its current expected_revision. Audit requires submission_id; repair requires the failing verdict audit_id. For audit/repair, omit task, context, expected_output, and scope: the server derives them. Returns work registration, not delivery or completion."}, branches...)
+	return compose(provider.ToolDefinition{Name: "assign_work", Description: "Create NEW tracked implementation, audit, repair, or research work for a required existing assignee. To transfer an existing work item to a replacement agent, use reassign_work. Use create_agent first to create one. Implementation requires task; scope is optional. Research requires task and forbids scope, work_id, expected_revision, submission_id and audit_id. Omit work_id, expected_revision, submission_id, and audit_id for implementation, including when reusing an agent. Audit and repair use the original implementation work_id and its current expected_revision. Audit requires submission_id; repair requires the failing verdict audit_id. For audit/repair, omit task, context, expected_output, and scope: the server derives them. Returns work registration, not delivery or completion."}, branches...)
 }
 func SubmitWork(handle Handler[work.SubmitRequest]) Tool {
 	return builtin("submit_work",
@@ -166,7 +166,7 @@ func ListWork(handle Handler[work.ListQuery]) Tool {
 	return compose(provider.ToolDefinition{Name: "list_work", Description: "Discover tracked work, including closed and cancelled work. Root only. Start with optional assignee, kind and state filters; continue with cursor and optional limit only. Results describe a fixed recorded snapshot. Use get_work for current details before mutations. Discovery does not guarantee exactly-once retries."},
 		builtin("first_work_page", "", func(ctx context.Context, c Call, q first) (Result, error) {
 			return handle(ctx, c, work.ListQuery{Assignee: q.Assignee, Kind: q.Kind, State: q.State, Limit: q.Limit})
-		}, Enum("kind", "implementation", "audit", "repair"), Enum("state", "active", "needs_check", "checking", "changes_requested", "accepted", "closed", "cancelled"), Minimum("limit", 1), Maximum("limit", 100)),
+		}, Enum("kind", "implementation", "audit", "repair", "research"), Enum("state", "active", "needs_check", "checking", "changes_requested", "accepted", "closed", "cancelled", "delivered"), Minimum("limit", 1), Maximum("limit", 100)),
 		builtin("next_work_page", "", func(ctx context.Context, c Call, q next) (Result, error) {
 			return handle(ctx, c, work.ListQuery{Cursor: q.Cursor, Limit: q.Limit})
 		}, MinLength("cursor", 1), Minimum("limit", 1), Maximum("limit", 100)))

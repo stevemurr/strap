@@ -23,6 +23,8 @@ type Verdict string
 type EventKind string
 
 const (
+	Research         Kind       = "research"
+	Delivered        State      = "delivered"
 	Implementation   Kind       = "implementation"
 	AuditWork        Kind       = "audit"
 	Repair           Kind       = "repair"
@@ -256,4 +258,8 @@ func (e Event) Clone() Event {
 		e.Plan = &p
 	}
 	return e
+}
+
+func (s State) Terminal() bool {
+	return s == Accepted || s == Closed || s == Cancelled || s == Delivered
 }

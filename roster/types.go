@@ -23,6 +23,8 @@ func (r Role) WorkKinds() []work.Kind {
 	switch r {
 	case Implementor:
 		return []work.Kind{work.Implementation, work.Repair}
+	case Researcher:
+		return []work.Kind{work.Research}
 	case Auditor:
 		return []work.Kind{work.AuditWork}
 	}

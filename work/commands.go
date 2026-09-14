@@ -36,6 +36,10 @@ func (r AssignmentRequest) Validate() error {
 		if blank(r.Task) || r.WorkID != "" || r.ExpectedRevision != 0 || r.SubmissionID != "" || r.AuditID != "" {
 			return invalid("implementation requires task and cannot select a submission or audit")
 		}
+	case Research:
+		if blank(r.Task) || r.Scope != nil || r.WorkID != "" || r.ExpectedRevision != 0 || r.SubmissionID != "" || r.AuditID != "" {
+			return invalid("research requires task and forbids scope, submission and audit selectors")
+		}
 	case AuditWork, Repair:
 		if blank(string(r.WorkID)) || r.ExpectedRevision == 0 || r.Scope != nil || r.Task != "" || r.Context != "" || r.ExpectedOutput != "" {
 			return invalid("audit and repair require original work_id and expected_revision; task and scope are derived")
@@ -47,7 +51,7 @@ func (r AssignmentRequest) Validate() error {
 			return invalid("repair requires audit_id and forbids submission_id")
 		}
 	default:
-		return invalid("kind must be implementation, audit, or repair")
+		return invalid("kind must be implementation, audit, repair, or research")
 	}
 	return nil
 }
