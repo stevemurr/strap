@@ -29,7 +29,7 @@ func callAs(s *Session, ctx context.Context, actor message.ActorID, name string,
 }
 func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	_, s := recoverySession(t)
-	created := invokeRoot(t, s, "update_plan", map[string]any{"title": "plan", "steps": []any{map[string]any{"title": "first"}, map[string]any{"title": "second"}}})
+	created := invokeRoot(t, s, "create_plan", map[string]any{"title": "plan", "steps": []any{map[string]any{"title": "first"}, map[string]any{"title": "second"}}})
 	var p work.Plan
 	if err := json.Unmarshal([]byte(created.Content.Text()), &p); err != nil {
 		t.Fatal(err)

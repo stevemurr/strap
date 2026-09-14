@@ -311,7 +311,8 @@ The CLI exposes tools according to each agent’s role:
 
 | Tool | Contract |
 |---|---|
-| `update_plan` | Root creates or edits plan structure using plan revisions |
+| `create_plan` | Root creates the shared plan once, with nested initial steps |
+| `add_step` / `edit_step` / `cancel_steps` / `reorder_steps` / `rename_plan` | Root changes one plan or one step per call using the plan revision; step status is never set here |
 | `report_work_progress` | Current worker reports a full position, findings, or eligible scoped steps using work and assignment revisions |
 | `create_agent` | Root creates an idle registered `implementor` or `auditor`; no task starts |
 | `assign_work` | Require an existing `assignee`: implementation takes task and optional scope; audit takes original work/revision/submission; repair takes original work/revision/audit |

@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
@@ -18,23 +17,54 @@ type createPlanArgs struct {
 	Title string        `json:"title"`
 	Steps []newPlanStep `json:"steps"`
 }
-type editPlanArgs struct {
-	PlanID           work.PlanID     `json:"plan_id"`
-	ExpectedRevision work.Revision   `json:"expected_revision"`
-	Title            *string         `json:"title,omitempty"`
-	Steps            []work.StepEdit `json:"steps,omitempty"`
-	Order            []work.StepID   `json:"order,omitempty"`
-	Cancel           []work.StepID   `json:"cancel,omitempty"`
+type addStepArgs struct {
+	PlanID             work.PlanID   `json:"plan_id"`
+	ExpectedRevision   work.Revision `json:"expected_revision"`
+	Title              string        `json:"title"`
+	AcceptanceCriteria []string      `json:"acceptance_criteria,omitempty"`
+}
+type editStepArgs struct {
+	PlanID             work.PlanID   `json:"plan_id"`
+	ExpectedRevision   work.Revision `json:"expected_revision"`
+	StepID             work.StepID   `json:"step_id"`
+	Title              *string       `json:"title,omitempty"`
+	AcceptanceCriteria []string      `json:"acceptance_criteria,omitempty"`
+}
+type cancelStepsArgs struct {
+	PlanID           work.PlanID   `json:"plan_id"`
+	ExpectedRevision work.Revision `json:"expected_revision"`
+	StepIDs          []work.StepID `json:"step_ids"`
+}
+type reorderStepsArgs struct {
+	PlanID           work.PlanID   `json:"plan_id"`
+	ExpectedRevision work.Revision `json:"expected_revision"`
+	Order            []work.StepID `json:"order"`
+}
+type renamePlanArgs struct {
+	PlanID           work.PlanID   `json:"plan_id"`
+	ExpectedRevision work.Revision `json:"expected_revision"`
+	Title            string        `json:"title"`
 }
 
-// UpdatePlan composes independently typed creation, structural editing and
-// progress operations. Nil callbacks omit that capability from the tool schema.
-func UpdatePlan(plan Handler[work.PlanUpdate], progress Handler[work.ProgressUpdate]) Tool {
-	branches := []Tool{}
-	guidance := []string{"Use exactly one operation. Send steps as a JSON array of objects and expected_revision as a JSON integer, never quoted strings. Omit unused fields; do not send null or copy whole step snapshots."}
-	if plan != nil {
-		guidance = append(guidance, `Create: {"title":"Plan title","steps":[{"title":"Step title"}]}. Omit IDs, revision, status and note; new steps start pending. Edit: {"plan_id":"<plan_id>","expected_revision":1,"steps":[{"step_id":"<step_id>","title":"Revised title"}]}. Use the revision from get_plan, not a work revision. Step edits allow only step_id, title and acceptance_criteria (an array of strings). New steps omit step_id. Omit unchanged steps, especially reserved or completed steps. order must list every step ID exactly once; to reorder newly added steps, first read their issued IDs from the update result. cancel lists step IDs.`)
-		createPlan := func(ctx context.Context, c Call, a createPlanArgs) (Result, error) {
+const (
+	planRevisionHint = "Use plan_id and the revision from get_plan or the last plan receipt as expected_revision; every plan change returns the new revision."
+	statusHint       = "step status is never set through plan tools; implementors report ready_for_review with report_work_progress and a passing audit completes the step"
+	noteHint         = "step notes come from worker progress reports, not plan tools"
+)
+
+// PlanTools returns the root's plan tools. Creation keeps nested steps because
+// models create plans reliably. Every edit is one flat operation on one plan or
+// one step: there is no whole-plan snapshot to copy back, no create-or-edit
+// form to choose, and no field where a step status could go. All operations
+// share the store's PlanUpdate contract and its reservation and revision rules.
+func PlanTools(handle Handler[work.PlanUpdate]) []Tool {
+	return []Tool{CreatePlan(handle), AddStep(handle), EditStep(handle), CancelSteps(handle), ReorderSteps(handle), RenamePlan(handle)}
+}
+
+func CreatePlan(handle Handler[work.PlanUpdate]) Tool {
+	return builtin("create_plan",
+		"Create the shared plan with a title and its initial steps. Each step has a title and optional acceptance_criteria, an array of strings. Omit IDs, status and revision; new steps start pending. The result issues plan_id, each step_id and revision 1. Change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan, never by creating another plan.",
+		func(ctx context.Context, c Call, a createPlanArgs) (Result, error) {
 			steps := make([]work.StepEdit, len(a.Steps))
 			for i, step := range a.Steps {
 				steps[i] = work.StepEdit{Title: &step.Title}
@@ -42,24 +72,70 @@ func UpdatePlan(plan Handler[work.PlanUpdate], progress Handler[work.ProgressUpd
 					steps[i].AcceptanceCriteria = &step.AcceptanceCriteria
 				}
 			}
-			return plan(ctx, c, work.PlanUpdate{Title: &a.Title, Steps: steps})
-		}
-		editPlan := func(ctx context.Context, c Call, a editPlanArgs) (Result, error) {
-			return plan(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Title: a.Title, Steps: a.Steps, Order: a.Order, Cancel: a.Cancel})
-		}
-		branches = append(branches,
-			builtin("create_plan", "Create a plan with a title and new steps. Omit all IDs.", createPlan,
-				MinLength("title", 1), MinItems("steps", 1), MinLength("steps[].title", 1)),
-			builtin("edit_plan", "Edit owned structure using plan_id and expected_revision. Existing steps use step_id; new steps require title.", editPlan,
-				MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1), MinLength("steps[].step_id", 1), MinLength("steps[].title", 1), AtLeastOne("steps[]", "step_id", "title"), UniqueItems("order"), UniqueItems("cancel")))
-	}
-	if progress != nil {
-		branches = append(branches, builtin("legacy_progress", "Legacy progress removed.", func(_ context.Context, _ Call, _ work.ProgressUpdate) (Result, error) {
-			return Result{}, fmt.Errorf("%w: use report_work_progress with assigned_at_revision", work.ErrInvalid)
-		}))
-	}
+			return handle(ctx, c, work.PlanUpdate{Title: &a.Title, Steps: steps})
+		},
+		MinLength("title", 1), MinItems("steps", 1), MinLength("steps[].title", 1),
+		Reject("", "plan_id", "create_plan takes no plan_id; change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan"),
+		Reject("", "expected_revision", "create_plan takes no revision; change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan"),
+		Reject("steps[]", "step_id", "creation issues step IDs; read them from the result and use edit_step to change a step"),
+		Reject("steps[]", "status", statusHint),
+		Reject("steps[]", "note", noteHint))
+}
 
-	return compose(provider.ToolDefinition{Name: "update_plan", Description: strings.Join(guidance, " ")}, branches...)
+func AddStep(handle Handler[work.PlanUpdate]) Tool {
+	return builtin("add_step",
+		"Append one new step to a plan you own, with a title and optional acceptance_criteria (array of strings). "+planRevisionHint+" The result includes the issued step_id. A title that matches a live step is rejected; edit that step instead.",
+		func(ctx context.Context, c Call, a addStepArgs) (Result, error) {
+			step := work.StepEdit{Title: &a.Title}
+			if a.AcceptanceCriteria != nil {
+				step.AcceptanceCriteria = &a.AcceptanceCriteria
+			}
+			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Steps: []work.StepEdit{step}})
+		},
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1),
+		Reject("", "step_id", "add_step issues the step_id; to change an existing step use edit_step"),
+		Reject("", "status", statusHint), Reject("", "note", noteHint))
+}
+
+func EditStep(handle Handler[work.PlanUpdate]) Tool {
+	return builtin("edit_step",
+		"Change one existing step's title or acceptance_criteria by step_id; send only the fields that change. "+planRevisionHint+" Reserved and completed steps cannot be edited.",
+		func(ctx context.Context, c Call, a editStepArgs) (Result, error) {
+			step := work.StepEdit{ID: &a.StepID, Title: a.Title}
+			if a.AcceptanceCriteria != nil {
+				step.AcceptanceCriteria = &a.AcceptanceCriteria
+			}
+			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Steps: []work.StepEdit{step}})
+		},
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("step_id", 1), MinLength("title", 1), AtLeastOne("", "title", "acceptance_criteria"),
+		Reject("", "status", statusHint), Reject("", "note", noteHint))
+}
+
+func CancelSteps(handle Handler[work.PlanUpdate]) Tool {
+	return builtin("cancel_steps",
+		"Cancel the listed steps of a plan you own by step_id. "+planRevisionHint+" Reserved and completed steps cannot be cancelled.",
+		func(ctx context.Context, c Call, a cancelStepsArgs) (Result, error) {
+			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Cancel: a.StepIDs})
+		},
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinItems("step_ids", 1), UniqueItems("step_ids"))
+}
+
+func ReorderSteps(handle Handler[work.PlanUpdate]) Tool {
+	return builtin("reorder_steps",
+		"Reorder a plan you own. order must list every step_id exactly once, including cancelled and completed steps. "+planRevisionHint,
+		func(ctx context.Context, c Call, a reorderStepsArgs) (Result, error) {
+			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Order: a.Order})
+		},
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinItems("order", 1), UniqueItems("order"))
+}
+
+func RenamePlan(handle Handler[work.PlanUpdate]) Tool {
+	return builtin("rename_plan",
+		"Change the title of a plan you own. "+planRevisionHint,
+		func(ctx context.Context, c Call, a renamePlanArgs) (Result, error) {
+			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Title: &a.Title})
+		},
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1))
 }
 
 // UpdateWork exposes work-level notes/blockers without implementation step fields.

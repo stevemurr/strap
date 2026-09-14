@@ -233,6 +233,16 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 			if edit.Title == nil || blank(*edit.Title) {
 				return Plan{}, invalid("new step requires title")
 			}
+			// A new step whose title matches a live step is almost always a
+			// snapshot copied back instead of an edit; name the existing step.
+			if u.PlanID != nil {
+				title := strings.TrimSpace(*edit.Title)
+				for _, existing := range p.Steps {
+					if existing.Status != CancelledStep && strings.TrimSpace(existing.Title) == title {
+						return Plan{}, invalid(fmt.Sprintf("step %q already exists as %s; use edit_step with that step_id, or choose a distinct title", title, existing.ID))
+					}
+				}
+			}
 			step := Step{ID: StepID(s.id("step")), Title: *edit.Title, Status: Pending}
 			if edit.AcceptanceCriteria != nil {
 				step.AcceptanceCriteria = slices.Clone(*edit.AcceptanceCriteria)

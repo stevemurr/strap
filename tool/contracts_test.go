@@ -136,12 +136,12 @@ func TestSenderAndLedgerToolCallbacks(t *testing.T) {
 			t.Fatal(result, err)
 		}
 	}
-	op := UpdatePlan(func(_ context.Context, _ Call, r work.PlanUpdate) (Result, error) {
+	op := CreatePlan(func(_ context.Context, _ Call, r work.PlanUpdate) (Result, error) {
 		if r.Steps[0].AcceptanceCriteria == nil || (*r.Steps[0].AcceptanceCriteria)[0] != "checked" {
 			t.Error(r)
 		}
 		return Text("ok"), nil
-	}, nil)
+	})
 	if _, err := op.Call(context.Background(), Call{Arguments: json.RawMessage(`{"title":"plan","steps":[{"title":"step","acceptance_criteria":["checked"]}]}`)}); err != nil {
 		t.Fatal(err)
 	}

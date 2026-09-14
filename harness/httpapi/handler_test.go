@@ -94,7 +94,7 @@ func operationResult[T any](t *testing.T, s *testSession, viaHTTP bool, actor id
 		}
 		return v
 	}
-	action := map[string]string{"assign_work": "assign", "reassign_work": "reassign", "cancel_work": "cancel", "update_plan": "plan", "submit_work": "submit", "submit_audit": "audit", "report_work_progress": "report-progress"}[name]
+	action := map[string]string{"assign_work": "assign", "reassign_work": "reassign", "cancel_work": "cancel", "create_plan": "plan", "submit_work": "submit", "submit_audit": "audit", "report_work_progress": "report-progress"}[name]
 	if _, ok := params.(work.ProgressUpdate); ok {
 		action = "progress"
 	}
@@ -144,7 +144,7 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 	implementor := create(roster.Implementor)
 	auditor := create(roster.Auditor)
 	planRequest := work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Unassigned")}}}
-	plan := operationResult(t, s, viaHTTP, root, "update_plan", planRequest, func() (work.Plan, error) {
+	plan := operationResult(t, s, viaHTTP, root, "create_plan", planRequest, func() (work.Plan, error) {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
 	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}

@@ -228,12 +228,15 @@ be rewritten in place to retain acceptance for changed requirements. New work
 must represent a changed outcome. Unrelated delegate progress does not invalidate
 the owner's structural revision.
 
-The `update_plan` tool composes separate typed operations: creation without IDs,
-structural editing with `plan_id`, and progress with `work_id`. Creation requires a
-title and new steps; progress-only fields cannot appear in structural operations.
-The root receives creation/editing, and implementors receive progress. Auditors
-use `update_work` for notes/blockers and cannot advertise implementation step edits.
-Conflicting selectors cannot match any operation.
+The root's plan tools are flat, one operation each, over the same `PlanUpdate`
+contract: `create_plan` (title plus nested initial steps, no IDs), `add_step`,
+`edit_step`, `cancel_steps`, `reorder_steps` and `rename_plan`, each taking
+`plan_id` and `expected_revision`. A single composed `update_plan` was replaced
+because models read the plan as a document and wrote it back as a patch: they
+copied step snapshots (creating duplicates), set `status`, and mixed create and
+edit fields. Flat tools give status no field, require `step_id` for edits, and keep
+each tool-call literal small. Workers report progress through
+`report_work_progress`; step status changes only through progress and audits.
 
 `assign_work` composes implementation, audit, and repair argument contracts; `submit_audit`
 composes pass and fail contracts. Pass accepts omitted or empty findings; fail

@@ -141,16 +141,17 @@ func (s *Session) updateProgress(ctx context.Context, c tool.Call, u work.Progre
 	return result(v, e)
 }
 func (s *Session) RootTools() []tool.Tool {
-	return append(s.commonTools(),
+	tools := append(s.commonTools(),
 		tool.WaitForInput(),
 		tool.CreateAgent(func(ctx context.Context, c tool.Call, r roster.CreateRequest) (tool.Result, error) {
 			v, e := s.CreateAgent(ctx, c.Actor, r)
 			return result(v, e)
-		}),
-		tool.UpdatePlan(func(ctx context.Context, c tool.Call, u work.PlanUpdate) (tool.Result, error) {
-			v, e := s.UpdatePlan(ctx, c.Actor, u)
-			return result(v, e)
-		}, nil),
+		}))
+	tools = append(tools, tool.PlanTools(func(ctx context.Context, c tool.Call, u work.PlanUpdate) (tool.Result, error) {
+		v, e := s.UpdatePlan(ctx, c.Actor, u)
+		return result(v, e)
+	})...)
+	return append(tools,
 		tool.AssignWork(func(ctx context.Context, c tool.Call, r tool.AssignWorkArgs) (tool.Result, error) {
 			v, err := s.AssignWork(ctx, c.Actor, r)
 			return result(v, err)

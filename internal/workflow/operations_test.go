@@ -78,7 +78,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 	implementor := create(roster.Implementor)
 	auditor := create(roster.Auditor)
 	planRequest := work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Unassigned")}}}
-	plan := operationResult(t, s, viaTools, root, "update_plan", planRequest, func() (work.Plan, error) {
+	plan := operationResult(t, s, viaTools, root, "create_plan", planRequest, func() (work.Plan, error) {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
 	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
@@ -207,7 +207,7 @@ func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	}
 	// The model adapter must use that same root-only check, even if a host
 	// accidentally exposes the root tool to a worker.
-	if _, err := callAs(s, ctx, w.Assignee, "update_plan", plan); !errors.Is(err, work.ErrForbidden) {
+	if _, err := callAs(s, ctx, w.Assignee, "create_plan", plan); !errors.Is(err, work.ErrForbidden) {
 		t.Fatalf("tool bypassed root-only check: %v", err)
 	}
 	if _, err := s.AssignWork(ctx, w.Assignee, work.AssignmentRequest{Kind: work.Implementation, Task: "delegate"}); !errors.Is(err, work.ErrForbidden) {

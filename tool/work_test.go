@@ -11,54 +11,16 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-func TestPlanCompositionExposesNestedStepShapes(t *testing.T) {
-	op := UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil },
-		func(context.Context, Call, work.ProgressUpdate) (Result, error) { return Result{}, nil })
-	var schema struct {
-		Properties map[string]struct {
-			Type  string `json:"type"`
-			Items struct {
-				Type       string                     `json:"type"`
-				Properties map[string]json.RawMessage `json:"properties"`
-				Required   []string                   `json:"required"`
-			} `json:"items"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
-		t.Fatal(err)
-	}
-	step := schema.Properties["steps"].Items
-	if step.Type != "object" || len(step.Required) != 0 {
-		t.Fatal("step hints must expose an object without merging branch requirements")
-	}
-	for _, field := range []string{"step_id", "title", "acceptance_criteria", "status", "note"} {
-		if len(step.Properties[field]) == 0 {
-			t.Fatalf("top-level steps.items hides %s", field)
-		}
-	}
-	var criteria struct {
-		Type  string `json:"type"`
-		Items struct {
-			Type string `json:"type"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(step.Properties["acceptance_criteria"], &criteria); err != nil {
-		t.Fatal(err)
-	}
-	if criteria.Type != "array" || criteria.Items.Type != "string" {
-		t.Fatal("nested criteria array lost its element type")
-	}
-}
-
 func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	store := work.New()
-	owner := UpdatePlan(func(_ context.Context, c Call, u work.PlanUpdate) (Result, error) {
+	plans := func(_ context.Context, c Call, u work.PlanUpdate) (Result, error) {
 		p, err := store.UpdatePlan(c.Actor, u)
 		if err != nil {
 			return Result{}, err
 		}
 		return JSON(p)
-	}, nil)
+	}
+	owner := CreatePlan(plans)
 	worker := ReportWorkProgress(func(_ context.Context, c Call, u work.ReportWorkProgressRequest) (Result, error) {
 		w, err := store.ReportWorkProgress(c.Actor, u)
 		if err != nil {
@@ -95,7 +57,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	}
 	// Progress does not consume the owner's structural plan revision.
 	edit := []byte(fmt.Sprintf(`{"plan_id":%q,"expected_revision":%d,"title":"Updated plan"}`, p.ID, p.Revision))
-	if _, err := owner.Call(context.Background(), Call{Actor: "root", Arguments: edit}); err != nil {
+	if _, err := RenamePlan(plans).Call(context.Background(), Call{Actor: "root", Arguments: edit}); err != nil {
 		t.Fatal(err)
 	}
 	submit := SubmitWork(func(_ context.Context, c Call, r work.SubmitRequest) (Result, error) {
@@ -111,40 +73,6 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	}
 }
 
-func TestUpdatePlanSelectorsAndStrictPatches(t *testing.T) {
-	plans, progress := 0, 0
-	op := UpdatePlan(func(_ context.Context, c Call, u work.PlanUpdate) (Result, error) {
-		if c.Actor != "root" {
-			t.Fatal("identity lost")
-		}
-		plans++
-		return Text("plan"), nil
-	}, func(_ context.Context, c Call, u work.ProgressUpdate) (Result, error) {
-		progress++
-		return Text("progress"), nil
-	})
-	for _, raw := range []string{`{"title":"p","steps":[{"title":"s"}]}`, `{"plan_id":"p","expected_revision":1,"title":"new"}`} {
-		if _, e := op.Call(context.Background(), Call{Actor: "root", Arguments: []byte(raw)}); e != nil {
-			t.Fatal(e)
-		}
-	}
-	if plans != 2 || progress != 0 {
-		t.Fatal(plans, progress)
-	}
-	for _, raw := range []string{`{"plan_id":"p","work_id":"w","expected_revision":1}`, `{"plan_id":null}`, `{"work_id":"w","expected_revision":1,"steps":[{"step_id":"s","title":"escape"}]}`, `{"title":"p","steps":[{"step_id":null,"title":"x"}]}`, `{"title":"p","steps":[{"title":"x","title":"y"}]}`, `{"work_id":"w","steps":[]}`, `{"plan_id":"p","expected_revision":1,"steps":[{"step_id":"s","status":"completed"}]}`} {
-		if _, e := op.Call(context.Background(), Call{Actor: "root", Arguments: []byte(raw)}); e == nil {
-			t.Fatal("accepted", raw)
-		}
-	}
-	if plans != 2 || progress != 0 {
-		t.Fatal("invalid input reached callback")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, e := op.Call(ctx, Call{}); !errors.Is(e, context.Canceled) {
-		t.Fatal(e)
-	}
-}
 func TestSubmitAuditDoesNotAcceptAuthorityFields(t *testing.T) {
 	calls := 0
 	op := SubmitAudit(func(_ context.Context, c Call, r work.AuditRequest) (Result, error) { calls++; return Text("ok"), nil })
@@ -159,9 +87,8 @@ func TestSubmitAuditDoesNotAcceptAuthorityFields(t *testing.T) {
 }
 
 func TestWorkToolSchemasHaveValidRequiredArrays(t *testing.T) {
-	definitions := []Tool{
-		UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }, nil), AssignWork(nil), SubmitWork(nil), SubmitAudit(nil), GetWork(nil), GetPlan(nil), GetAudit(nil), CancelWork(nil), ReassignWork(nil),
-	}
+	definitions := append(PlanTools(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }),
+		AssignWork(nil), SubmitWork(nil), SubmitAudit(nil), GetWork(nil), GetPlan(nil), GetAudit(nil), CancelWork(nil), ReassignWork(nil))
 	var check func(any)
 	check = func(v any) {
 		switch v := v.(type) {
@@ -186,81 +113,6 @@ func TestWorkToolSchemasHaveValidRequiredArrays(t *testing.T) {
 			t.Fatal(e)
 		}
 		check(schema)
-	}
-}
-
-func TestPlanCreationRegressionAndCapabilitySchemas(t *testing.T) {
-	calls := 0
-	owner := UpdatePlan(func(_ context.Context, _ Call, a work.PlanUpdate) (Result, error) {
-		calls++
-		if a.PlanID != nil || a.Title == nil || len(a.Steps) != 1 || a.Steps[0].ID != nil {
-			t.Fatal(a)
-		}
-		return Text("created"), nil
-	}, nil)
-	for _, raw := range []string{
-		`{"title":"p","steps":"[{\"title\":\"s\"}]"}`,
-		`{"title":"p","steps":[{"title":"s"}],"note":"initial"}`,
-		`{"title":"p","steps":[{"title":"s","status":"pending"}]}`,
-		`{"steps":[{"title":"s"}]}`,
-		`{"title":"p","steps":[{"step_id":"invented","title":"s"}]}`,
-		`{"title":"p","steps":[]}`,
-		`{"title":"p","steps":[{}]}`,
-		`{"title":"p","steps":[{"title":"s"}],"expected_revision":1}`,
-		`{"work_id":"w","expected_revision":1,"note":"escape"}`,
-	} {
-		if _, err := owner.Call(context.Background(), Call{Arguments: []byte(raw)}); err == nil {
-			t.Fatal("accepted", raw)
-		}
-	}
-	if calls != 0 {
-		t.Fatal("invalid creation reached store callback")
-	}
-	if _, err := owner.Call(context.Background(), Call{Arguments: []byte(`{"title":"p","steps":[{"title":"s"}]}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Fatal(calls)
-	}
-	var schema struct {
-		OneOf []struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-			Required   []string                   `json:"required"`
-		} `json:"oneOf"`
-	}
-	if err := json.Unmarshal(owner.Definition().Parameters, &schema); err != nil {
-		t.Fatal(err)
-	}
-	if len(schema.OneOf) != 2 {
-		t.Fatal("owner schema must have creation and edit alternatives")
-	}
-	for _, branch := range schema.OneOf {
-		for _, forbidden := range []string{"work_id", "note", "blocker"} {
-			if _, ok := branch.Properties[forbidden]; ok {
-				t.Fatal("owner advertises", forbidden)
-			}
-		}
-	}
-	progressCalls := 0
-	report := func(context.Context, Call, work.ProgressUpdate) (Result, error) {
-		progressCalls++
-		return Result{}, nil
-	}
-	implementor := UpdatePlan(nil, report)
-	auditor := UpdateWork(report)
-	for _, op := range []Tool{implementor, auditor} {
-		if _, err := op.Call(context.Background(), Call{Arguments: []byte(`{"title":"p","steps":[{"title":"s"}]}`)}); err == nil {
-			t.Fatal("delegate created plan")
-		}
-	}
-	if _, err := auditor.Call(context.Background(), Call{Arguments: []byte(`{"work_id":"a","expected_revision":1,"steps":[{"step_id":"s","status":"ready_for_review"}]}`)}); err == nil {
-		t.Fatal("auditor changed implementation progress")
-	}
-	if _, err := auditor.Call(context.Background(), Call{Arguments: []byte(`{"work_id":"a","expected_revision":1,"blocker":"missing evidence"}`)}); !errors.Is(err, work.ErrInvalid) {
-		t.Fatal(err)
-	}
-	if progressCalls != 0 {
-		t.Fatal(progressCalls)
 	}
 }
 
@@ -343,54 +195,111 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 	}
 }
 
-func TestPlanRejectionNamesTheClosestForm(t *testing.T) {
-	op := UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }, nil)
-	_, err := op.Call(context.Background(), Call{Arguments: []byte(`{"title":"p","steps":[{"title":"s","step_id":"step-1","status":"completed"}]}`)})
-	if err == nil {
-		t.Fatal("accepted step IDs on creation")
-	}
-	got := err.Error()
-	for _, want := range []string{
-		"update_plan arguments match no operation: ",
-		"form 1, Create a plan with a title and new steps: arguments.steps[0].status is not an allowed field (also not allowed: step_id)",
-		"form 2, Edit owned structure using plan_id and expected_revision: arguments.expected_revision is required (also required: plan_id)",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("rejection %q lacks %q", got, want)
-		}
-	}
-}
-
-func TestFlattenedHintsAnnotateFormSpecificProperties(t *testing.T) {
-	op := UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }, nil)
+func TestCreatePlanExposesOnlyTitleAndCriteriaPerStep(t *testing.T) {
+	op := CreatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil })
 	var schema struct {
-		Properties map[string]struct {
-			Description string `json:"description"`
-			Items       struct {
-				Properties map[string]struct {
-					Description string `json:"description"`
-				} `json:"properties"`
-			} `json:"items"`
+		Required   []string `json:"required"`
+		Properties struct {
+			Steps struct {
+				Items struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+					Required   []string                   `json:"required"`
+				} `json:"items"`
+			} `json:"steps"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"plan_id", "expected_revision", "order", "cancel"} {
-		if got := schema.Properties[field].Description; got != "Only in the edit form" {
-			t.Fatalf("%s: %q", field, got)
-		}
+	step := schema.Properties.Steps.Items
+	if len(step.Properties) != 2 || step.Properties["title"] == nil || step.Properties["acceptance_criteria"] == nil || len(step.Required) != 1 {
+		t.Fatalf("step shape: %v required %v", step.Properties, step.Required)
 	}
-	if got := schema.Properties["steps"].Items.Properties["step_id"].Description; got != "Only in the edit form" {
-		t.Fatalf("step_id: %q", got)
-	}
-	// Fields every form accepts carry no restriction.
-	for _, field := range []string{"title", "steps"} {
-		if got := schema.Properties[field].Description; got != "" {
-			t.Fatalf("%s annotated although shared: %q", field, got)
-		}
-	}
-	if got := schema.Properties["steps"].Items.Properties["title"].Description; got != "" {
-		t.Fatalf("step title annotated although shared: %q", got)
+	if strings.Contains(string(op.Definition().Parameters), "oneOf") {
+		t.Fatal("creation must be a single flat form")
 	}
 }
+
+// Each plan tool is one operation with a flat argument set. Foreign fields are
+// rejected before the handler with guidance, and every accepted call maps to
+// the single PlanUpdate shape the store understands.
+func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
+	var got []work.PlanUpdate
+	handle := func(_ context.Context, c Call, u work.PlanUpdate) (Result, error) {
+		if c.Actor != "root" {
+			t.Fatal("identity lost")
+		}
+		got = append(got, u)
+		return Text("ok"), nil
+	}
+	tools := map[string]Tool{}
+	for _, op := range PlanTools(handle) {
+		tools[op.Definition().Name] = op
+	}
+	accepted := []struct{ tool, raw string }{
+		{"create_plan", `{"title":"p","steps":[{"title":"s","acceptance_criteria":["a"]},{"title":"t"}]}`},
+		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","acceptance_criteria":[]}`},
+		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","title":"renamed"}`},
+		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","acceptance_criteria":["b"]}`},
+		{"cancel_steps", `{"plan_id":"plan-x","expected_revision":3,"step_ids":["step-y","step-z"]}`},
+		{"reorder_steps", `{"plan_id":"plan-x","expected_revision":3,"order":["step-z","step-y"]}`},
+		{"rename_plan", `{"plan_id":"plan-x","expected_revision":3,"title":"Renamed"}`},
+	}
+	for _, c := range accepted {
+		if _, err := tools[c.tool].Call(context.Background(), Call{Actor: "root", Arguments: []byte(c.raw)}); err != nil {
+			t.Fatalf("%s %s: %v", c.tool, c.raw, err)
+		}
+	}
+	rev := work.Revision(3)
+	id := work.PlanID("plan-x")
+	step := work.StepID("step-y")
+	want := []work.PlanUpdate{
+		{Title: ptr("p"), Steps: []work.StepEdit{{Title: ptr("s"), AcceptanceCriteria: ptr([]string{"a"})}, {Title: ptr("t")}}},
+		{PlanID: &id, ExpectedRevision: &rev, Steps: []work.StepEdit{{Title: ptr("new"), AcceptanceCriteria: ptr([]string{})}}},
+		{PlanID: &id, ExpectedRevision: &rev, Steps: []work.StepEdit{{ID: &step, Title: ptr("renamed")}}},
+		{PlanID: &id, ExpectedRevision: &rev, Steps: []work.StepEdit{{ID: &step, AcceptanceCriteria: ptr([]string{"b"})}}},
+		{PlanID: &id, ExpectedRevision: &rev, Cancel: []work.StepID{"step-y", "step-z"}},
+		{PlanID: &id, ExpectedRevision: &rev, Order: []work.StepID{"step-z", "step-y"}},
+		{PlanID: &id, ExpectedRevision: &rev, Title: ptr("Renamed")},
+	}
+	if a, b := mustJSON(t, got), mustJSON(t, want); a != b {
+		t.Fatalf("plan updates diverged:\n got %s\nwant %s", a, b)
+	}
+	rejected := []struct{ tool, raw, want string }{
+		{"create_plan", `{"title":"p","steps":[{"title":"s","status":"completed"}]}`, "status: step status is never set through plan tools"},
+		{"create_plan", `{"title":"p","steps":[{"title":"s","step_id":"step-1"}]}`, "creation issues step IDs"},
+		{"create_plan", `{"plan_id":"plan-x","expected_revision":1,"title":"p","steps":[{"title":"s"}]}`, "create_plan takes no revision"},
+		{"create_plan", `{"title":"p","steps":"[{\"title\":\"s\"}]"}`, "steps must be array"},
+		{"create_plan", `{"title":"p","steps":[]}`, "requires at least 1 items"},
+		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","status":"pending"}`, "status: step status is never set through plan tools"},
+		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","step_id":"step-y"}`, "add_step issues the step_id"},
+		{"add_step", `{"plan_id":"plan-x","title":"new"}`, "arguments.expected_revision is required"},
+		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","status":"completed"}`, "status: step status is never set through plan tools"},
+		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y"}`, "requires at least one of title, acceptance_criteria"},
+		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","note":"n"}`, "note: step notes come from worker progress reports"},
+		{"cancel_steps", `{"plan_id":"plan-x","expected_revision":3,"step_ids":[]}`, "requires at least 1 items"},
+		{"reorder_steps", `{"plan_id":"plan-x","expected_revision":"3","order":["a"]}`, "expected_revision must be integer"},
+		{"rename_plan", `{"plan_id":"plan-x","expected_revision":3,"title":"","work_id":"w"}`, "work_id is not an allowed field"},
+	}
+	before := len(got)
+	for _, c := range rejected {
+		_, err := tools[c.tool].Call(context.Background(), Call{Actor: "root", Arguments: []byte(c.raw)})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%s %s: got %v, want %q", c.tool, c.raw, err, c.want)
+		}
+	}
+	if len(got) != before {
+		t.Fatal("invalid input reached the handler")
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func ptr[T any](v T) *T { return &v }

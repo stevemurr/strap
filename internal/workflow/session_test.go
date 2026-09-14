@@ -197,7 +197,7 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 	// Exercise the public creation contract, rather than constructing the plan
 	// directly in the store and bypassing the model-facing boundary.
 	for _, operation := range s.RootTools() {
-		if operation.Definition().Name != "update_plan" {
+		if operation.Definition().Name != "create_plan" {
 			continue
 		}
 		created, err := operation.Call(ctx, tool.Call{Actor: p.root, Arguments: json.RawMessage(`{"title":"Storage","steps":[{"title":"Implement"},{"title":"Test"},{"title":"Integrate"}]}`)})
