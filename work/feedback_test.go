@@ -44,7 +44,7 @@ func TestRejectionsCarryIdsRevisionsAndNextStep(t *testing.T) {
 	expect(err, ErrReserved, "step "+string(p.Steps[0].ID)+" is reserved by "+string(w.ID), "scope only available steps")
 
 	_, err = s.GetResearchBrief("root", "report-5")
-	expect(err, ErrNotFound, "report-5 is a progress report id, not a brief id")
+	expect(err, ErrNotFound, "report-5 is a progress report id, not a brief id", "no brief has been delivered to you")
 	_, err = s.GetResearchBrief("root", "brief-9")
 	expect(err, ErrNotFound, "research brief brief-9")
 
@@ -54,4 +54,28 @@ func TestRejectionsCarryIdsRevisionsAndNextStep(t *testing.T) {
 	}
 	_, err = s.SubmitResearch("researcher", SubmitResearchRequest{WorkTarget: target(research), AssignedAtRevision: 1, Summary: "s", FindingIDs: []ProgressFindingID{"finding-1"}})
 	expect(err, ErrNotFound, "finding finding-1 was never recorded for "+string(research.ID), "omit finding_ids if none were recorded")
+
+	// Not-found rejections name what does exist for the caller, so a guessed
+	// id turns into a lookup instead of another guess.
+	_, err = s.GetResearchBrief("root", "brief-guess")
+	expect(err, ErrNotFound, "no brief has been delivered to you", "research not yet delivered: "+string(research.ID))
+	delivered, err := s.SubmitResearch("researcher", SubmitResearchRequest{WorkTarget: target(research), AssignedAtRevision: 1, Summary: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.GetResearchBrief("root", "brief-guess")
+	expect(err, ErrNotFound, "delivered briefs: "+string(delivered.BriefID)+" ("+string(research.ID)+")")
+	if _, err = s.GetResearchBrief("stranger", "brief-guess"); !strings.Contains(err.Error(), "no brief has been delivered to you") || strings.Contains(err.Error(), string(delivered.BriefID)) {
+		t.Fatalf("listing leaked to a stranger: %v", err)
+	}
+	_, err = s.GetWork("impl", "work-guess")
+	expect(err, ErrNotFound, "work work-guess", "live work visible to you: "+string(w.ID)+" (implementation, active, revision 1)")
+	_, err = s.SubmitWork("impl", SubmitRequest{WorkTarget: WorkTarget{ID: "work-guess", ExpectedRevision: 1}, Summary: "x"})
+	expect(err, ErrNotFound, "live work visible to you: "+string(w.ID))
+	_, err = s.GetPlan("root", "plan-guess")
+	expect(err, ErrNotFound, "plan plan-guess", "plans you own: "+string(p.ID)+" (revision 1)")
+	_, err = s.UpdatePlan("root", PlanUpdate{PlanID: ptr(PlanID("plan-guess")), ExpectedRevision: ptr(Revision(1)), Steps: []StepEdit{{Title: ptr("t")}}})
+	expect(err, ErrNotFound, "plans you own: "+string(p.ID))
+	_, err = s.GetPlan("stranger", "plan-guess")
+	expect(err, ErrNotFound, "you own no plan")
 }

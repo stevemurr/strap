@@ -122,10 +122,61 @@ func (s *Store) AcknowledgeEvent(id EventID) error {
 	}
 	return nil
 }
+
+// knownWorks, knownPlans and knownBriefs name what an actor could have meant
+// when an id is not found. Callers hold s.mu. Lists are sorted and bounded so
+// a rejection stays short; a model that guessed an id gets the real ones back.
+func (s *Store) knownWorks(actor identity.ActorID) string {
+	var parts []string
+	for _, w := range s.works {
+		if actor != "" && (w.Owner == actor || w.Assignee == actor) && live(w) {
+			parts = append(parts, fmt.Sprintf("%s (%s, %s, revision %d)", w.ID, w.Kind, w.State, w.Revision))
+		}
+	}
+	return known("live work visible to you", "no live work is visible to you", parts)
+}
+func (s *Store) knownPlans(actor identity.ActorID) string {
+	var parts []string
+	for _, p := range s.plans {
+		if actor != "" && p.Owner == actor {
+			parts = append(parts, fmt.Sprintf("%s (revision %d)", p.ID, p.Revision))
+		}
+	}
+	return known("plans you own", "you own no plan", parts)
+}
+func (s *Store) knownBriefs(actor identity.ActorID) string {
+	var delivered, pending []string
+	for _, b := range s.researchBriefs {
+		if w, ok := s.works[b.WorkID]; ok && actor != "" && (w.Owner == actor || w.Assignee == actor) {
+			delivered = append(delivered, fmt.Sprintf("%s (%s)", b.ID, w.ID))
+		}
+	}
+	for _, w := range s.works {
+		if w.Kind == Research && live(w) && w.LatestResearchBriefID == "" && actor != "" && (w.Owner == actor || w.Assignee == actor) {
+			pending = append(pending, string(w.ID))
+		}
+	}
+	out := known("delivered briefs", "no brief has been delivered to you", delivered)
+	if len(pending) > 0 {
+		out += "; " + known("research not yet delivered", "", pending)
+	}
+	return out
+}
+func known(label, none string, parts []string) string {
+	if len(parts) == 0 {
+		return none
+	}
+	slices.Sort(parts)
+	if len(parts) > 8 {
+		parts = append(parts[:8], fmt.Sprintf("and %d more", len(parts)-8))
+	}
+	return label + ": " + strings.Join(parts, ", ")
+}
+
 func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, error) {
 	w, ok := s.works[t.ID]
 	if !ok {
-		return Work{}, ErrNotFound
+		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, t.ID, s.knownWorks(actor))
 	}
 	allowed := w.Assignee
 	if owner {
@@ -160,7 +211,7 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 		var ok bool
 		p, ok = s.plans[*u.PlanID]
 		if !ok {
-			return Plan{}, fmt.Errorf("%w: plan %s", ErrNotFound, *u.PlanID)
+			return Plan{}, fmt.Errorf("%w: plan %s; %s", ErrNotFound, *u.PlanID, s.knownPlans(actor))
 		}
 		if p.Owner != actor {
 			return Plan{}, ErrForbidden
@@ -310,7 +361,7 @@ func (s *Store) GetWork(actor identity.ActorID, id ID) (Work, error) {
 	defer s.mu.Unlock()
 	w, ok := s.works[id]
 	if !ok {
-		return Work{}, ErrNotFound
+		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, id, s.knownWorks(actor))
 	}
 	if actor == "" || (w.Owner != actor && w.Assignee != actor) {
 		return Work{}, ErrForbidden
@@ -322,7 +373,7 @@ func (s *Store) GetPlan(actor identity.ActorID, id PlanID) (Plan, error) {
 	defer s.mu.Unlock()
 	p, ok := s.plans[id]
 	if !ok {
-		return Plan{}, ErrNotFound
+		return Plan{}, fmt.Errorf("%w: plan %s; %s", ErrNotFound, id, s.knownPlans(actor))
 	}
 	if actor == "" {
 		return Plan{}, ErrForbidden

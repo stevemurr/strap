@@ -149,9 +149,9 @@ func (s *Store) GetResearchBrief(actor identity.ActorID, id ResearchBriefID) (Re
 	b, ok := s.researchBriefs[id]
 	if !ok {
 		if strings.HasPrefix(string(id), "report-") {
-			return ResearchBrief{}, fmt.Errorf("%w: %s is a progress report id, not a brief id; brief IDs start with brief- and arrive in the work progress notice and get_work", ErrNotFound, id)
+			return ResearchBrief{}, fmt.Errorf("%w: %s is a progress report id, not a brief id; %s", ErrNotFound, id, s.knownBriefs(actor))
 		}
-		return ResearchBrief{}, fmt.Errorf("%w: research brief %s", ErrNotFound, id)
+		return ResearchBrief{}, fmt.Errorf("%w: research brief %s; %s", ErrNotFound, id, s.knownBriefs(actor))
 	}
 	w := s.works[b.WorkID]
 	if actor == "" || actor != w.Owner && actor != w.Assignee {
