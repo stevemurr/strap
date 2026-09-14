@@ -306,6 +306,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var v any
 		var err error
 		switch path[0] {
+		case "progress":
+			v, err = session.GetWorkProgress(r.Context(), actor, work.ID(path[1]))
+		case "progress-reports":
+			v, err = session.GetWorkProgressReport(r.Context(), actor, work.ProgressReportID(path[1]))
+		case "progress-findings":
+			v, err = session.GetProgressFinding(r.Context(), actor, work.ProgressFindingID(path[1]))
+		case "research-briefs":
+			v, err = session.GetResearchBrief(r.Context(), actor, work.ResearchBriefID(path[1]))
 		case "receipts":
 			receipt, ok := session.Receipt(message.MessageID(path[1]))
 			v = receipt
@@ -406,6 +414,8 @@ func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, actio
 		decodedCall(w, r, tool.DecodeReassignment, s.ReassignWork)
 	case "cancel":
 		workCall(w, r, s.CancelWork)
+	case "report-progress":
+		workCall(w, r, s.ReportWorkProgress)
 	case "progress":
 		workCall(w, r, s.UpdateProgress)
 	case "plan":

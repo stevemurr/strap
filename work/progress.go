@@ -33,11 +33,15 @@ type ProgressFindingDraft struct {
 	Supersedes ProgressFindingID `json:"supersedes,omitempty"`
 }
 type ProgressFinding struct {
-	ID       ProgressFindingID `json:"finding_id"`
-	WorkID   ID                `json:"work_id"`
-	ReportID ProgressReportID  `json:"report_id"`
-	Author   identity.ActorID  `json:"author"`
-	ProgressFindingDraft
+	ID         ProgressFindingID `json:"finding_id"`
+	WorkID     ID                `json:"work_id"`
+	ReportID   ProgressReportID  `json:"report_id"`
+	Author     identity.ActorID  `json:"author"`
+	Claim      string            `json:"claim"`
+	Basis      FindingBasis      `json:"basis"`
+	Evidence   []EvidenceRef     `json:"evidence,omitempty"`
+	Limitation string            `json:"limitation,omitempty"`
+	Supersedes ProgressFindingID `json:"supersedes,omitempty"`
 }
 type ProgressDependency struct {
 	Need                    string `json:"need"`
@@ -232,7 +236,7 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 	}
 	r := WorkProgressReport{ID: ProgressReportID(s.id("report")), WorkID: w.ID, Author: actor, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision + 1, RecordedAt: time.Now().UTC(), Position: u.Position, Steps: u.Steps}
 	for _, f := range u.Findings {
-		r.Findings = append(r.Findings, ProgressFinding{ID: ProgressFindingID(s.id("finding")), WorkID: w.ID, ReportID: r.ID, Author: actor, ProgressFindingDraft: f})
+		r.Findings = append(r.Findings, ProgressFinding{ID: ProgressFindingID(s.id("finding")), WorkID: w.ID, ReportID: r.ID, Author: actor, Claim: f.Claim, Basis: f.Basis, Evidence: f.Evidence, Limitation: f.Limitation, Supersedes: f.Supersedes})
 	}
 	r = r.Clone()
 	encoded, err := json.Marshal(r)
