@@ -58,3 +58,21 @@ verify actual plan/delegation/submission/audit ordering, accepted scope before
 completion, root commentary, and research delivery without code changes or an
 implementation audit. Inspect trace commands and fixture contents as well as
 lifecycle events; event counts alone do not establish these properties.
+
+## Follow-up: explicit request routing
+
+The user subsequently reported root performing an explicitly requested research
+task itself. The opening instructions now define direct-response and agent-workflow
+conditions by requested actions rather than terms such as "ordinary conversation"
+or "a plan requires delegated execution."
+
+Explicit research requests require researcher assignment. Root creates a phased
+plan and assigns each phase before execution. Direct responses require no source
+inspection, commands or changes; status replies reuse the existing workflow.
+Root's preparation reads are limited to conversation and recorded work/results.
+Additional source inspection is assigned to a researcher. The root-specific web
+instruction now describes citing researcher evidence instead of telling root to
+perform searches itself. Worker prompts and tool capabilities are unchanged.
+
+This follow-up clarifies the policy; it is not evidence that the latest reported
+interaction used these prompts or that a model now follows them.

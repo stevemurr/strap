@@ -106,11 +106,19 @@ any code fix. Preserve these input/output expectations when adding research:
 | Researcher / research | Bounded question or planning assignment | Evidence-backed brief, uncertainty, and proposed next steps; delivery grants no implementation acceptance |
 | Root / coordination | User request and the above reports/outcomes | Explicit assignments, plan decisions, and user-facing synthesis |
 
-The default root prompt requires a shared plan for requests beyond a direct
-conversational answer, and delegated execution of that plan. Root owns user
-communication, assignment decisions and acceptance tracking; researchers investigate,
-implementors change code, and independent auditors verify submitted implementation.
-Brief root inspection can support coordination and evidence verification. Planning
+The default root prompt selects the agent workflow for explicit research,
+investigation, source review, implementation planning or change requests, and for
+answers requiring source inspection, commands, tests or file changes. Root creates
+a shared plan, breaks the task into phases, and uses create_agent/select plus
+assign_work to delegate each phase. Investigation goes to researchers;
+implementation goes to implementors and requires independent audit acceptance.
+One assignment can be one phase. Direct responses cover greetings, clarification
+and questions answerable from the conversation or general knowledge without those
+operations. Status replies read existing records and retain the current workflow.
+
+Root reads conversation and recorded plans, work, progress, findings, briefs and
+audits to coordinate and explain results. Additional source inspection belongs to
+a researcher, including inspection needed to prepare later assignments. Planning
 and delegation are behavioral instructions; the underlying APIs still permit
 unscoped implementation and expose local tools to root.
 
