@@ -13,8 +13,8 @@ is promoted into production instructions.
 | 2. Research assignment and terminal lifecycle | Complete — 977d471 |
 | 3. Immutable research briefs and delivery | Complete — see preceding commit |
 | 4. Session and HTTP progress APIs | Complete — 93bbfd9; collection pagination follows in area 6 |
-| 5. Worker progress API migration | Complete in this checkpoint |
-| 6. Bounded progress and brief model readers | Pending |
+| 5. Worker progress API migration | Complete — 80b11b1 |
+| 6. Bounded progress and brief model readers | Complete in this checkpoint; live assembly follows in area 7 |
 | 7. Current authorization for live read continuations | Pending |
 | 8. Selective progress notifications | Pending |
 | 9. Notification coverage and exchange admission | Pending |

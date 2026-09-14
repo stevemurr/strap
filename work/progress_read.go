@@ -82,3 +82,41 @@ func (s *Store) GetWorkProgress(actor identity.ActorID, id ID) (WorkProgress, er
 func (v *ReadModel) GetWorkProgress(actor identity.ActorID, id ID) (WorkProgress, error) {
 	return v.store.GetWorkProgress(actor, id)
 }
+
+// ProgressReports returns trusted detached history; wire readers apply bounds.
+func (s *Store) ProgressReports(actor identity.ActorID, id ID) ([]WorkProgressReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w, ok := s.works[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if actor == "" || actor != w.Owner && actor != w.Assignee {
+		return nil, ErrForbidden
+	}
+	out := []WorkProgressReport{}
+	for _, r := range s.progressReports {
+		if r.WorkID == id {
+			out = append(out, r.Clone())
+		}
+	}
+	slices.SortFunc(out, func(a, b WorkProgressReport) int { return cmp.Compare(a.WorkRevision, b.WorkRevision) })
+	return out, nil
+}
+func (v *ReadModel) ProgressReports(actor identity.ActorID, id ID) ([]WorkProgressReport, error) {
+	return v.store.ProgressReports(actor, id)
+}
+
+type ReportQuery struct {
+	WorkID ID     `json:"work_id,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+type ReportPage struct {
+	Items      []WorkProgressReport `json:"items"`
+	NextCursor string               `json:"next_cursor,omitempty"`
+}
+type ProgressFindingPage struct {
+	Items      []ProgressFinding `json:"items"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+}
