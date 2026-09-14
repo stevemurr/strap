@@ -2,7 +2,9 @@ package work
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -20,6 +22,7 @@ type Store struct {
 	failure          error
 	mu               sync.Mutex
 	next             uint64
+	issued           map[string]bool
 	plans            map[PlanID]Plan
 	works            map[ID]Work
 	submissions      map[SubmissionID]Submission
@@ -42,10 +45,36 @@ func New(options ...Option) *Store {
 	}
 	return s
 }
-func (s *Store) id(prefix string) string { s.next++; return fmt.Sprintf("%s-%d", prefix, s.next) }
-func blank(v string) bool                { return strings.TrimSpace(v) == "" }
-func invalid(why string) error           { return fmt.Errorf("%w: %s", ErrInvalid, why) }
-func live(w Work) bool                   { return !w.State.Terminal() }
+
+// id issues an opaque identifier: a kind prefix and a random base36 suffix.
+// Ids are deliberately not sequential. A model that sees brief-9 must not be
+// able to extrapolate the next id; it learns ids only from receipts, notices
+// and reads. Uniqueness is checked against every id this store has issued.
+func (s *Store) id(prefix string) string {
+	if s.issued == nil {
+		s.issued = map[string]bool{}
+	}
+	for {
+		suffix := strconv.FormatUint(rand.Uint64()%idSpace, 36)
+		for len(suffix) < idLength {
+			suffix = "0" + suffix
+		}
+		candidate := prefix + "-" + suffix
+		if !s.issued[candidate] {
+			s.issued[candidate] = true
+			s.next++
+			return candidate
+		}
+	}
+}
+
+// idLength base36 characters give 36^7 (78 billion) ids per kind.
+const idLength = 7
+const idSpace = 36 * 36 * 36 * 36 * 36 * 36 * 36
+
+func blank(v string) bool      { return strings.TrimSpace(v) == "" }
+func invalid(why string) error { return fmt.Errorf("%w: %s", ErrInvalid, why) }
+func live(w Work) bool         { return !w.State.Terminal() }
 func (s *Store) steps(scope *Scope) []Step {
 	if scope == nil {
 		return nil

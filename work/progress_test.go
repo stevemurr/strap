@@ -231,25 +231,29 @@ func TestProgressPublicationAndPassiveReplay(t *testing.T) {
 func TestProgressRejectsInvalidReports(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mutate func(*ReportWorkProgressRequest)
+		mutate func(*ReportWorkProgressRequest, Work)
 		want   error
 	}{
-		{"empty", func(r *ReportWorkProgressRequest) {}, ErrInvalid},
-		{"missing binding", func(r *ReportWorkProgressRequest) { r.AssignedAtRevision = 0 }, ErrConflict},
-		{"missing objective", func(r *ReportWorkProgressRequest) { r.Position = &WorkPosition{} }, ErrInvalid},
-		{"missing evidence", func(r *ReportWorkProgressRequest) {
+		{"empty", func(r *ReportWorkProgressRequest, _ Work) {}, ErrInvalid},
+		{"missing binding", func(r *ReportWorkProgressRequest, _ Work) { r.AssignedAtRevision = 0 }, ErrConflict},
+		{"missing objective", func(r *ReportWorkProgressRequest, _ Work) { r.Position = &WorkPosition{} }, ErrInvalid},
+		{"missing evidence", func(r *ReportWorkProgressRequest, _ Work) {
 			r.Findings = []ProgressFindingDraft{{Claim: "observed", Basis: Observed}}
 		}, ErrInvalid},
-		{"unqualified inference", func(r *ReportWorkProgressRequest) {
+		{"unqualified inference", func(r *ReportWorkProgressRequest, _ Work) {
 			r.Findings = []ProgressFindingDraft{{Claim: "inferred", Basis: Inferred}}
 		}, ErrInvalid},
-		{"long prose", func(r *ReportWorkProgressRequest) { r.Position = &WorkPosition{Objective: strings.Repeat("x", 4097)} }, ErrInvalid},
-		{"accept step", func(r *ReportWorkProgressRequest) { r.Steps = []StepProgress{{ID: "step-2", Status: ptr(Completed)}} }, ErrInvalid},
+		{"long prose", func(r *ReportWorkProgressRequest, _ Work) {
+			r.Position = &WorkPosition{Objective: strings.Repeat("x", 4097)}
+		}, ErrInvalid},
+		{"accept step", func(r *ReportWorkProgressRequest, w Work) {
+			r.Steps = []StepProgress{{ID: w.Scope.StepIDs[0], Status: ptr(Completed)}}
+		}, ErrInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, w := fixture(t)
 			r := reportRequest(w)
-			tc.mutate(&r)
+			tc.mutate(&r, w)
 			before := len(s.PendingEvents(0))
 			if _, err := s.ReportWorkProgress("impl", r); !errors.Is(err, tc.want) {
 				t.Fatalf("got %v want %v", err, tc.want)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/stevemurr/strap/roster"
-	"reflect"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stevemurr/strap/agent"
@@ -170,9 +172,27 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 func TestTypedAndToolOperationsProduceSameAuditRepairOutcome(t *testing.T) {
 	direct := operationCycle(t, false)
 	adapted := operationCycle(t, true)
-	if !reflect.DeepEqual(direct, adapted) {
-		t.Fatalf("typed operations and tool adapters diverged:\ndirect: %#v\nadapted: %#v", direct, adapted)
+	if a, b := opaqueIDs(t, direct), opaqueIDs(t, adapted); a != b {
+		t.Fatalf("typed operations and tool adapters diverged:\ndirect: %s\nadapted: %s", a, b)
 	}
+}
+
+// opaqueIDs replaces every store-issued id with its position of first
+// appearance, so two independent runs can be compared structurally even though
+// each run issues its own random ids.
+func opaqueIDs(t *testing.T, v any) string {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	return regexp.MustCompile(`\b([a-z]+)-[0-9a-z]{7}\b`).ReplaceAllStringFunc(string(raw), func(id string) string {
+		if _, ok := seen[id]; !ok {
+			seen[id] = fmt.Sprintf("%s#%d", id[:strings.Index(id, "-")], len(seen)+1)
+		}
+		return seen[id]
+	})
 }
 
 func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
