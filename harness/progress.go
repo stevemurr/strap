@@ -67,6 +67,30 @@ func (s *Session) ListWorkProgressFindings(ctx context.Context, actor identity.A
 	return s.progressReads.ListWorkProgressFindings(ctx, actor, q)
 }
 
+// wakeContext gives an agent its current plans, owned work and assignments
+// at the start of each exchange, read from the same accepted-log view that
+// admission uses. Agents with nothing owned or assigned receive nothing.
+func (s *Session) wakeContext(actor identity.ActorID) agent.WakeContext {
+	return func(ctx context.Context, _ []message.Message) (*message.Message, error) {
+		head, err := s.progressReads.Reader.Head(ctx)
+		if err != nil {
+			return nil, err
+		}
+		v, err := s.progressReads.Reader.At(ctx, head.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		state, err := v.ActorState(ctx, actor)
+		if err != nil {
+			return nil, err
+		}
+		if len(state.Plans)+len(state.Owned)+len(state.Assigned) == 0 {
+			return nil, nil
+		}
+		return &message.Message{From: actor, To: actor, Kind: message.Observation, State: &state}, nil
+	}
+}
+
 func (s *Session) inboxAdmission(actor identity.ActorID) agent.InboxAdmission {
 	return func(ctx context.Context, inputs []message.Message) (agent.InboxDecision, error) {
 		head, err := s.progressReads.Reader.Head(ctx)

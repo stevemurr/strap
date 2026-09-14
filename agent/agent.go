@@ -58,6 +58,8 @@ type Config struct {
 	// OnUsage enqueues one observation after each Submit returns, even on error.
 	// It must not block on a consumer. The observation owns its counts.
 	OnUsage func(UsageObservation)
+	// WakeContext attaches harness-owned state once per exchange; see WakeContext.
+	WakeContext WakeContext
 }
 
 type Agent struct {
@@ -66,6 +68,7 @@ type Agent struct {
 	stopRequested  atomic.Bool
 	nextOutput     uint64
 	nextInvocation uint64
+	nextWake       uint64
 	config         Config
 	tools          map[string]tool.Tool
 	controls       map[string]tool.ControlKind
@@ -199,6 +202,9 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 					break
 				}
 				admitted = true
+				if err := a.appendWakeContext(ctx, inputs); err != nil {
+					return err
+				}
 			}
 			request, revision := a.request()
 			response, output, err := a.generate(ctx, request, revision)

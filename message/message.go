@@ -4,6 +4,7 @@ package message
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/stevemurr/strap/identity"
@@ -38,6 +39,9 @@ type Message struct {
 	Content  string              `json:"content,omitempty"`
 	Work     *work.Work          `json:"work,omitempty"`
 	Event    *work.Event         `json:"event,omitempty"`
+	// State is harness-computed context attached when an agent wakes: its
+	// plans, owned work and assignments with current ids and revisions.
+	State *work.ActorState `json:"state,omitempty"`
 }
 
 type DeliveryStatus string
@@ -91,6 +95,19 @@ func (m Message) Clone() Message {
 	if m.Event != nil {
 		event := m.Event.Clone()
 		m.Event = &event
+	}
+	if m.State != nil {
+		state := *m.State
+		state.Plans = slices.Clone(state.Plans)
+		for i := range state.Plans {
+			state.Plans[i].Steps = slices.Clone(state.Plans[i].Steps)
+		}
+		state.Owned = slices.Clone(state.Owned)
+		state.Assigned = slices.Clone(state.Assigned)
+		for i := range state.Assigned {
+			state.Assigned[i].Steps = slices.Clone(state.Assigned[i].Steps)
+		}
+		m.State = &state
 	}
 	return m
 }

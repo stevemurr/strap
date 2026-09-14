@@ -27,6 +27,7 @@ type ownedAgent struct {
 
 type Controller struct {
 	admitInbox  func(message.ActorID) agent.InboxAdmission
+	wakeContext func(message.ActorID) agent.WakeContext
 	emission    sync.Mutex
 	reporter    Reporter
 	source      func(context.Context) (Event, error)
@@ -61,6 +62,11 @@ func WithReporting(r Reporter, source func(context.Context) (Event, error)) Opti
 }
 func WithInboxAdmission(f func(message.ActorID) agent.InboxAdmission) Option {
 	return func(c *Controller) { c.admitInbox = f }
+}
+
+// WithWakeContext supplies per-agent wake context; see agent.WakeContext.
+func WithWakeContext(f func(message.ActorID) agent.WakeContext) Option {
+	return func(c *Controller) { c.wakeContext = f }
 }
 func New(ctx context.Context, options ...Option) *Controller {
 	ctx, cancel := context.WithCancel(ctx)
@@ -137,7 +143,11 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	if c.admitInbox != nil {
 		admit = c.admitInbox(id)
 	}
-	runner, err := agent.New(agent.Config{AdmitInbox: admit,
+	var wake agent.WakeContext
+	if c.wakeContext != nil {
+		wake = c.wakeContext(id)
+	}
+	runner, err := agent.New(agent.Config{AdmitInbox: admit, WakeContext: wake,
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
 		Outbox: sender{controller: c, actor: id},
 		Reporter: agent.ReporterFunc(func(ctx context.Context, e agent.Event) error {

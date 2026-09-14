@@ -300,7 +300,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		s.resources.Add("web", web)
 		local = append(local, web.Tools()...)
 	}
-	c := conversation.New(execution, conversation.WithInboxAdmission(s.inboxAdmission), conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
+	c := conversation.New(execution, conversation.WithInboxAdmission(s.inboxAdmission), conversation.WithWakeContext(s.wakeContext), conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
 	s.controller = c
 	var stopReads context.CancelFunc
 	s.workflowReadLife, stopReads = context.WithCancel(context.Background())

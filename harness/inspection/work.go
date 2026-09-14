@@ -52,6 +52,16 @@ func (v *View) workModel(ctx context.Context) (*work.ReadModel, map[work.ID]uint
 	}
 	return model, first, nil
 }
+
+// ActorState computes the wake-time state block for an actor from the work
+// facts accepted through this view's cursor.
+func (v *View) ActorState(ctx context.Context, actor identity.ActorID) (work.ActorState, error) {
+	model, _, err := v.workModel(ctx)
+	if err != nil {
+		return work.ActorState{}, err
+	}
+	return model.ActorState(actor), nil
+}
 func (v *View) agentInspection(ctx context.Context, id identity.ActorID) (projection.AgentInspection, error) {
 	a, err := v.projection.AgentInspection(id)
 	if err != nil {

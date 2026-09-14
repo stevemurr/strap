@@ -848,8 +848,8 @@ Worker progress requires `work_id`, current `expected_revision`, and the exact
 `assigned_at_revision`. A supplied `position` replaces the entire prior position;
 omitting it preserves that position. Findings are immutable, with observed or
 inferred basis, evidence, limitations and explicit supersession. Step progress
-updates the authoritative scoped plan immediately. Legacy worker `update_plan`
-and `update_work` mutations reject requests without changing state.
+updates the authoritative scoped plan immediately. The legacy worker `update_work`
+mutation rejects requests without changing state.
 
 The dispatcher records every report. Activity-only reports stay in inspection;
 finding notices batch for two seconds and normally occur at most once per owner
@@ -858,6 +858,15 @@ Notices carry bounded references, not report bodies. Submission, cancellation an
 reassignment retire obsolete report wakeups. Queued messages remain in history;
 recorded admission decisions suppress stale-only new exchanges while preserving
 ordinary tool continuations. Runtime waiting and reported blockers remain distinct.
+
+Every new exchange begins with a harness-computed state block, appended to the
+agent's history after the queued inputs and before the first model call. The
+root sees its plans with live steps, statuses and reservations, plus its owned
+work with assignees and latest submission, audit and brief ids; a worker sees its
+assignments with work and assignment revisions and scoped step statuses. The
+block is read from the accepted log at wake time, so it is never stale, and the
+model cannot write a guessed id into it. Agents with nothing owned or assigned
+receive no block.
 
 Research diagnostics use a separate shell configured by `ResearchExecution`
 (default 30 seconds, maximum 60 seconds, 16 KiB retained output). Every command
