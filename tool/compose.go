@@ -150,7 +150,15 @@ func (t *composedTool) snapshot() preparedTool {
 // Include nested property/item hints too, so steps and scopes retain their shape.
 // Hints must accept every branch; the original oneOf remains authoritative.
 func compositionSchema(branches []json.RawMessage) (json.RawMessage, error) {
-	hints, err := compositionHints(branches)
+	labels := make([]string, len(branches))
+	for i, raw := range branches {
+		var branch struct {
+			Description string `json:"description"`
+		}
+		_ = json.Unmarshal(raw, &branch)
+		labels[i] = hintLabel(i, branch.Description)
+	}
+	hints, err := compositionHints(branches, labels)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +173,19 @@ func compositionSchema(branches []json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(schema)
 }
 
-func compositionHints(alternatives []json.RawMessage) (json.RawMessage, error) {
+// hintLabel names an alternative for property annotations: the first word of
+// its description ("the create form") or its position ("form 2").
+func hintLabel(i int, description string) string {
+	if word, _, _ := strings.Cut(strings.TrimSpace(description), " "); word != "" {
+		return "the " + strings.ToLower(strings.TrimRight(word, ".,:;")) + " form"
+	}
+	return fmt.Sprintf("form %d", i+1)
+}
+
+// Servers that flatten oneOf show every property as if it applied everywhere.
+// A property present in only some alternatives is annotated with the forms that
+// accept it, so the model reads the restriction where it reads the field.
+func compositionHints(alternatives []json.RawMessage, labels []string) (json.RawMessage, error) {
 	if len(alternatives) == 0 {
 		return json.RawMessage(`{}`), nil
 	}
@@ -178,6 +198,7 @@ func compositionHints(alternatives []json.RawMessage) (json.RawMessage, error) {
 	}
 	kind := ""
 	properties := map[string][]json.RawMessage{}
+	owners := map[string][]int{}
 	items := []json.RawMessage{}
 	for i, raw := range alternatives {
 		var schema struct {
@@ -197,6 +218,7 @@ func compositionHints(alternatives []json.RawMessage) (json.RawMessage, error) {
 		}
 		for name, property := range schema.Properties {
 			properties[name] = append(properties[name], property)
+			owners[name] = append(owners[name], i)
 		}
 		item := schema.Items
 		if len(item) == 0 {
@@ -208,9 +230,15 @@ func compositionHints(alternatives []json.RawMessage) (json.RawMessage, error) {
 	if kind == "object" {
 		fields := map[string]json.RawMessage{}
 		for name, choices := range properties {
-			field, err := compositionHints(choices)
+			field, err := compositionHints(choices, pick(labels, owners[name]))
 			if err != nil {
 				return nil, err
+			}
+			if len(owners[name]) < len(alternatives) && len(labels) == len(alternatives) {
+				field, err = describe(field, "Only in "+strings.Join(pick(labels, owners[name]), " or "))
+				if err != nil {
+					return nil, err
+				}
 			}
 			fields[name] = field
 		}
@@ -218,11 +246,41 @@ func compositionHints(alternatives []json.RawMessage) (json.RawMessage, error) {
 		hint["properties"] = fields
 	}
 	if kind == "array" {
-		item, err := compositionHints(items)
+		item, err := compositionHints(items, labels)
 		if err != nil {
 			return nil, err
 		}
 		hint["items"] = item
 	}
 	return json.Marshal(hint)
+}
+
+func pick(labels []string, indices []int) []string {
+	out := make([]string, 0, len(indices))
+	for _, i := range indices {
+		if i < len(labels) {
+			out = append(out, labels[i])
+		}
+	}
+	return out
+}
+
+// describe prefixes text onto a hint's description without changing its contract.
+func describe(hint json.RawMessage, text string) (json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(hint, &m); err != nil {
+		return nil, err
+	}
+	if prior, ok := m["description"]; ok {
+		var s string
+		if json.Unmarshal(prior, &s) == nil && s != "" {
+			text += ". " + s
+		}
+	}
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		return nil, err
+	}
+	m["description"] = encoded
+	return json.Marshal(m)
 }

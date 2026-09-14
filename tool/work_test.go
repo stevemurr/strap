@@ -360,3 +360,37 @@ func TestPlanRejectionNamesTheClosestForm(t *testing.T) {
 		}
 	}
 }
+
+func TestFlattenedHintsAnnotateFormSpecificProperties(t *testing.T) {
+	op := UpdatePlan(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }, nil)
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+			Items       struct {
+				Properties map[string]struct {
+					Description string `json:"description"`
+				} `json:"properties"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"plan_id", "expected_revision", "order", "cancel"} {
+		if got := schema.Properties[field].Description; got != "Only in the edit form" {
+			t.Fatalf("%s: %q", field, got)
+		}
+	}
+	if got := schema.Properties["steps"].Items.Properties["step_id"].Description; got != "Only in the edit form" {
+		t.Fatalf("step_id: %q", got)
+	}
+	// Fields every form accepts carry no restriction.
+	for _, field := range []string{"title", "steps"} {
+		if got := schema.Properties[field].Description; got != "" {
+			t.Fatalf("%s annotated although shared: %q", field, got)
+		}
+	}
+	if got := schema.Properties["steps"].Items.Properties["title"].Description; got != "" {
+		t.Fatalf("step title annotated although shared: %q", got)
+	}
+}
