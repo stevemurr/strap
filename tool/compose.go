@@ -35,6 +35,9 @@ func Compose(definition provider.ToolDefinition, branches ...Tool) (Tool, error)
 	schemas := []json.RawMessage{}
 	names := map[string]bool{}
 	for _, branch := range branches {
+		if _, ok := branch.(ControlTool); ok {
+			return nil, fmt.Errorf("control tools must be registered independently")
+		}
 		typed, ok := branch.(preparedTool)
 		if !ok || (reflect.ValueOf(typed).Kind() == reflect.Pointer && reflect.ValueOf(typed).IsNil()) {
 			return nil, fmt.Errorf("composition requires non-nil typed tools")

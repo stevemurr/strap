@@ -65,6 +65,7 @@ type WorkView struct {
 	Record  eventlog.Cursor `json:"record"`
 }
 type Projector struct {
+	lastBatch     map[identity.ActorID]agent.ToolBatch
 	registrations map[identity.ActorID]roster.Registration
 	workViews     map[work.ID]WorkView
 	toolStates    map[string]toolState
@@ -88,7 +89,7 @@ type Projector struct {
 }
 
 func New(session identity.SessionID) *Projector {
-	return &Projector{registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
+	return &Projector{lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
 }
 func (p *Projector) Cursor() eventlog.Cursor { p.mu.RLock(); defer p.mu.RUnlock(); return p.cursor }
 func (p *Projector) Apply(e eventlog.Record) error {
@@ -513,6 +514,17 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			}
 		}
 
+	case "agent_yielded":
+		var v agent.Yielded
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		b := p.lastBatch[actor]
+		o, ok := p.outputs[v.Output]
+		if !ok || v.Output.Agent != actor || o.Status != agent.OutputComplete || o.HistoryPosition == nil || *o.HistoryPosition+1 != v.SettledRevision || len(b.Calls) != 1 || b.Calls[0] != v.CallID || b.ContextRevision != v.SettledRevision || v.SettledRevision != uint64(len(p.histories[actor])) {
+			return errors.New("yield without matching settled batch")
+		}
+		commit = func() { delete(p.lastBatch, actor) }
 	case "inbox_disposition":
 		var v agent.InboxDisposition
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
@@ -534,6 +546,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		if v.Agent != actor || len(v.Batch.Calls) == 0 || v.Batch.ContextRevision != uint64(len(p.histories[actor])) {
 			return errors.New("invalid tool batch")
 		}
+		commit = func() { p.lastBatch[actor] = v.Batch }
 	case "context_tokens":
 		var v conversation.ContextTokensEvent
 		if err := json.Unmarshal(e.Payload, &v); err != nil {

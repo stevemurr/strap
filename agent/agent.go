@@ -68,6 +68,7 @@ type Agent struct {
 	nextInvocation uint64
 	config         Config
 	tools          map[string]tool.Tool
+	controls       map[string]tool.ControlKind
 	definitions    []provider.ToolDefinition
 	thread         thread
 	usage          usageTracker
@@ -80,7 +81,7 @@ func New(config Config) (*Agent, error) {
 		return nil, errors.New("agent requires a provider, inbox, and outbox")
 	}
 	config.Spec = config.Spec.Clone()
-	a := &Agent{config: config, tools: make(map[string]tool.Tool), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
+	a := &Agent{config: config, tools: make(map[string]tool.Tool), controls: make(map[string]tool.ControlKind), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
 	for _, t := range config.Spec.Tools {
 		if t == nil {
 			return nil, errors.New("nil tool")
@@ -96,6 +97,13 @@ func New(config Config) (*Agent, error) {
 		}
 		if _, exists := a.tools[definition.Name]; exists {
 			return nil, fmt.Errorf("duplicate tool: %s", definition.Name)
+		}
+		if control, ok := t.(tool.ControlTool); ok {
+			kind := control.Control()
+			if kind != tool.YieldToInbox {
+				return nil, fmt.Errorf("invalid tool control: %s", kind)
+			}
+			a.controls[definition.Name] = kind
 		}
 		a.tools[definition.Name] = t
 		definition.Parameters = append(json.RawMessage(nil), definition.Parameters...)
@@ -214,11 +222,26 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				}
 			}
 			var toolRevision uint64
+			controlBatch := false
+			for _, call := range response.ToolCalls {
+				if a.controls[call.Name] != "" {
+					controlBatch = true
+				}
+			}
+			mixedControl := controlBatch && len(response.ToolCalls) != 1
+			yielded := false
 			for _, call := range response.ToolCalls {
 				if err := a.checkpoint(ctx); err != nil {
 					return err
 				}
-				result, err := a.call(ctx, call)
+				var rejected error
+				if mixedControl {
+					rejected = errors.New("control tool must be the sole call; no calls in this batch executed")
+				}
+				result, err := a.invokeCall(ctx, call, rejected)
+				if err == nil && !mixedControl && a.controls[call.Name] == tool.YieldToInbox {
+					yielded = true
+				}
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -244,6 +267,12 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				if a.config.OnToolBatch != nil {
 					a.config.OnToolBatch(batch)
 				}
+			}
+			if yielded {
+				if err := a.report(Yielded{Output: output, CallID: response.ToolCalls[0].ID, SettledRevision: toolRevision}); err != nil {
+					return err
+				}
+				break
 			}
 		}
 	}
@@ -280,7 +309,10 @@ func (a *Agent) request() (provider.Request, uint64) {
 	}, revision
 }
 
-func (a *Agent) call(ctx context.Context, call provider.ToolCall) (result tool.Result, err error) {
+func (a *Agent) call(ctx context.Context, call provider.ToolCall) (tool.Result, error) {
+	return a.invokeCall(ctx, call, nil)
+}
+func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected error) (result tool.Result, err error) {
 	started := time.Now()
 	a.nextInvocation++
 	invocation := fmt.Sprintf("%s/tool-%d", a.config.ID, a.nextInvocation)
@@ -294,6 +326,9 @@ func (a *Agent) call(ctx context.Context, call provider.ToolCall) (result tool.R
 		}
 		err = errors.Join(err, a.reportTool(ToolActivity{InvocationID: invocation, Diagnostic: tool.DiagnosticFrom(observedErr), Call: call, StartedAt: started, FinishedAt: time.Now(), Result: result, Err: observedErr}))
 	}()
+	if rejected != nil {
+		return tool.Result{}, rejected
+	}
 	t, ok := a.tools[call.Name]
 	if !ok {
 		return tool.Result{}, fmt.Errorf("unknown tool: %s", call.Name)

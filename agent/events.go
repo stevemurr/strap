@@ -120,3 +120,12 @@ func (a *Agent) Definitions() []provider.ToolDefinition {
 	}
 	return out
 }
+
+// Yielded follows the settled sole-call batch and creates no synthetic reply.
+type Yielded struct {
+	Output          identity.OutputID `json:"output"`
+	CallID          string            `json:"call_id"`
+	SettledRevision uint64            `json:"settled_revision"`
+}
+
+func (Yielded) isAgentEvent() {}

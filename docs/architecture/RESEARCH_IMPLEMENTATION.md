@@ -17,8 +17,8 @@ is promoted into production instructions.
 | 6. Bounded progress and brief model readers | Complete — c897f2d |
 | 7. Current authorization for live read continuations | Complete — 79185f3; readers exposed to all roles and HTTP |
 | 8. Selective progress notifications | Complete — 414366a; bounded references, activity silence, timed findings, immediate attention/delivery |
-| 9. Notification coverage and exchange admission | Complete in this checkpoint; accepted-prefix admission, secondary-work coverage, preserved tool continuations |
-| 10. Explicit inbox yielding | Pending |
+| 9. Notification coverage and exchange admission | Complete — 101034f; accepted-prefix admission, secondary-work coverage, preserved tool continuations |
+| 10. Explicit inbox yielding | Complete in this checkpoint; sole-call capability, matched errors, correlated passive yield records |
 | 11. Assignment-bound researcher diagnostics | Pending |
 | 12. Host-issued execution evidence and validation | Pending |
 | 13. Cancellation and error evidence preservation | Pending |

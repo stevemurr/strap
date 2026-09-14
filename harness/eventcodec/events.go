@@ -102,7 +102,7 @@ func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 		return nil, errors.New("record requires content resolution")
 	}
 	switch e.Kind {
-	case "output_started", "output_delta", "output_finished", "history_appended", "inbox_disposition":
+	case "output_started", "output_delta", "output_finished", "history_appended", "inbox_disposition", "agent_yielded":
 		return decodeAgent(e)
 	case "context_tokens":
 		return decode[conversation.ContextTokensEvent](e.Payload)

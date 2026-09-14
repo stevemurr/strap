@@ -95,7 +95,7 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	}))
 	if s.researcher.Provider != nil {
 		s.researcher.Tools = append(s.researcher.Tools, s.commonTools()...)
-		s.researcher.Tools = append(s.researcher.Tools, s.progressTool())
+		s.researcher.Tools = append(s.researcher.Tools, s.progressTool(), tool.WaitForInput())
 		s.researcher.Tools = append(s.researcher.Tools, tool.SubmitResearch(func(ctx context.Context, c tool.Call, r work.SubmitResearchRequest) (tool.Result, error) {
 			v, e := s.SubmitResearch(ctx, c.Actor, r)
 			return result(v, e)
@@ -133,6 +133,7 @@ func (s *Session) updateProgress(ctx context.Context, c tool.Call, u work.Progre
 }
 func (s *Session) RootTools() []tool.Tool {
 	return append(s.commonTools(),
+		tool.WaitForInput(),
 		tool.CreateAgent(func(ctx context.Context, c tool.Call, r roster.CreateRequest) (tool.Result, error) {
 			v, e := s.CreateAgent(ctx, c.Actor, r)
 			return result(v, e)

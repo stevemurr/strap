@@ -160,6 +160,10 @@ func control(e conversation.Event) (json.RawMessage, error) {
 		v = conversation.AgentStarted{Agent: e.Agent, OutputTokenLimit: e.OutputTokenLimit}
 	case conversation.AgentEvent:
 		switch x := e.Event.(type) {
+		case agent.Yielded:
+			v = x
+		case agent.InboxDisposition:
+			v = x
 		case agent.OutputStarted:
 			v = x
 		case agent.HistoryAppended:
