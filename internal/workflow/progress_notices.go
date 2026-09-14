@@ -104,3 +104,45 @@ func (q *noticeQueue) flush(now time.Time, send func(identity.ActorID, message.W
 		}
 	}
 }
+
+// Split a complete transition before routing any part. Coverage is already
+// applied to scheduling; each immutable envelope honors both configured caps.
+func splitNotice(n message.WorkProgressNotice, limit int) ([]message.WorkProgressNotice, error) {
+	var parts []message.WorkProgressNotice
+	current := message.WorkProgressNotice{Attention: n.Attention}
+	appendOne := func(add func(*message.WorkProgressNotice)) error {
+		candidate := current.Clone()
+		add(&candidate)
+		if len(candidate.Reports)+len(candidate.Briefs)+len(candidate.Covered) > limit || candidate.Validate() != nil {
+			if len(current.Reports)+len(current.Briefs)+len(current.Covered) > 0 {
+				parts = append(parts, current)
+			}
+			candidate = message.WorkProgressNotice{Attention: n.Attention}
+			add(&candidate)
+		}
+		if err := candidate.Validate(); err != nil {
+			return err
+		}
+		current = candidate
+		return nil
+	}
+	for _, r := range n.Covered {
+		if err := appendOne(func(v *message.WorkProgressNotice) { v.Covered = append(v.Covered, r) }); err != nil {
+			return nil, err
+		}
+	}
+	for _, r := range n.Reports {
+		if err := appendOne(func(v *message.WorkProgressNotice) { v.Reports = append(v.Reports, r) }); err != nil {
+			return nil, err
+		}
+	}
+	for _, r := range n.Briefs {
+		if err := appendOne(func(v *message.WorkProgressNotice) { v.Briefs = append(v.Briefs, r) }); err != nil {
+			return nil, err
+		}
+	}
+	if err := current.Validate(); err != nil {
+		return nil, err
+	}
+	return append(parts, current), nil
+}

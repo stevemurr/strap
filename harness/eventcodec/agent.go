@@ -18,6 +18,8 @@ func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
 	var payload any = v.Event
 	var output *identity.OutputID
 	switch e := v.Event.(type) {
+	case agent.InboxDisposition:
+		kind = "inbox_disposition"
 	case agent.OutputStarted:
 		kind = "output_started"
 		output = &e.Output
@@ -64,6 +66,12 @@ func describeAgent(v conversation.AgentEvent) (eventlog.Data, any, error) {
 func decodeAgent(e eventlog.Event) (conversation.Event, error) {
 	var fact agent.Event
 	switch e.Kind {
+	case "inbox_disposition":
+		var v agent.InboxDisposition
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return nil, err
+		}
+		fact = v
 	case "output_started":
 		var v agent.OutputStarted
 		if err := json.Unmarshal(e.Payload, &v); err != nil {

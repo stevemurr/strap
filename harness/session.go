@@ -288,7 +288,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		s.resources.Add("web", web)
 		local = append(local, web.Tools()...)
 	}
-	c := conversation.New(execution, conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
+	c := conversation.New(execution, conversation.WithInboxAdmission(s.inboxAdmission), conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
 	s.controller = c
 	var stopReads context.CancelFunc
 	s.workflowReadLife, stopReads = context.WithCancel(context.Background())
@@ -312,7 +312,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
+			return s.GetWork(context.Background(), actor, id)
+		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
 	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {

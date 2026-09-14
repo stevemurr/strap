@@ -26,6 +26,7 @@ type ownedAgent struct {
 }
 
 type Controller struct {
+	admitInbox  func(message.ActorID) agent.InboxAdmission
 	emission    sync.Mutex
 	reporter    Reporter
 	source      func(context.Context) (Event, error)
@@ -57,6 +58,9 @@ type Option func(*Controller)
 
 func WithReporting(r Reporter, source func(context.Context) (Event, error)) Option {
 	return func(c *Controller) { c.reporter = r; c.source = source; c.events = nil }
+}
+func WithInboxAdmission(f func(message.ActorID) agent.InboxAdmission) Option {
+	return func(c *Controller) { c.admitInbox = f }
 }
 func New(ctx context.Context, options ...Option) *Controller {
 	ctx, cancel := context.WithCancel(ctx)
@@ -129,7 +133,11 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	id := message.ActorID(fmt.Sprintf("agent-%d", c.nextAgent))
 	ctx, cancel := context.WithCancel(c.ctx)
 	mail := inbox.New[message.Message]()
-	runner, err := agent.New(agent.Config{
+	var admit agent.InboxAdmission
+	if c.admitInbox != nil {
+		admit = c.admitInbox(id)
+	}
+	runner, err := agent.New(agent.Config{AdmitInbox: admit,
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
 		Outbox: sender{controller: c, actor: id},
 		Reporter: agent.ReporterFunc(func(ctx context.Context, e agent.Event) error {

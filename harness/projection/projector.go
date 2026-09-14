@@ -513,6 +513,19 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			}
 		}
 
+	case "inbox_disposition":
+		var v agent.InboxDisposition
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		if len(v.Messages) == 0 || v.Decision.Session != e.Session || v.Decision.Through >= e.Sequence {
+			return errors.New("invalid inbox disposition prefix")
+		}
+		for _, id := range v.Messages {
+			if _, ok := p.messageIDs[id]; !ok {
+				return errors.New("disposition before message")
+			}
+		}
 	case "tool_batch":
 		var v conversation.ToolBatchEvent
 		if err := json.Unmarshal(e.Payload, &v); err != nil {

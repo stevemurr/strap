@@ -29,12 +29,13 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
-	publish        func(conversation.Event) error
-	progressReads  []tool.Tool
-	progressConfig WorkProgressReportingConfig
-	closing        atomic.Bool
-	admission      *admission.Gate
-	stopOwner      func() bool
+	publish         func(conversation.Event) error
+	progressReads   []tool.Tool
+	progressConfig  WorkProgressReportingConfig
+	progressCurrent func(identity.ActorID, work.ID) (work.Work, error)
+	closing         atomic.Bool
+	admission       *admission.Gate
+	stopOwner       func() bool
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
@@ -48,6 +49,10 @@ type Session struct {
 }
 
 type Option func(*Session)
+
+func WithProgressCurrent(f func(identity.ActorID, work.ID) (work.Work, error)) Option {
+	return func(s *Session) { s.progressCurrent = f }
+}
 
 func WithProgressTools(ops []tool.Tool) Option {
 	return func(s *Session) { s.progressReads = append([]tool.Tool(nil), ops...) }
@@ -231,6 +236,17 @@ func (s *Session) run() {
 	revoked := map[work.EventID]bool{}
 	notifications := map[message.MessageID][]work.EventID{}
 	queue := newNoticeQueue(s.progressConfig)
+	if s.progressCurrent == nil {
+		s.progressCurrent = s.Store.GetWork
+	}
+	priorWorks := map[work.ID]work.Work{}
+	coverages := map[work.EventID][]message.ProgressCoverage{}
+	seenChange := map[work.EventID]bool{}
+	retire := func() {
+		if err := queue.retire(s.progressCurrent, func(id work.EventID) { _ = s.Store.AcknowledgeEvent(id) }); err != nil {
+			s.emit(conversation.DiagnosticEvent{Level: "error", Message: err.Error()})
+		}
+	}
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
 		<-timer.C
@@ -250,15 +266,35 @@ func (s *Session) run() {
 			timerC = timer.C
 		}
 	}
-	sendNotice := func(owner identity.ActorID, n message.WorkProgressNotice, ids []work.EventID) bool {
-		receipt, err := s.Controller.Deliver(owner, message.Draft{To: owner, Kind: message.Notification, Progress: &n})
+
+	outstanding := map[work.EventID]int{}
+	sendParts := func(owner identity.ActorID, n message.WorkProgressNotice, ids []work.EventID, event *work.Event) bool {
+		parts, err := splitNotice(n, s.progressConfig.MaxReportsPerNotice)
 		if err != nil {
-			s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Progress notice delivery failed: %v", err)}})
+			s.emit(conversation.DiagnosticEvent{Level: "error", Message: err.Error()})
 			return false
 		}
-		notifications[receipt.MessageID] = append([]work.EventID(nil), ids...)
+		for i, part := range parts {
+			var outcome *work.Event
+			if i == len(parts)-1 {
+				outcome = event
+			}
+			receipt, err := s.Controller.Deliver(owner, message.Draft{To: owner, Kind: message.Notification, Progress: &part, Event: outcome})
+			if err != nil {
+				s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Progress notice delivery failed: %v", err)}})
+				return false
+			}
+			notifications[receipt.MessageID] = append([]work.EventID(nil), ids...)
+			for _, id := range ids {
+				outstanding[id]++
+			}
+		}
 		return true
 	}
+	sendNotice := func(owner identity.ActorID, n message.WorkProgressNotice, ids []work.EventID) bool {
+		return sendParts(owner, n, ids, nil)
+	}
+
 	drain := func() {
 		for _, e := range s.Store.PendingEvents(0) {
 			if !published[e.ID] {
@@ -271,13 +307,18 @@ func (s *Session) run() {
 				continue
 			}
 			w := e.Work
+			if !seenChange[e.ID] {
+				coverages[e.ID] = coverageChange(priorWorks, e.Change)
+				seenChange[e.ID] = true
+				retire()
+			}
 			if e.Kind == work.WorkProgressReported || e.Kind == work.ResearchDelivered {
 				if attempted[e.ID] {
 					continue
 				}
 				attempted[e.ID] = true
 				if e.Kind == work.ResearchDelivered {
-					sendNotice(w.Owner, message.WorkProgressNotice{Briefs: []message.ResearchBriefRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, BriefID: w.LatestResearchBriefID}}, Attention: true}, []work.EventID{e.ID})
+					sendNotice(w.Owner, message.WorkProgressNotice{Covered: coverages[e.ID], Briefs: []message.ResearchBriefRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, BriefID: w.LatestResearchBriefID}}, Attention: true}, []work.EventID{e.ID})
 				} else if e.Actionable {
 					sendNotice(w.Owner, message.WorkProgressNotice{Reports: []message.ProgressReportRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, ReportID: w.LatestProgressReportID}}, Attention: true}, []work.EventID{e.ID})
 				} else if e.Change != nil && len(e.Change.ProgressReports) > 0 && len(e.Change.ProgressReports[0].Findings) > 0 {
@@ -340,6 +381,10 @@ func (s *Session) run() {
 					continue
 				}
 				attempted[e.ID] = true
+				if refs := coverages[e.ID]; len(refs) > 0 {
+					sendParts(w.Owner, message.WorkProgressNotice{Covered: refs, Attention: true}, []work.EventID{e.ID}, &e)
+					continue
+				}
 				receipt, err := s.Controller.Deliver(e.Actor, message.Draft{To: w.Owner, Kind: kind, Event: &e})
 				if err != nil {
 					s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s for %s remains pending: %v", e.Kind, w.ID, err)}})
@@ -363,6 +408,8 @@ func (s *Session) run() {
 			resetTimer()
 		case now := <-timerC:
 			if !s.closing.Load() {
+				drain()
+				retire()
 				queue.flush(now, sendNotice)
 				resetTimer()
 			}
@@ -380,6 +427,11 @@ func (s *Session) run() {
 				if ids, ok := notifications[event.Receipt.MessageID]; ok {
 					for _, id := range ids {
 						if event.Receipt.Status == message.Consumed {
+							if outstanding[id] > 1 {
+								outstanding[id]--
+								continue
+							}
+							delete(outstanding, id)
 							_ = s.Store.AcknowledgeEvent(id)
 							delete(notifications, event.Receipt.MessageID)
 							delete(attempted, id)

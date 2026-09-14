@@ -36,6 +36,7 @@ func (s Spec) Clone() Spec {
 
 // Config supplies the collaborators owned by the conversation controller.
 type Config struct {
+	AdmitInbox InboxAdmission
 	Reporter   Reporter // Required for recoverable hosts; nil is an explicitly unrecorded low-level agent.
 	ID         message.ActorID
 	ReplyTo    message.ActorID
@@ -154,11 +155,16 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		if incoming.Kind == message.Observation {
 			continue
 		}
+		inputs := []message.Message{incoming}
+		admitted := false
 		for {
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
 			for _, incoming := range a.config.Inbox.Drain() {
+				if !admitted {
+					inputs = append(inputs, incoming)
+				}
 				if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
 					last = incoming.ID
 				}
@@ -168,6 +174,16 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 			}
 			if err := a.checkpoint(ctx); err != nil {
 				return err
+			}
+			if !admitted {
+				wake, err := a.admit(ctx, inputs)
+				if err != nil {
+					return err
+				}
+				if !wake {
+					break
+				}
+				admitted = true
 			}
 			request, revision := a.request()
 			response, output, err := a.generate(ctx, request, revision)

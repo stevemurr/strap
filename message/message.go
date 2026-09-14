@@ -98,7 +98,7 @@ func (m Message) Clone() Message {
 // Validate checks the payload before it is routed.
 func (d Draft) Validate() error {
 	if d.Progress != nil {
-		if d.Kind != Notification || d.Work != nil || d.Event != nil || d.Content != "" {
+		if d.Kind != Notification || d.Work != nil || d.Content != "" {
 			return errors.New("progress requires an exclusive notification envelope")
 		}
 		return d.Progress.Validate()
