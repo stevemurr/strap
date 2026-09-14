@@ -10,8 +10,8 @@ is promoted into production instructions.
 | Rejected tool argument recording | Complete — 835c6ca |
 | Progress ledger and passive inspection foundation | Complete — 2e4b611 |
 | 1. Researcher registration and role configuration | Complete — d041026 |
-| 2. Research assignment and terminal lifecycle | Complete in this checkpoint |
-| 3. Immutable research briefs and delivery | Pending |
+| 2. Research assignment and terminal lifecycle | Complete — 977d471 |
+| 3. Immutable research briefs and delivery | Complete in this checkpoint |
 | 4. Session and HTTP progress APIs | Pending |
 | 5. Worker progress API migration | Pending |
 | 6. Bounded progress and brief model readers | Pending |

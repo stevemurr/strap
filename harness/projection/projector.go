@@ -434,7 +434,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			return errors.New("missing or duplicate work event identity")
 		}
 		switch c.Kind {
-		case work.PlanChanged, work.WorkAssigned, work.WorkReassigned, work.WorkCancelled, work.ProgressChanged, work.WorkProgressReported, work.ReviewRequested, work.AuditCompleted:
+		case work.PlanChanged, work.WorkAssigned, work.WorkReassigned, work.WorkCancelled, work.ProgressChanged, work.WorkProgressReported, work.ResearchDelivered, work.ReviewRequested, work.AuditCompleted:
 		default:
 			return errors.New("invalid work event kind")
 		}
@@ -466,6 +466,20 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		for _, a := range c.Audits {
 			if a.ID == "" || a.Work == "" || a.Submission == "" || a.Verdict != work.Pass && a.Verdict != work.Fail {
 				return errors.New("invalid audit header")
+			}
+		}
+		if c.Kind == work.ResearchDelivered && len(c.ResearchBriefs) != 1 {
+			return errors.New("research delivery requires one brief")
+		}
+		for _, b := range c.ResearchBriefs {
+			matched := false
+			for _, w := range c.Works {
+				if w.ID == b.Work && w.Revision == b.Revision && w.State == work.Delivered && w.Kind == work.Research {
+					matched = true
+				}
+			}
+			if !matched || b.ID == "" || b.AssignedAtRevision == 0 || b.AssignedAtRevision > b.Revision {
+				return errors.New("invalid research brief header")
 			}
 		}
 		if c.Kind == work.WorkProgressReported && len(c.ProgressReports) != 1 {

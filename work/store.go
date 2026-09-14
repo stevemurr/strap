@@ -24,6 +24,7 @@ type Store struct {
 	submissions      map[SubmissionID]Submission
 	audits           map[AuditID]Audit
 	progressReports  map[ProgressReportID]WorkProgressReport
+	researchBriefs   map[ResearchBriefID]ResearchBrief
 	progressFindings map[ProgressFindingID]ProgressFinding
 	reserved         map[StepID]ID
 	events           []Event
@@ -33,6 +34,7 @@ type Store struct {
 func New(options ...Option) *Store {
 	s := &Store{plans: map[PlanID]Plan{}, works: map[ID]Work{}, submissions: map[SubmissionID]Submission{}, audits: map[AuditID]Audit{}, reserved: map[StepID]ID{}, ready: make(chan struct{}, 1)}
 	s.progressReports = map[ProgressReportID]WorkProgressReport{}
+	s.researchBriefs = map[ResearchBriefID]ResearchBrief{}
 	s.progressFindings = map[ProgressFindingID]ProgressFinding{}
 	for _, o := range options {
 		o(s)

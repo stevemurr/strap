@@ -278,3 +278,15 @@ func (s *Session) begin(ctx context.Context) (context.Context, func(), error) {
 	}
 	return ctx, func() {}, ctx.Err()
 }
+
+func (s *Session) SubmitResearch(ctx context.Context, actor identity.ActorID, r work.SubmitResearchRequest) (work.SubmitResearchResult, error) {
+	run, done, err := s.begin(ctx)
+	if err != nil {
+		return work.SubmitResearchResult{}, err
+	}
+	defer done()
+	if err = run.Err(); err != nil {
+		return work.SubmitResearchResult{}, err
+	}
+	return s.Store.SubmitResearch(actor, r)
+}

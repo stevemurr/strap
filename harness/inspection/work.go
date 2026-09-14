@@ -243,3 +243,11 @@ func (v *View) Agents(ctx context.Context) ([]projection.AgentInfo, error) {
 	}
 	return out, nil
 }
+
+func (v *View) GetResearchBrief(ctx context.Context, actor identity.ActorID, id work.ResearchBriefID) (work.ResearchBrief, error) {
+	m, _, err := v.workModel(ctx)
+	if err != nil {
+		return work.ResearchBrief{}, err
+	}
+	return m.GetResearchBrief(actor, id)
+}

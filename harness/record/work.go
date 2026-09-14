@@ -31,7 +31,14 @@ type ProgressReportHeader struct {
 	AssignedAtRevision work.Revision            `json:"assigned_at_revision"`
 	Findings           []work.ProgressFindingID `json:"findings,omitempty"`
 }
+type ResearchBriefHeader struct {
+	ID                 work.ResearchBriefID `json:"id"`
+	Work               work.ID              `json:"work"`
+	Revision           work.Revision        `json:"revision"`
+	AssignedAtRevision work.Revision        `json:"assigned_at_revision"`
+}
 type WorkControl struct {
+	ResearchBriefs  []ResearchBriefHeader  `json:"research_briefs,omitempty"`
 	ID              work.EventID           `json:"event_id"`
 	Kind            work.EventKind         `json:"kind"`
 	Works           []WorkHeader           `json:"works,omitempty"`
@@ -72,6 +79,9 @@ func DescribeWork(e work.Event) WorkControl {
 			h.Findings = append(h.Findings, f.ID)
 		}
 		c.ProgressReports = append(c.ProgressReports, h)
+	}
+	for _, b := range change.ResearchBriefs {
+		c.ResearchBriefs = append(c.ResearchBriefs, ResearchBriefHeader{b.ID, b.WorkID, b.WorkRevision, b.AssignedAtRevision})
 	}
 	return c
 }

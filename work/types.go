@@ -100,6 +100,7 @@ type Work struct {
 	LatestAuditID          AuditID          `json:"latest_audit_id,omitempty"`
 	ActiveRepairID         ID               `json:"active_repair_id,omitempty"`
 	LatestSubmissionID     SubmissionID     `json:"latest_submission_id,omitempty"`
+	LatestResearchBriefID  ResearchBriefID  `json:"latest_research_brief_id,omitempty"`
 	LatestProgressReportID ProgressReportID `json:"latest_progress_report_id,omitempty"`
 	LatestPositionReportID ProgressReportID `json:"latest_position_report_id,omitempty"`
 }

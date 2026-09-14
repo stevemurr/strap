@@ -412,6 +412,8 @@ func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, actio
 		workCall(w, r, s.UpdatePlan)
 	case "submit":
 		workCall(w, r, s.SubmitWork)
+	case "research":
+		workCall(w, r, s.SubmitResearch)
 	case "audit":
 		workCall(w, r, s.SubmitAudit)
 	default:

@@ -65,3 +65,14 @@ func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r wo
 func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, a work.AssignmentRequest) (work.Work, error) {
 	return s.workflow.AssignWork(ctx, actor, a)
 }
+
+func (s *Session) SubmitResearch(ctx context.Context, actor identity.ActorID, r work.SubmitResearchRequest) (work.SubmitResearchResult, error) {
+	return s.workflow.SubmitResearch(ctx, actor, r)
+}
+func (s *Session) GetResearchBrief(ctx context.Context, actor identity.ActorID, id work.ResearchBriefID) (work.ResearchBrief, error) {
+	v, err := s.workView(ctx)
+	if err != nil {
+		return work.ResearchBrief{}, err
+	}
+	return v.GetResearchBrief(actor, id)
+}

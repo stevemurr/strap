@@ -171,3 +171,7 @@ func ListWork(handle Handler[work.ListQuery]) Tool {
 			return handle(ctx, c, work.ListQuery{Cursor: q.Cursor, Limit: q.Limit})
 		}, MinLength("cursor", 1), Minimum("limit", 1), Maximum("limit", 100)))
 }
+
+func SubmitResearch(h Handler[work.SubmitResearchRequest]) Tool {
+	return builtin("submit_research", "Deliver an immutable research brief. Use current work and assignment revisions. Cite current finding IDs; proposed steps do not change the plan. Delivery ends this investigation and does not accept implementation work.", h, MinLength("work_id", 1), Minimum("expected_revision", 1), Minimum("assigned_at_revision", 1), MinLength("summary", 1), MaxItems("finding_ids", 256), UniqueItems("finding_ids"), MaxItems("open_questions", 32), MaxItems("proposed_steps", 32))
+}

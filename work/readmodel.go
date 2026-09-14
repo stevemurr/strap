@@ -27,6 +27,9 @@ func (v *ReadModel) Apply(c Change) {
 	for _, a := range c.Audits {
 		s.audits[a.ID] = a.Clone()
 	}
+	for _, b := range c.ResearchBriefs {
+		s.researchBriefs[b.ID] = b.Clone()
+	}
 	for _, r := range c.ProgressReports {
 		s.progressReports[r.ID] = r.Clone()
 		for _, f := range r.Findings {

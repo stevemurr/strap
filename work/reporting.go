@@ -12,6 +12,7 @@ type Change struct {
 	Plans           []Plan               `json:"plans,omitempty"`
 	Submissions     []Submission         `json:"submissions,omitempty"`
 	Audits          []Audit              `json:"audits,omitempty"`
+	ResearchBriefs  []ResearchBrief      `json:"research_briefs,omitempty"`
 	ProgressReports []WorkProgressReport `json:"progress_reports,omitempty"`
 }
 
@@ -31,6 +32,9 @@ func (c Change) Clone() Change {
 	}
 	for _, x := range c.ProgressReports {
 		v.ProgressReports = append(v.ProgressReports, x.Clone())
+	}
+	for _, b := range c.ResearchBriefs {
+		v.ResearchBriefs = append(v.ResearchBriefs, b.Clone())
 	}
 	return v
 }

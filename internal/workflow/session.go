@@ -83,6 +83,10 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	}))
 	if s.researcher.Provider != nil {
 		s.researcher.Tools = append(s.researcher.Tools, s.commonTools()...)
+		s.researcher.Tools = append(s.researcher.Tools, tool.SubmitResearch(func(ctx context.Context, c tool.Call, r work.SubmitResearchRequest) (tool.Result, error) {
+			v, e := s.SubmitResearch(ctx, c.Actor, r)
+			return result(v, e)
+		}))
 	}
 	s.stopOwner = context.AfterFunc(owner, func() { _ = s.Close(context.Background()) })
 	go s.run()
