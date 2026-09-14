@@ -52,10 +52,11 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	if err := json.Unmarshal([]byte(v.Content.Text()), &inspection); err != nil || len(inspection.Steps) != 1 || inspection.Steps[0].Title != "first" {
 		t.Fatal(inspection, err)
 	}
-	w, err := s.Store.UpdateProgress(w.Assignee, work.ProgressUpdate{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Steps: []work.StepProgress{{ID: p.Steps[0].ID, Status: ptr(work.ReadyForReview)}}})
+	receipt, err := s.Store.ReportWorkProgress(w.Assignee, work.ReportWorkProgressRequest{AssignedAtRevision: w.AssignedAtRevision, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Steps: []work.StepProgress{{ID: p.Steps[0].ID, Status: ptr(work.ReadyForReview)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	w.Revision = receipt.WorkRevision
 	sub, err := s.Store.SubmitWork(w.Assignee, work.SubmitRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Summary: "ready"})
 	if err != nil {
 		t.Fatal(err)

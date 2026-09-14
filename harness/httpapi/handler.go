@@ -415,7 +415,7 @@ func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, actio
 	case "cancel":
 		workCall(w, r, s.CancelWork)
 	case "report-progress":
-		workCall(w, r, s.ReportWorkProgress)
+		decodedCall(w, r, tool.DecodeProgressReport, s.ReportWorkProgress)
 	case "progress":
 		workCall(w, r, s.UpdateProgress)
 	case "plan":

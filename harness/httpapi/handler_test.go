@@ -93,7 +93,7 @@ func operationResult[T any](t *testing.T, s *testSession, viaHTTP bool, actor id
 		}
 		return v
 	}
-	action := map[string]string{"assign_work": "assign", "reassign_work": "reassign", "cancel_work": "cancel", "update_plan": "plan", "submit_work": "submit", "submit_audit": "audit"}[name]
+	action := map[string]string{"assign_work": "assign", "reassign_work": "reassign", "cancel_work": "cancel", "update_plan": "plan", "submit_work": "submit", "submit_audit": "audit", "report_work_progress": "report-progress"}[name]
 	if _, ok := params.(work.ProgressUpdate); ok {
 		action = "progress"
 	}
@@ -153,10 +153,11 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
-		progress := work.ProgressUpdate{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
-		implementation = operationResult(t, s, viaHTTP, implementation.Assignee, "update_plan", progress, func() (work.Work, error) {
-			return s.UpdateProgress(ctx, implementation.Assignee, progress)
+		progress := work.ReportWorkProgressRequest{AssignedAtRevision: implementation.AssignedAtRevision, WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
+		receipt := operationResult(t, s, viaHTTP, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
+			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})
+		implementation.Revision = receipt.WorkRevision
 		submissionRequest := work.SubmitRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Summary: "implemented", Evidence: []string{"checked"}}
 		submission := operationResult(t, s, viaHTTP, implementation.Assignee, "submit_work", submissionRequest, func() (work.Submission, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)

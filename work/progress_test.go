@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/stevemurr/strap/identity"
 	"reflect"
 	"strings"
 	"sync"
@@ -317,5 +318,27 @@ func TestProgressAuditAuthorityAndEncodedLimit(t *testing.T) {
 	}
 	if len(s.PendingEvents(0)) != before || current(t, s, a.ID).Revision != a.Revision {
 		t.Fatal("oversized report committed")
+	}
+}
+
+// Lifecycle fixtures explicitly supply the new report contract, then inspect
+// the changed work when subsequent assertions need more than its receipt.
+func (s *Store) reportSnapshot(actor identity.ActorID, r ReportWorkProgressRequest) (Work, error) {
+	_, err := s.ReportWorkProgress(actor, r)
+	if err != nil {
+		return Work{}, err
+	}
+	return s.GetWork(actor, r.ID)
+}
+
+func TestLegacyProgressCannotMutateOrInferAssignment(t *testing.T) {
+	s, _, w := fixture(t)
+	before, _ := s.GetWork(w.Assignee, w.ID)
+	if _, err := s.UpdateProgress(w.Assignee, ProgressUpdate{WorkTarget: target(w), Blocker: ptr("")}); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+	after, _ := s.GetWork(w.Assignee, w.ID)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("legacy request mutated work")
 	}
 }

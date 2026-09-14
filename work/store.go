@@ -270,36 +270,10 @@ func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work
 	s.emit(WorkAssigned, actor, w, true)
 	return w.Clone(), nil
 }
-func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (result Work, err error) {
-	if err = s.beginMutation(); err != nil {
-		return result, err
-	}
-	defer s.endMutation(&err)
-	w, err := s.target(actor, u.WorkTarget, false)
-	if err != nil {
-		return Work{}, err
-	}
-	if w.State != Active {
-		return Work{}, ErrState
-	}
-	p, err := s.progressSteps(w, u.Steps)
-	if err != nil {
-		return Work{}, err
-	}
-	actionable := u.Blocker != nil && *u.Blocker != w.Blocker
-	if u.Note != nil {
-		w.Note = *u.Note
-	}
-	if u.Blocker != nil {
-		w.Blocker = *u.Blocker
-	}
-	w.Revision++
-	if w.Scope != nil {
-		s.putPlan(p.ID, p)
-	}
-	s.putWork(w.ID, w)
-	s.emit(ProgressChanged, actor, w, actionable)
-	return w.Clone(), nil
+
+// UpdateProgress is retained only to reject obsolete callers without mutation.
+func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (Work, error) {
+	return Work{}, invalid("legacy progress mutation removed; use ReportWorkProgress with an explicit assigned_at_revision and full position")
 }
 func (s *Store) GetWork(actor identity.ActorID, id ID) (Work, error) {
 	s.mu.Lock()

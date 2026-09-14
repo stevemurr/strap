@@ -155,17 +155,17 @@ func TestSubmissionProgressAndReadValidation(t *testing.T) {
 	if _, err := s.GetAudit("root", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdateProgress("impl", ProgressUpdate{WorkTarget: WorkTarget{ID: "missing", ExpectedRevision: 1}}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: WorkTarget{ID: "missing", ExpectedRevision: 1}, AssignedAtRevision: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID}, {ID: p.Steps[0].ID}}}); !errors.Is(err, ErrInvalid) {
+	if _, err := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID}, {ID: p.Steps[0].ID}}, AssignedAtRevision: w.AssignedAtRevision}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
 	if _, err := s.SubmitWork("impl", SubmitRequest{WorkTarget: target(w), Summary: "premature"}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
 	var err error
-	w, err = s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(w), Note: ptr("working"), Blocker: ptr("waiting"), Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(Blocked), Note: ptr("dependency")}}})
+	w, err = s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(Blocked), Note: ptr("dependency")}}, AssignedAtRevision: w.AssignedAtRevision, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("working"), Blocker: *ptr("waiting")}})
 	if err != nil || w.Note != "working" {
 		t.Fatal(w, err)
 	}
@@ -176,7 +176,7 @@ func TestSubmissionProgressAndReadValidation(t *testing.T) {
 	if _, err := s.SubmitWork("impl", SubmitRequest{WorkTarget: target(w), Summary: "blocked"}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
-	w, _ = s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(w), Blocker: ptr("")})
+	w, _ = s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(w), AssignedAtRevision: w.AssignedAtRevision, Position: &WorkPosition{Objective: "fixture progress", Blocker: *ptr("")}})
 	w = ready(t, s, w)
 	if _, err := s.SubmitWork("impl", SubmitRequest{WorkTarget: target(w), Summary: "ok", Artifacts: []ArtifactRef{{URI: " "}}}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestSubmissionProgressAndReadValidation(t *testing.T) {
 	if err != nil || len(got.Steps) != 2 {
 		t.Fatal(got, err)
 	}
-	if _, err := s.UpdateProgress("reviewer", ProgressUpdate{WorkTarget: target(a), Steps: []StepProgress{{ID: p.Steps[0].ID}}}); !errors.Is(err, ErrForbidden) {
+	if _, err := s.reportSnapshot("reviewer", ReportWorkProgressRequest{WorkTarget: target(a), Steps: []StepProgress{{ID: p.Steps[0].ID}}, AssignedAtRevision: a.AssignedAtRevision}); !errors.Is(err, ErrForbidden) {
 		t.Fatal(err)
 	}
 }

@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/stevemurr/strap/identity"
@@ -53,12 +54,11 @@ func UpdatePlan(plan Handler[work.PlanUpdate], progress Handler[work.ProgressUpd
 				MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1), MinLength("steps[].step_id", 1), MinLength("steps[].title", 1), AtLeastOne("steps[]", "step_id", "title"), UniqueItems("order"), UniqueItems("cancel")))
 	}
 	if progress != nil {
-		guidance = append(guidance, `Progress: {"work_id":"<work_id>","expected_revision":1,"steps":[{"step_id":"<step_id>","status":"in_progress"}]}. Use work.revision from get_work, not the plan revision or assigned_at_revision. Each successful update returns a new work revision; use that revision for the next mutation, including submit_work. Each step allows step_id, optional status and optional note; never title. Status is pending, in_progress, blocked or ready_for_review. Top-level note and blocker update the work; an empty blocker clears it. Only audits complete work.`)
-		branches = append(branches, builtin("update_progress",
-			"Update assigned scoped progress using work_id and expected_revision. Only an audit can complete steps.",
-			progress,
-			MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("steps[].step_id", 1), Enum("steps[].status", "pending", "in_progress", "blocked", "ready_for_review")))
+		branches = append(branches, builtin("legacy_progress", "Legacy progress removed.", func(_ context.Context, _ Call, _ work.ProgressUpdate) (Result, error) {
+			return Result{}, fmt.Errorf("%w: use report_work_progress with assigned_at_revision", work.ErrInvalid)
+		}))
 	}
+
 	return compose(provider.ToolDefinition{Name: "update_plan", Description: strings.Join(guidance, " ")}, branches...)
 }
 
@@ -72,7 +72,7 @@ func UpdateWork(handle Handler[work.ProgressUpdate]) Tool {
 	return builtin("update_work",
 		"Report a note or blocker on your assigned work. A blocker reports inability to verify; it is not a verdict.",
 		func(ctx context.Context, c Call, a args) (Result, error) {
-			return handle(ctx, c, work.ProgressUpdate{WorkTarget: a.WorkTarget, Note: a.Note, Blocker: a.Blocker})
+			return Result{}, fmt.Errorf("%w: update_work removed; use report_work_progress with assigned_at_revision", work.ErrInvalid)
 		},
 		Minimum("expected_revision", 1), MinLength("work_id", 1))
 }

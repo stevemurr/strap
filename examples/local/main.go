@@ -27,7 +27,7 @@ func run(ctx context.Context, baseURL, model string) (err error) {
 	}
 	c := conversation.New(ctx)
 	implementor := agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "Answer the assigned arithmetic question.", Instructions: []string{"Read the work envelope. Submit your answer with submit_work using its work_id and revision as expected_revision. Plain text alone does not submit. For repairs, address the findings and submit again."}}}
-	auditor := agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "Audit the arithmetic submission.", Instructions: []string{"Read get_work for your assigned work_id and submission. Independently calculate the answer. Call submit_audit with your work_id, expected_revision, submission_id, summary, and verdict pass or fail. Fail requires findings with description, required_change, and verification. If unable to verify, set your blocker through update_work."}}}
+	auditor := agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "Audit the arithmetic submission.", Instructions: []string{"Read get_work for your assigned work_id and submission. Independently calculate the answer. Call submit_audit with your work_id, expected_revision, submission_id, summary, and verdict pass or fail. Fail requires findings with description, required_change, and verification. If unable to verify, report a full position and blocker through report_work_progress using work_id, expected_revision and assigned_at_revision."}}}
 	s := workflow.New(ctx, c, implementor, auditor)
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), time.Second)

@@ -31,7 +31,7 @@ func ready(t *testing.T, s *Store, w Work) Work {
 			changes = append(changes, StepProgress{ID: id, Status: ptr(ReadyForReview)})
 		}
 	}
-	w, e := s.UpdateProgress(w.Assignee, ProgressUpdate{WorkTarget: target(w), Steps: changes})
+	w, e := s.reportSnapshot(w.Assignee, ReportWorkProgressRequest{WorkTarget: target(w), Steps: changes, AssignedAtRevision: w.AssignedAtRevision})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -61,15 +61,15 @@ func TestAuditRepairAcceptance(t *testing.T) {
 	s, p, w := fixture(t)
 	w = ready(t, s, w)
 	sub := submit(t, s, w)
-	if _, e := s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(w), Note: ptr("late")}); !errors.Is(e, ErrConflict) {
+	if _, e := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(w), AssignedAtRevision: w.AssignedAtRevision, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("late")}}); !errors.Is(e, ErrConflict) {
 		t.Fatalf("stale update: %v", e)
 	}
 	current, _ := s.GetWork("root", w.ID)
-	if _, e := s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(current), Note: ptr("late")}); !errors.Is(e, ErrState) {
+	if _, e := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(current), AssignedAtRevision: current.AssignedAtRevision, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("late")}}); !errors.Is(e, ErrState) {
 		t.Fatalf("submitted update: %v", e)
 	}
 	a := review(t, s, w.ID, sub.ID)
-	a, e := s.UpdateProgress("reviewer", ProgressUpdate{WorkTarget: target(a), Blocker: ptr("environment unavailable")})
+	a, e := s.reportSnapshot("reviewer", ReportWorkProgressRequest{WorkTarget: target(a), AssignedAtRevision: a.AssignedAtRevision, Position: &WorkPosition{Objective: "fixture progress", Blocker: *ptr("environment unavailable")}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -84,7 +84,7 @@ func TestAuditRepairAcceptance(t *testing.T) {
 	if !events[len(events)-1].Actionable {
 		t.Fatal("blocker did not notify owner")
 	}
-	a, e = s.UpdateProgress("reviewer", ProgressUpdate{WorkTarget: target(a), Blocker: ptr("")})
+	a, e = s.reportSnapshot("reviewer", ReportWorkProgressRequest{WorkTarget: target(a), AssignedAtRevision: a.AssignedAtRevision, Position: &WorkPosition{Objective: "fixture progress", Blocker: *ptr("")}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -107,7 +107,7 @@ func TestAuditRepairAcceptance(t *testing.T) {
 	if repair.RequestedBy != "root" || repair.Owner != "root" || repair.Assignee != "impl" || !reflect.DeepEqual(repair.Scope.StepIDs, []StepID{p.Steps[0].ID}) {
 		t.Fatalf("bad repair: %+v", repair)
 	}
-	if _, e = s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(repair), Steps: []StepProgress{{ID: p.Steps[1].ID, Status: ptr(InProgress)}}}); !errors.Is(e, ErrForbidden) {
+	if _, e = s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(repair), Steps: []StepProgress{{ID: p.Steps[1].ID, Status: ptr(InProgress)}}, AssignedAtRevision: repair.AssignedAtRevision}); !errors.Is(e, ErrForbidden) {
 		t.Fatal("repair expanded scope", e)
 	}
 	plan, _ := s.GetPlan("root", p.ID)
@@ -165,14 +165,14 @@ func TestPlanScopeAndAtomicity(t *testing.T) {
 	if _, e := s.GetPlan("stranger", p.ID); !errors.Is(e, ErrForbidden) {
 		t.Fatal(e)
 	}
-	if _, e := s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(InProgress)}, {ID: p.Steps[2].ID, Status: ptr(ReadyForReview)}}}); !errors.Is(e, ErrForbidden) {
+	if _, e := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(InProgress)}, {ID: p.Steps[2].ID, Status: ptr(ReadyForReview)}}, AssignedAtRevision: w.AssignedAtRevision}); !errors.Is(e, ErrForbidden) {
 		t.Fatal(e)
 	}
 	got, _ = s.GetPlan("root", p.ID)
 	if got.Steps[0].Status != Pending {
 		t.Fatal("partial progress")
 	}
-	if _, e := s.UpdateProgress("impl", ProgressUpdate{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(Completed)}}}); e == nil {
+	if _, e := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: target(w), Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(Completed)}}, AssignedAtRevision: w.AssignedAtRevision}); e == nil {
 		t.Fatal("self acceptance")
 	}
 	w = ready(t, s, w)
@@ -198,10 +198,10 @@ func TestReassignmentCancellationAndSnapshots(t *testing.T) {
 	if replacement.AssignedAtRevision != replacement.Revision {
 		t.Fatal(replacement)
 	}
-	if _, e = s.UpdateProgress("impl", ProgressUpdate{WorkTarget: old, Note: ptr("old")}); !errors.Is(e, ErrForbidden) {
+	if _, e = s.reportSnapshot("impl", ReportWorkProgressRequest{WorkTarget: old, AssignedAtRevision: 1, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("old")}}); !errors.Is(e, ErrForbidden) {
 		t.Fatal(e)
 	}
-	if _, e = s.UpdateProgress("replacement", ProgressUpdate{WorkTarget: old, Note: ptr("old")}); !errors.Is(e, ErrConflict) {
+	if _, e = s.reportSnapshot("replacement", ReportWorkProgressRequest{WorkTarget: old, AssignedAtRevision: 1, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("old")}}); !errors.Is(e, ErrConflict) {
 		t.Fatal(e)
 	}
 	replacement = ready(t, s, replacement)
@@ -259,7 +259,7 @@ func TestConcurrentDisjointProgress(t *testing.T) {
 		wg.Add(1)
 		go func(w Work) {
 			defer wg.Done()
-			_, e := s.UpdateProgress(w.Assignee, ProgressUpdate{WorkTarget: target(w), Steps: []StepProgress{{ID: w.Scope.StepIDs[0], Status: ptr(InProgress)}}})
+			_, e := s.reportSnapshot(w.Assignee, ReportWorkProgressRequest{WorkTarget: target(w), Steps: []StepProgress{{ID: w.Scope.StepIDs[0], Status: ptr(InProgress)}}, AssignedAtRevision: w.AssignedAtRevision})
 			errs <- e
 		}(item)
 	}

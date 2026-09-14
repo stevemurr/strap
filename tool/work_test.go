@@ -58,8 +58,8 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 		}
 		return JSON(p)
 	}, nil)
-	worker := UpdatePlan(nil, func(_ context.Context, c Call, u work.ProgressUpdate) (Result, error) {
-		w, err := store.UpdateProgress(c.Actor, u)
+	worker := ReportWorkProgress(func(_ context.Context, c Call, u work.ReportWorkProgressRequest) (Result, error) {
+		w, err := store.ReportWorkProgress(c.Actor, u)
 		if err != nil {
 			return Result{}, err
 		}
@@ -77,16 +77,16 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, w.Revision, p.Steps[0].ID))
+	args := []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"assigned_at_revision":1,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, w.Revision, p.Steps[0].ID))
 	updated, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var current work.Work
+	var current work.ReportWorkProgressResult
 	if err := json.Unmarshal([]byte(updated.Content.Text()), &current); err != nil {
 		t.Fatal(err)
 	}
-	if current.Revision != w.Revision+1 {
+	if current.WorkRevision != w.Revision+1 {
 		t.Fatal("progress result did not expose next revision")
 	}
 	if _, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args}); !errors.Is(err, work.ErrConflict) {
@@ -104,7 +104,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 		}
 		return JSON(submission)
 	})
-	args = []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"summary":"Done"}`, current.ID, current.Revision))
+	args = []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"summary":"Done"}`, current.WorkID, current.WorkRevision))
 	if _, err := submit.Call(context.Background(), Call{Actor: "worker", Arguments: args}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +122,12 @@ func TestUpdatePlanSelectorsAndStrictPatches(t *testing.T) {
 		progress++
 		return Text("progress"), nil
 	})
-	for _, raw := range []string{`{"title":"p","steps":[{"title":"s"}]}`, `{"plan_id":"p","expected_revision":1,"title":"new"}`, `{"work_id":"w","expected_revision":2,"steps":[{"step_id":"s","status":"ready_for_review"}]}`} {
+	for _, raw := range []string{`{"title":"p","steps":[{"title":"s"}]}`, `{"plan_id":"p","expected_revision":1,"title":"new"}`} {
 		if _, e := op.Call(context.Background(), Call{Actor: "root", Arguments: []byte(raw)}); e != nil {
 			t.Fatal(e)
 		}
 	}
-	if plans != 2 || progress != 1 {
+	if plans != 2 || progress != 0 {
 		t.Fatal(plans, progress)
 	}
 	for _, raw := range []string{`{"plan_id":"p","work_id":"w","expected_revision":1}`, `{"plan_id":null}`, `{"work_id":"w","expected_revision":1,"steps":[{"step_id":"s","title":"escape"}]}`, `{"title":"p","steps":[{"step_id":null,"title":"x"}]}`, `{"title":"p","steps":[{"title":"x","title":"y"}]}`, `{"work_id":"w","steps":[]}`, `{"plan_id":"p","expected_revision":1,"steps":[{"step_id":"s","status":"completed"}]}`} {
@@ -135,7 +135,7 @@ func TestUpdatePlanSelectorsAndStrictPatches(t *testing.T) {
 			t.Fatal("accepted", raw)
 		}
 	}
-	if plans != 2 || progress != 1 {
+	if plans != 2 || progress != 0 {
 		t.Fatal("invalid input reached callback")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -255,10 +255,10 @@ func TestPlanCreationRegressionAndCapabilitySchemas(t *testing.T) {
 	if _, err := auditor.Call(context.Background(), Call{Arguments: []byte(`{"work_id":"a","expected_revision":1,"steps":[{"step_id":"s","status":"ready_for_review"}]}`)}); err == nil {
 		t.Fatal("auditor changed implementation progress")
 	}
-	if _, err := auditor.Call(context.Background(), Call{Arguments: []byte(`{"work_id":"a","expected_revision":1,"blocker":"missing evidence"}`)}); err != nil {
+	if _, err := auditor.Call(context.Background(), Call{Arguments: []byte(`{"work_id":"a","expected_revision":1,"blocker":"missing evidence"}`)}); !errors.Is(err, work.ErrInvalid) {
 		t.Fatal(err)
 	}
-	if progressCalls != 1 {
+	if progressCalls != 0 {
 		t.Fatal(progressCalls)
 	}
 }

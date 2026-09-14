@@ -305,8 +305,8 @@ The CLI exposes tools according to each agent’s role:
 
 | Tool | Contract |
 |---|---|
-| `update_plan` | Root: omit IDs to create, or use `plan_id` and `expected_revision` to edit structure. Implementor: use `work_id` and `expected_revision` for scoped progress |
-| `update_work` | Auditor reports work-level notes and blockers without changing implementation steps |
+| `update_plan` | Root creates or edits plan structure using plan revisions |
+| `report_work_progress` | Current worker reports a full position, findings, or eligible scoped steps using work and assignment revisions |
 | `create_agent` | Root creates an idle registered `implementor` or `auditor`; no task starts |
 | `assign_work` | Require an existing `assignee`: implementation takes task and optional scope; audit takes original work/revision/submission; repair takes original work/revision/audit |
 | `list_work` | Root discovers work in all states; optional assignee/kind/state filters, default 20 results, max 100, fixed-prefix continuation cursor |
@@ -811,3 +811,8 @@ argument type. `tool.NewParameters[A]` compiles the JSON field structure and
 constraints once; schema generation and runtime decoding use that one contract.
 See [the tool contract design](DESIGN.md#typed-tool-contracts) and
 [the executable example](tool/example_test.go).
+
+Worker progress uses `report_work_progress` with explicit `assigned_at_revision`.
+Legacy worker `update_plan`, `update_work`, and Go/HTTP `UpdateProgress` mutations
+are rejected without changing work. A supplied position replaces all its fields;
+omit it for finding-only or step-only reports. HTTP uses `POST /sessions/{id}/work/report-progress`.

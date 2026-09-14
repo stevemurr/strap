@@ -86,10 +86,11 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
-		progress := work.ProgressUpdate{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
-		implementation = operationResult(t, s, viaTools, implementation.Assignee, "update_plan", progress, func() (work.Work, error) {
-			return s.UpdateProgress(ctx, implementation.Assignee, progress)
+		progress := work.ReportWorkProgressRequest{AssignedAtRevision: implementation.AssignedAtRevision, WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
+		receipt := operationResult(t, s, viaTools, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
+			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})
+		implementation.Revision = receipt.WorkRevision
 		submissionRequest := work.SubmitRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Summary: "implemented", Evidence: []string{"checked"}}
 		submission := operationResult(t, s, viaTools, implementation.Assignee, "submit_work", submissionRequest, func() (work.Submission, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)
@@ -192,7 +193,7 @@ func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	if _, err := s.AssignWork(ctx, w.Assignee, work.AssignmentRequest{Kind: work.Implementation, Task: "delegate"}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdateProgress(ctx, s.Root(), work.ProgressUpdate{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Note: ptr("wrong actor")}); !errors.Is(err, work.ErrForbidden) {
+	if _, err := s.ReportWorkProgress(ctx, s.Root(), work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AssignedAtRevision: w.AssignedAtRevision, Position: &work.WorkPosition{Objective: "wrong actor"}}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
 	before := len(s.Agents())

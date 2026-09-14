@@ -12,8 +12,8 @@ is promoted into production instructions.
 | 1. Researcher registration and role configuration | Complete — d041026 |
 | 2. Research assignment and terminal lifecycle | Complete — 977d471 |
 | 3. Immutable research briefs and delivery | Complete — see preceding commit |
-| 4. Session and HTTP progress APIs | Complete in this checkpoint; collection pagination follows in area 6 |
-| 5. Worker progress API migration | Pending |
+| 4. Session and HTTP progress APIs | Complete — 93bbfd9; collection pagination follows in area 6 |
+| 5. Worker progress API migration | Complete in this checkpoint |
 | 6. Bounded progress and brief model readers | Pending |
 | 7. Current authorization for live read continuations | Pending |
 | 8. Selective progress notifications | Pending |
