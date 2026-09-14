@@ -50,4 +50,5 @@ func modelFlags(flags *flag.FlagSet, model *harness.ModelConfig) {
 	}
 	boolFlag("thinking", "Override thinking mode (-thinking=false disables it)", &model.Generation.EnableThinking)
 	boolFlag("force-nonempty-content", "Require assistant content with tool calls (requires chat-template support)", &model.Generation.ForceNonemptyContent)
+	boolFlag("strict-tools", "Constrain vLLM tool-call generation to each tool's schema (structural tags; test per tool before enabling in a profile)", &model.Generation.StrictTools)
 }

@@ -43,6 +43,9 @@ type functionDefinition struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters"`
+	// Strict asks servers that support it to constrain tool-call generation
+	// to Parameters. Only the vLLM adapter sets it, and only when configured.
+	Strict *bool `json:"strict,omitempty"`
 }
 
 type functionCall struct {

@@ -77,6 +77,10 @@ Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
 `-force-nonempty-content=false`. They require the vLLM backend. Explicitly selecting
 `-backend chatcompletions` clears saved generation settings and uses server defaults;
 explicit generation flags or a nonempty preset other than `none` are then rejected.
+`-strict-tools` marks every advertised tool `strict`, so vLLM constrains tool-call
+generation to each tool's schema with structural tags instead of extracting calls
+from free text. It is opt-in: the served grammar must accept every schema, so test
+it against each tool before enabling it in a profile, and expect added latency.
 The same immutable provider settings apply to the root, implementors, and auditors.
 
 The vLLM adapter targets the generation fields exposed by vLLM 0.25.0, including

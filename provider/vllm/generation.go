@@ -18,6 +18,11 @@ type Generation struct {
 	MaxTokens            *int     `json:"max_tokens,omitempty"`             // > 0; output budget, not context length.
 	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
 	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
+	// StrictTools marks every advertised tool strict, so vLLM constrains
+	// tool-call generation to each tool's schema (structural tags) instead of
+	// extracting calls from free text. It is not a sampling field; it is
+	// applied to the tool definitions of each request.
+	StrictTools *bool `json:"strict_tools,omitempty"`
 }
 
 type generationFields struct {

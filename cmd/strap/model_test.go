@@ -47,6 +47,8 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 		{"explicit false content", []string{"-preset", "none", "-force-nonempty-content=false"}, map[string]any{
 			"chat_template_kwargs": map[string]any{"force_nonempty_content": false},
 		}, false},
+		// strict-tools marks tools, not the request body, so no sampling field appears.
+		{"strict tools", []string{"-preset", "none", "-strict-tools"}, map[string]any{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

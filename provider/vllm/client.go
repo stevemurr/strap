@@ -30,6 +30,7 @@ type Client struct {
 	model            string
 	wire             *chatwire.Client
 	generation       generationFields
+	strictTools      bool
 	tokenizeEndpoint string
 }
 
@@ -62,7 +63,8 @@ func New(config Config) (*Client, error) {
 	u, _ := url.Parse(config.BaseURL)
 	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1") + "/tokenize"
 	u.RawPath = ""
-	return &Client{model: config.Model, wire: wire, generation: generation, tokenizeEndpoint: u.String()}, nil
+	strict := config.Generation.StrictTools != nil && *config.Generation.StrictTools
+	return &Client{model: config.Model, wire: wire, generation: generation, strictTools: strict, tokenizeEndpoint: u.String()}, nil
 }
 
 // HTTPError preserves rejected options and other bounded server diagnostics.
@@ -80,6 +82,12 @@ func (c *Client) Submit(ctx context.Context, input provider.Request, observer pr
 	base, err := chatwire.Encode(c.model, input)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("vllm: encode content: %w", err)
+	}
+	if c.strictTools {
+		yes := true
+		for i := range base.Tools {
+			base.Tools[i].Function.Strict = &yes
+		}
 	}
 	// Embed typed fields at the root. extra_body is an SDK convention, not a
 	// vLLM wire field. Only chat template options have a nested JSON object.
