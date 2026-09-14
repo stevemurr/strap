@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math/big"
@@ -38,6 +39,7 @@ type parameterNode struct {
 	unique                        bool
 	enum                          []string
 	anyRequired                   []string
+	rejects                       map[string]string // fields models tend to send, with guidance
 }
 
 // Constraint adds a restriction to a JSON field path (for example steps[].title).
@@ -117,6 +119,22 @@ func UniqueItems(path string) Constraint {
 			return fmt.Errorf("uniqueItems requires an array")
 		}
 		p.unique = true
+		return nil
+	}}
+}
+
+// Reject documents a field the contract does not accept and the guidance to
+// return when a model sends it. The field must not exist on the object; the
+// hint is appended to the rejection so the retry can be right the first time.
+func Reject(path, field, hint string) Constraint {
+	return Constraint{path, func(p *parameterNode) error {
+		if p.kind != "object" || field == "" || hint == "" || p.fields[field] != nil {
+			return fmt.Errorf("reject hint requires an object, an unknown field and a hint")
+		}
+		if p.rejects == nil {
+			p.rejects = map[string]string{}
+		}
+		p.rejects[field] = hint
 		return nil
 	}}
 }
@@ -417,15 +435,39 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 			return bad()
 		}
 		names := slices.Sorted(maps.Keys(obj))
+		// Report every disallowed field at once. Models repair exactly what the
+		// message names, so naming one field at a time produces a retry per field.
+		var unknown, hints []string
 		for _, name := range names {
 			if p.fields[name] == nil {
-				return nil, fmt.Errorf("%s.%s is not an allowed field", path, name)
+				unknown = append(unknown, name)
+				if hint := p.rejects[name]; hint != "" {
+					hints = append(hints, name+": "+hint)
+				}
 			}
 		}
+		if len(unknown) > 0 {
+			msg := fmt.Sprintf("%s.%s is not an allowed field", path, unknown[0])
+			if len(unknown) > 1 {
+				msg += fmt.Sprintf(" (also not allowed: %s)", strings.Join(unknown[1:], ", "))
+			}
+			if len(hints) > 0 {
+				msg += "; " + strings.Join(hints, "; ")
+			}
+			return nil, errors.New(msg)
+		}
+		var missing []string
 		for _, name := range p.required {
 			if _, ok := obj[name]; !ok {
-				return nil, fmt.Errorf("%s.%s is required", path, name)
+				missing = append(missing, name)
 			}
+		}
+		if len(missing) > 0 {
+			msg := fmt.Sprintf("%s.%s is required", path, missing[0])
+			if len(missing) > 1 {
+				msg += fmt.Sprintf(" (also required: %s)", strings.Join(missing[1:], ", "))
+			}
+			return nil, errors.New(msg)
 		}
 		if len(p.anyRequired) > 0 {
 			found := false

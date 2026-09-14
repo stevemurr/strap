@@ -331,3 +331,38 @@ func TestNestedCompositionDoesNotNarrowMixedPropertyTypes(t *testing.T) {
 		t.Fatal("outer hint narrowed nested alternatives")
 	}
 }
+
+func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
+	params, err := NewParameters[contractArgs](
+		Reject("steps[]", "note", "notes come from worker progress"),
+		Reject("", "workdir", "prefix the command with cd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = params.Decode(json.RawMessage(`{"title":"p","workdir":"/x","actor":"forged","steps":[{"step_id":"s","note":"n","priority":1}]}`))
+	if err == nil {
+		t.Fatal("accepted unknown fields")
+	}
+	// The first disallowed field keeps its original phrasing; the rest follow.
+	want := "arguments.actor is not an allowed field (also not allowed: workdir); workdir: prefix the command with cd"
+	if err.Error() != want {
+		t.Fatalf("got %q, want %q", err, want)
+	}
+	_, err = params.Decode(json.RawMessage(`{"title":"p","steps":[{"step_id":"s","note":"n","priority":1}]}`))
+	if err == nil || err.Error() != "arguments.steps[0].note is not an allowed field (also not allowed: priority); note: notes come from worker progress" {
+		t.Fatalf("nested rejection: %v", err)
+	}
+	_, err = params.Decode(json.RawMessage(`{"steps":[{"status":"pending"}]}`))
+	if err == nil || err.Error() != "arguments.title is required" {
+		t.Fatalf("required phrasing changed: %v", err)
+	}
+	_, err = params.Decode(json.RawMessage(`{"title":"p","steps":[{}]}`))
+	if err == nil || err.Error() != "arguments.steps[0].step_id is required" {
+		t.Fatalf("nested required phrasing changed: %v", err)
+	}
+	for _, bad := range []Constraint{Reject("", "title", "exists"), Reject("steps[]", "", "empty"), Reject("title", "x", "not an object"), Reject("", "x", "")} {
+		if _, err := NewParameters[contractArgs](bad); err == nil {
+			t.Fatal("accepted invalid reject hint")
+		}
+	}
+}
