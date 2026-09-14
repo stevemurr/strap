@@ -13,8 +13,8 @@ go run ./cmd/strap
 ```
 
 Model endpoints and defaults live in [`cmd/strap/models.json`](cmd/strap/models.json).
-The bundled default is `qwen3.6`; select the saved Nemotron endpoint with
-`-profile nemotron-lightning`. A profile pairs a server's model alias with its endpoint,
+The bundled default is `nemotron-lightning`; select the saved Qwen endpoint with
+`-profile qwen3.6`. A profile pairs a server's model alias with its endpoint,
 request timeout, and generation settings.
 
 For personal settings, copy that catalog to `~/.config/strap/models.json`

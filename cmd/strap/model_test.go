@@ -27,7 +27,7 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 		want    map[string]any
 		generic bool
 	}{
-		{"default", nil, preset, false},
+		{"default", nil, map[string]any{"temperature": 1.0, "top_p": 0.95, "chat_template_kwargs": map[string]any{"enable_thinking": true, "force_nonempty_content": true}}, false},
 		{"nemotron profile", []string{"-profile", "nemotron-lightning"}, map[string]any{"temperature": 1.0, "top_p": 0.95, "chat_template_kwargs": map[string]any{"enable_thinking": true, "force_nonempty_content": true}}, false},
 		{"qwen profile", []string{"-profile", "qwen3.6"}, preset, false},
 		{"explicit preset", []string{"-preset", "qwen3.6-coding"}, preset, false},
