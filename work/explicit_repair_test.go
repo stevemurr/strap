@@ -32,7 +32,7 @@ func failingSubmission(t *testing.T) (*Store, Plan, Work, Submission, Audit) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	return s, p, w, sub, audit
+	return s, p, w, sub.Submission, audit
 }
 func TestFailedAuditWaitsForExplicitRepairAndRejectsConcurrentDuplicates(t *testing.T) {
 	s, _, w, sub, a := failingSubmission(t)

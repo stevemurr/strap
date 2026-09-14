@@ -57,15 +57,15 @@ func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work
 	return s.Store.Cancel(actor, r)
 }
 
-func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.Submission, error) {
+func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.SubmitReceipt, error) {
 	run, done, admitErr := s.begin(ctx)
 	if admitErr != nil {
-		return work.Submission{}, admitErr
+		return work.SubmitReceipt{}, admitErr
 	}
 	defer done()
 	ctx = run
 	if err := ctx.Err(); err != nil {
-		return work.Submission{}, err
+		return work.SubmitReceipt{}, err
 	}
 	return s.Store.SubmitWork(actor, r)
 }

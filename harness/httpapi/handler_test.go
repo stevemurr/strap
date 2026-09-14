@@ -159,7 +159,7 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 		})
 		implementation.Revision = receipt.WorkRevision
 		submissionRequest := work.SubmitRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Summary: "implemented", Evidence: []string{"checked"}}
-		submission := operationResult(t, s, viaHTTP, implementation.Assignee, "submit_work", submissionRequest, func() (work.Submission, error) {
+		submission := operationResult(t, s, viaHTTP, implementation.Assignee, "submit_work", submissionRequest, func() (work.SubmitReceipt, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)
 		})
 		originalView := operationResult(t, s, viaHTTP, root, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) { return s.InspectWork(ctx, root, implementationID) })

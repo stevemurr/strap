@@ -92,7 +92,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 		})
 		implementation.Revision = receipt.WorkRevision
 		submissionRequest := work.SubmitRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Summary: "implemented", Evidence: []string{"checked"}}
-		submission := operationResult(t, s, viaTools, implementation.Assignee, "submit_work", submissionRequest, func() (work.Submission, error) {
+		submission := operationResult(t, s, viaTools, implementation.Assignee, "submit_work", submissionRequest, func() (work.SubmitReceipt, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)
 		})
 		original, err := s.GetWork(ctx, root, implementationID)

@@ -18,7 +18,7 @@ func (s *Session) UpdateProgress(ctx context.Context, actor identity.ActorID, u 
 func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
 	return s.workflow.CancelWork(ctx, actor, r)
 }
-func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.Submission, error) {
+func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.SubmitReceipt, error) {
 	return s.workflow.SubmitWork(ctx, actor, r)
 }
 func (s *Session) SubmitAudit(ctx context.Context, actor identity.ActorID, r work.AuditRequest) (work.Audit, error) {

@@ -7,37 +7,37 @@ import (
 	"github.com/stevemurr/strap/identity"
 )
 
-func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Submission, err error) {
+func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result SubmitReceipt, err error) {
 	if err = s.beginMutation(); err != nil {
 		return result, err
 	}
 	defer s.endMutation(&err)
 	w, err := s.target(actor, r.WorkTarget, false)
 	if err != nil {
-		return Submission{}, err
+		return SubmitReceipt{}, err
 	}
 	if w.State != Active || (w.Kind != Implementation && w.Kind != Repair) {
-		return Submission{}, ErrState
+		return SubmitReceipt{}, ErrState
 	}
 	if !blank(w.Blocker) || blank(r.Summary) {
-		return Submission{}, invalid("clear blocker and provide summary before submitting")
+		return SubmitReceipt{}, invalid("clear blocker and provide summary before submitting")
 	}
 	for _, artifact := range r.Artifacts {
 		if blank(artifact.URI) {
-			return Submission{}, invalid("artifact URI required")
+			return SubmitReceipt{}, invalid("artifact URI required")
 		}
 	}
 	original := w
 	if w.Kind == Repair {
 		original = s.works[w.ParentID].Clone()
 		if original.State != ChangesRequested || original.ActiveRepairID != w.ID {
-			return Submission{}, ErrState
+			return SubmitReceipt{}, ErrState
 		}
 	}
 	steps := s.steps(original.Scope)
 	for _, step := range steps {
 		if step.Status != ReadyForReview {
-			return Submission{}, invalid("all scoped steps must be ready_for_review")
+			return SubmitReceipt{}, invalid("all scoped steps must be ready_for_review")
 		}
 	}
 	sub := Submission{ID: SubmissionID(s.id("submission")), WorkID: original.ID, SubmittedVia: w.ID, SubmittedBy: actor, Supersedes: original.LatestSubmissionID, Task: original.Task, ExpectedOutput: original.ExpectedOutput, Steps: steps, Summary: r.Summary, Evidence: r.Evidence, Artifacts: r.Artifacts}.Clone()
@@ -54,7 +54,7 @@ func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Subm
 	s.putWork(original.ID, original)
 	s.putSubmission(sub.ID, sub)
 	s.emit(ReviewRequested, actor, original, true)
-	return s.submissionView(actor, sub), nil
+	return SubmitReceipt{Submission: s.submissionView(actor, sub), WorkRevision: original.Revision}, nil
 }
 
 // Defense in depth for host integrations: a contributor anywhere in a submission

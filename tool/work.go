@@ -89,7 +89,7 @@ func AssignWork(handle Handler[AssignWorkArgs]) Tool {
 }
 func SubmitWork(handle Handler[work.SubmitRequest]) Tool {
 	return builtin("submit_work",
-		"Submit implementation or repairs for audit. All scoped steps must be ready_for_review and your blocker cleared. A text reply does not submit work.",
+		"Submit implementation or repairs for audit. All scoped steps must be ready_for_review and your blocker cleared. The receipt's work_revision is current for any later mutation. A text reply does not submit work.",
 		handle, Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("summary", 1), MinLength("artifacts[].uri", 1))
 }
 func SubmitAudit(handle Handler[work.AuditRequest]) Tool {

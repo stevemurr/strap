@@ -43,7 +43,13 @@ func submit(t *testing.T, s *Store, w Work) Submission {
 	if e != nil {
 		t.Fatal(e)
 	}
-	return sub
+	// The receipt must cite the revision the submitted work advanced to, so
+	// the next mutation can use it without re-reading. For repairs that is the
+	// original implementation named by work_id, not the closed repair.
+	if after, e := s.GetWork("root", sub.WorkID); e != nil || sub.WorkRevision != after.Revision {
+		t.Fatalf("receipt revision %d does not match %s revision %d (%v)", sub.WorkRevision, sub.WorkID, after.Revision, e)
+	}
+	return sub.Submission
 }
 func review(t *testing.T, s *Store, id ID, sub SubmissionID) Work {
 	t.Helper()

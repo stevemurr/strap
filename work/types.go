@@ -181,6 +181,13 @@ type Submission struct {
 	Evidence       []string         `json:"evidence,omitempty"`
 	Artifacts      []ArtifactRef    `json:"artifacts,omitempty"`
 }
+
+// SubmitReceipt pairs the recorded submission with the work revision it
+// advanced to, so the assignee's next mutation can cite it without re-reading.
+type SubmitReceipt struct {
+	Submission
+	WorkRevision Revision `json:"work_revision"`
+}
 type Finding struct {
 	StepIDs        []StepID `json:"step_ids,omitempty"`
 	Description    string   `json:"description"`
