@@ -335,7 +335,13 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
 		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
-	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, s.workflow.RootTools(), []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
+	rootTools := s.workflow.RootTools()
+	for i, t := range rootTools {
+		if t.Definition().Name == "wait_for_input" {
+			rootTools[i] = tool.WaitForInputWhen(s.rootMayWait)
+		}
+	}
+	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, rootTools, []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {
 			return tool.Result{}, e
@@ -427,6 +433,23 @@ func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, rev
 	}
 	defer done()
 	return s.controller.CountAgentTokens(run, id, revision)
+}
+
+// rootMayWait rejects wait_for_input while the root owns no live work. Nothing
+// would arrive, and in ladder runs a root that ended a finished task this way
+// sat idle until the session budget expired. Listing problems never block a
+// wait; only a definite absence of live work does.
+func (s *Session) rootMayWait(ctx context.Context, c tool.Call) error {
+	page, err := s.ListWork(ctx, c.Actor, work.ListQuery{Limit: 100})
+	if err != nil {
+		return nil
+	}
+	for _, item := range page.Items {
+		if !item.State.Terminal() {
+			return nil
+		}
+	}
+	return errors.New("wait_for_input rejected: you own no active delegated work, so no worker result can arrive. If the task is finished, send the final reply as a text-only response now; if work remains, assign it first")
 }
 
 func localTools(dir string) ([]tool.Tool, error) {
