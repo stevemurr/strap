@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/stevemurr/strap/provider"
@@ -83,6 +84,25 @@ func (t *composedTool) Definition() provider.ToolDefinition {
 	d.Parameters = append(json.RawMessage(nil), d.Parameters...)
 	return d
 }
+
+// BookkeepingParameters is the union of the branches' declarations.
+func (t *composedTool) BookkeepingParameters() []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, branch := range t.branches {
+		if b, ok := branch.(interface{ BookkeepingParameters() []string }); ok {
+			for _, name := range b.BookkeepingParameters() {
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
 func (t *composedTool) Validate() error {
 	for _, branch := range t.branches {
 		if err := branch.Validate(); err != nil {

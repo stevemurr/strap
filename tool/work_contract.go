@@ -22,7 +22,7 @@ type assignmentBranch[A any] struct {
 }
 
 func (b assignmentBranch[A]) tool(h Handler[work.AssignmentRequest]) Tool {
-	return Func[A]{Spec: Definition[A]{Name: b.name, Parameters: b.parameters}, Invoke: func(ctx context.Context, c Call, a A) (Result, error) {
+	return Func[A]{Spec: Definition[A]{Name: b.name, Parameters: b.parameters, Bookkeeping: []string{"expected_revision"}}, Invoke: func(ctx context.Context, c Call, a A) (Result, error) {
 		r := b.normalize(a)
 		if err := r.Validate(); err != nil {
 			return Result{}, err

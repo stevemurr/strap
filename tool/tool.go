@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/stevemurr/strap/content"
 	"github.com/stevemurr/strap/identity"
@@ -34,6 +35,10 @@ type Definition[A any] struct {
 	Name        string
 	Description string
 	Parameters  Parameters[A]
+	// Bookkeeping names top-level parameters the model copies from a previous
+	// receipt, such as revisions. They carry no intent, so the agent ignores
+	// them when deciding whether a call repeats the previous one.
+	Bookkeeping []string
 }
 
 func (d Definition[A]) ProviderDefinition() provider.ToolDefinition {
@@ -51,6 +56,16 @@ type Func[A any] struct {
 }
 
 func (f Func[A]) Definition() provider.ToolDefinition { return f.Spec.ProviderDefinition() }
+
+// Bookkeeping returns a copy of the tool that declares the named parameters as
+// bookkeeping; see Definition.Bookkeeping.
+func (f Func[A]) Bookkeeping(names ...string) Func[A] {
+	f.Spec.Bookkeeping = append(slices.Clone(f.Spec.Bookkeeping), names...)
+	return f
+}
+
+// BookkeepingParameters is read by the agent at registration.
+func (f Func[A]) BookkeepingParameters() []string { return slices.Clone(f.Spec.Bookkeeping) }
 
 // builtin declares a statically-declared tool from its model-facing name,
 // description, handler and argument constraints. An invalid constraint panics at

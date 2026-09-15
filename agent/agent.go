@@ -89,11 +89,13 @@ type Agent struct {
 	started        atomic.Bool
 	control        lifecycle
 	repeated       repeatedCall
+	bookkeeping    map[string]map[string]bool // Tool name to argument names ignored by repeatKey.
 }
 
-// repeatedCall counts consecutive tool calls with the same name and the same
-// argument bytes, across batches. A model that re-issues one rejected call
-// verbatim can otherwise spend an entire session budget on it.
+// repeatedCall counts consecutive tool calls that make the same request and
+// get the same outcome, across batches; see repeatKey. A model that re-issues
+// one rejected call verbatim, or re-sends an edit that changes nothing, can
+// otherwise spend an entire session budget on it.
 type repeatedCall struct {
 	key   string
 	count int
@@ -104,7 +106,7 @@ func New(config Config) (*Agent, error) {
 		return nil, errors.New("agent requires a provider, inbox, and outbox")
 	}
 	config.Spec = config.Spec.Clone()
-	a := &Agent{config: config, tools: make(map[string]tool.Tool), controls: make(map[string]tool.ControlKind), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
+	a := &Agent{config: config, tools: make(map[string]tool.Tool), controls: make(map[string]tool.ControlKind), bookkeeping: make(map[string]map[string]bool), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
 	for _, t := range config.Spec.Tools {
 		if t == nil {
 			return nil, errors.New("nil tool")
@@ -129,6 +131,13 @@ func New(config Config) (*Agent, error) {
 			a.controls[definition.Name] = kind
 		}
 		a.tools[definition.Name] = t
+		if b, ok := t.(interface{ BookkeepingParameters() []string }); ok {
+			ignored := make(map[string]bool)
+			for _, name := range b.BookkeepingParameters() {
+				ignored[name] = true
+			}
+			a.bookkeeping[definition.Name] = ignored
+		}
 		definition.Parameters = append(json.RawMessage(nil), definition.Parameters...)
 		a.definitions = append(a.definitions, definition)
 	}
@@ -146,13 +155,54 @@ func New(config Config) (*Agent, error) {
 // ends the agent.
 const maxMalformedCalls = 2
 
-// repeatedCallHint is the consecutive identical call at which the tool result
-// starts carrying a notice; maxRepeatedCalls ends the agent. Calls that differ
-// in any argument byte, such as a revision, restart the count.
+// repeatedCallHint is the consecutive repeat at which the tool result starts
+// carrying a notice; maxRepeatedCalls ends the agent.
 const (
 	repeatedCallHint = 3
 	maxRepeatedCalls = 12
 )
+
+// repeatKey identifies a call by what the model asked for and what it got
+// back. Bookkeeping arguments the tool declared are dropped, so a retry that
+// changes only a copied revision is the same request. The outcome is part of
+// the key: the same request with a different error, or a different result, is
+// progress and restarts the count. Results are compared by their text after
+// dropping top-level revision fields, so a successful edit that changes
+// nothing but the revision counter still counts as a repeat.
+func (a *Agent) repeatKey(call provider.ToolCall, result tool.Result, err error) string {
+	var b strings.Builder
+	b.WriteString(call.Name)
+	b.WriteByte(0)
+	b.WriteString(normalizeJSON(call.Arguments, a.bookkeeping[call.Name]))
+	b.WriteByte(0)
+	if err != nil {
+		b.WriteString("error:" + err.Error())
+		return b.String()
+	}
+	b.WriteString("ok:" + normalizeJSON([]byte(result.Content.Text()), revisionFields))
+	return b.String()
+}
+
+// revisionFields are the receipt counters harness tools return; they change
+// on every successful call whether or not anything else did.
+var revisionFields = map[string]bool{"revision": true, "work_revision": true, "state_revision": true}
+
+// normalizeJSON re-encodes a JSON object with the ignored top-level keys
+// removed and the remaining keys sorted; anything else is returned as is.
+func normalizeJSON(raw []byte, ignored map[string]bool) string {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil || object == nil {
+		return string(raw)
+	}
+	for name := range ignored {
+		delete(object, name)
+	}
+	out, err := json.Marshal(object) // encoding/json sorts map keys.
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
+}
 
 // Run starts exactly one loop. A text response ends an exchange, not the agent.
 // Each tool batch settles before inbox input is consumed and another model call
@@ -309,16 +359,16 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				if err != nil && result.Execution == nil {
 					result.Content = append(result.Content, tool.Text("Tool error: "+err.Error()).Content...)
 				}
-				if key := call.Name + "\x00" + string(call.Arguments); key == a.repeated.key {
+				if key := a.repeatKey(call, result, err); key == a.repeated.key {
 					a.repeated.count++
 				} else {
 					a.repeated = repeatedCall{key: key, count: 1}
 				}
 				if a.repeated.count >= maxRepeatedCalls {
-					return fmt.Errorf("tool %s called %d times in a row with identical arguments; stopping", call.Name, a.repeated.count)
+					return fmt.Errorf("tool %s called %d times in a row with the same request and the same result; stopping", call.Name, a.repeated.count)
 				}
 				if a.repeated.count >= repeatedCallHint {
-					result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with identical arguments. If the result is not what you need, change the arguments or the approach instead of repeating the call; after %d identical calls this agent stops.", a.repeated.count, call.Name, maxRepeatedCalls)).Content...)
+					result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with the same request and the same result. Repeating it will not change the outcome; change the arguments or the approach instead. After %d such calls this agent stops.", a.repeated.count, call.Name, maxRepeatedCalls)).Content...)
 				}
 				toolRevision, err = a.appendHistory(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,

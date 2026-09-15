@@ -101,7 +101,7 @@ func AddStep(handle Handler[work.PlanUpdate]) Tool {
 		},
 		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1),
 		Reject("", "step_id", "add_step issues the step_id; to change an existing step use edit_step"),
-		Reject("", "status", statusHint), Reject("", "note", noteHint))
+		Reject("", "status", statusHint), Reject("", "note", noteHint)).Bookkeeping("expected_revision")
 }
 
 func EditStep(handle Handler[work.PlanUpdate]) Tool {
@@ -115,7 +115,7 @@ func EditStep(handle Handler[work.PlanUpdate]) Tool {
 			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Steps: []work.StepEdit{step}})
 		},
 		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("step_id", 1), MinLength("title", 1), AtLeastOne("", "title", "acceptance_criteria"),
-		Reject("", "status", statusHint), Reject("", "note", noteHint))
+		Reject("", "status", statusHint), Reject("", "note", noteHint)).Bookkeeping("expected_revision")
 }
 
 func CancelSteps(handle Handler[work.PlanUpdate]) Tool {
@@ -124,7 +124,7 @@ func CancelSteps(handle Handler[work.PlanUpdate]) Tool {
 		func(ctx context.Context, c Call, a cancelStepsArgs) (Result, error) {
 			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Cancel: a.StepIDs})
 		},
-		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinItems("step_ids", 1), UniqueItems("step_ids"))
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinItems("step_ids", 1), UniqueItems("step_ids")).Bookkeeping("expected_revision")
 }
 
 func ReorderSteps(handle Handler[work.PlanUpdate]) Tool {
@@ -133,7 +133,7 @@ func ReorderSteps(handle Handler[work.PlanUpdate]) Tool {
 		func(ctx context.Context, c Call, a reorderStepsArgs) (Result, error) {
 			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Order: a.Order})
 		},
-		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinItems("order", 1), UniqueItems("order"))
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinItems("order", 1), UniqueItems("order")).Bookkeeping("expected_revision")
 }
 
 func RenamePlan(handle Handler[work.PlanUpdate]) Tool {
@@ -142,7 +142,7 @@ func RenamePlan(handle Handler[work.PlanUpdate]) Tool {
 		func(ctx context.Context, c Call, a renamePlanArgs) (Result, error) {
 			return handle(ctx, c, work.PlanUpdate{PlanID: &a.PlanID, ExpectedRevision: &a.ExpectedRevision, Title: &a.Title})
 		},
-		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1))
+		MinLength("plan_id", 1), Minimum("expected_revision", 1), MinLength("title", 1)).Bookkeeping("expected_revision")
 }
 
 // UpdateWork exposes work-level notes/blockers without implementation step fields.
@@ -173,7 +173,7 @@ func AssignWork(handle Handler[AssignWorkArgs]) Tool {
 func SubmitWork(handle Handler[work.SubmitRequest]) Tool {
 	return builtin("submit_work",
 		"Submit implementation or repairs for audit. All scoped steps must be ready_for_review and your blocker cleared. The receipt's work_revision is current for any later mutation. A text reply does not submit work.",
-		handle, Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("summary", 1), MinLength("artifacts[].uri", 1))
+		handle, Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("summary", 1), MinLength("artifacts[].uri", 1)).Bookkeeping("expected_revision")
 }
 func SubmitAudit(handle Handler[work.AuditRequest]) Tool {
 	// fail is local because it drops omitempty on findings, making it required in
@@ -191,12 +191,12 @@ func SubmitAudit(handle Handler[work.AuditRequest]) Tool {
 		// handle directly panics at construction (tool/work_test.go:162).
 		builtin("pass_audit", "",
 			func(ctx context.Context, c Call, a work.AuditRequest) (Result, error) { return handle(ctx, c, a) },
-			Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("submission_id", 1), Enum("verdict", "pass"), MinLength("summary", 1), MaxItems("findings", 0)),
+			Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("submission_id", 1), Enum("verdict", "pass"), MinLength("summary", 1), MaxItems("findings", 0)).Bookkeeping("expected_revision"),
 		builtin("fail_audit", "",
 			func(ctx context.Context, c Call, a fail) (Result, error) {
 				return handle(ctx, c, work.AuditRequest{WorkTarget: a.WorkTarget, SubmissionID: a.SubmissionID, Verdict: a.Verdict, Summary: a.Summary, Findings: a.Findings})
 			},
-			Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("submission_id", 1), Enum("verdict", "fail"), MinLength("summary", 1), MinItems("findings", 1), MinLength("findings[].description", 1), MinLength("findings[].required_change", 1), MinLength("findings[].verification", 1)),
+			Minimum("expected_revision", 1), MinLength("work_id", 1), MinLength("submission_id", 1), Enum("verdict", "fail"), MinLength("summary", 1), MinItems("findings", 1), MinLength("findings[].description", 1), MinLength("findings[].required_change", 1), MinLength("findings[].verification", 1)).Bookkeeping("expected_revision"),
 	)
 }
 func GetWork(handle func(context.Context, Call, work.ID) (Result, error)) Tool {
@@ -229,10 +229,10 @@ func GetAudit(handle func(context.Context, Call, work.AuditID) (Result, error)) 
 func CancelWork(handle Handler[work.CancelRequest]) Tool {
 	return builtin("cancel_work",
 		"Owner cancels work. Cancelling implementation or repair ends that cycle; cancelling audit returns its submission for another review.",
-		handle, MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("reason", 1))
+		handle, MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("reason", 1)).Bookkeeping("expected_revision")
 }
 func ReassignWork(handle Handler[work.ReassignRequest]) Tool {
-	return Func[work.ReassignRequest]{Spec: Definition[work.ReassignRequest]{Name: "reassign_work", Description: "Replace the worker on an existing active work item. Supply only work_id, expected_revision, and the required existing assignee. Create a replacement explicitly with create_agent if needed. Uses this work item's revision. Does not create, resume, or stop agents. Old assignment updates are rejected.", Parameters: reassignmentParameters}, Invoke: func(ctx context.Context, c Call, r work.ReassignRequest) (Result, error) { return handle(ctx, c, r) }}
+	return Func[work.ReassignRequest]{Spec: Definition[work.ReassignRequest]{Bookkeeping: []string{"expected_revision"}, Name: "reassign_work", Description: "Replace the worker on an existing active work item. Supply only work_id, expected_revision, and the required existing assignee. Create a replacement explicitly with create_agent if needed. Uses this work item's revision. Does not create, resume, or stop agents. Old assignment updates are rejected.", Parameters: reassignmentParameters}, Invoke: func(ctx context.Context, c Call, r work.ReassignRequest) (Result, error) { return handle(ctx, c, r) }}
 }
 
 func ListWork(handle Handler[work.ListQuery]) Tool {
@@ -256,5 +256,5 @@ func ListWork(handle Handler[work.ListQuery]) Tool {
 }
 
 func SubmitResearch(h Handler[work.SubmitResearchRequest]) Tool {
-	return builtin("submit_research", "Deliver an immutable research brief. Use current work and assignment revisions. Cite current finding IDs; proposed steps do not change the plan. Delivery ends this investigation and does not accept implementation work.", h, MinLength("work_id", 1), Minimum("expected_revision", 1), Minimum("assigned_at_revision", 1), MinLength("summary", 1), MaxItems("finding_ids", 256), UniqueItems("finding_ids"), MaxItems("open_questions", 32), MaxItems("proposed_steps", 32))
+	return builtin("submit_research", "Deliver an immutable research brief. Use current work and assignment revisions. Cite current finding IDs; proposed steps do not change the plan. Delivery ends this investigation and does not accept implementation work.", h, MinLength("work_id", 1), Minimum("expected_revision", 1), Minimum("assigned_at_revision", 1), MinLength("summary", 1), MaxItems("finding_ids", 256), UniqueItems("finding_ids"), MaxItems("open_questions", 32), MaxItems("proposed_steps", 32)).Bookkeeping("expected_revision", "assigned_at_revision")
 }

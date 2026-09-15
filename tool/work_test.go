@@ -307,3 +307,30 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// Revision arguments are copied from receipts, not chosen, so the tools declare
+// them as bookkeeping for the agent's repeated-call detection.
+func TestWorkToolsDeclareRevisionBookkeeping(t *testing.T) {
+	declared := func(tl Tool) []string {
+		b, ok := tl.(interface{ BookkeepingParameters() []string })
+		if !ok {
+			t.Fatalf("%s declares no bookkeeping", tl.Definition().Name)
+		}
+		return b.BookkeepingParameters()
+	}
+	plans := func(context.Context, Call, work.PlanUpdate) (Result, error) { return Text("ok"), nil }
+	for _, op := range PlanTools(plans)[1:] {
+		if got := declared(op); len(got) != 1 || got[0] != "expected_revision" {
+			t.Fatalf("%s: %v", op.Definition().Name, got)
+		}
+	}
+	if got := declared(CreatePlan(plans)); len(got) != 0 {
+		t.Fatalf("create_plan takes no revision: %v", got)
+	}
+	if got := declared(AssignWork(func(context.Context, Call, AssignWorkArgs) (Result, error) { return Text("ok"), nil })); len(got) != 1 || got[0] != "expected_revision" {
+		t.Fatalf("assign_work: %v", got)
+	}
+	if got := declared(ReportWorkProgress(nil)); len(got) != 2 || got[0] != "expected_revision" || got[1] != "assigned_at_revision" {
+		t.Fatalf("report_work_progress: %v", got)
+	}
+}
