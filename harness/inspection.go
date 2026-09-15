@@ -20,6 +20,7 @@ type EffectiveConfig struct {
 	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Dir                   string                      `json:"dir"`
+	ReasoningLimit        int                         `json:"reasoning_limit"`
 	Telemetry             TelemetryConfig             `json:"telemetry"`
 	Events                EventConfig                 `json:"events"`
 	Root                  RoleConfiguration           `json:"root"`

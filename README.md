@@ -375,7 +375,10 @@ call `Close` again to retry unfinished resources. Inspection remains available.
 Automatic token counting belongs to the session (`cfg.Telemetry`), so attaching
 or detaching a view does not change provider traffic. Set `ContextTokens = false`
 to disable it. `Configuration()` shows resolved role configuration and marks
-injected providers as opaque. `Inspect()` includes capture coverage and health.
+injected providers as opaque. `cfg.ReasoningLimit` (CLI `-reasoning-limit`,
+default 192 KB) cancels a model call that streams more reasoning than that
+without acting and retries it once with a notice; a second overrun ends the
+agent. Zero disables the limit. `Inspect()` includes capture coverage and health.
 
 For evals, choose a completion rule explicitly: a root reply, idle agent, consumed
 receipt, accepted work, and closed session are different facts. Grade the domain

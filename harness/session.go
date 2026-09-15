@@ -56,6 +56,7 @@ type Config struct {
 	Telemetry             TelemetryConfig             `json:"telemetry"`
 	Events                EventConfig                 `json:"events"`
 	Dir                   string                      `json:"dir"`
+	ReasoningLimit        int                         `json:"reasoning_limit"` // Reasoning bytes per model call; zero is unlimited.
 	Model                 ModelConfig                 `json:"model"`
 	LocalTools            bool                        `json:"local_tools"`
 	Web                   *tool.WebConfig             `json:"web"` // Nil disables browser/search tools.
@@ -68,7 +69,7 @@ type Config struct {
 // DefaultConfig returns independent library defaults without acquiring resources.
 // The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
-	return Config{ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	return Config{ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://192.168.1.237:8355", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, Researcher: AgentConfig{Prompt: researcherPrompt.Clone()}}
 }
 
@@ -179,6 +180,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	if err = cfg.WorkProgressReporting.Validate(); err != nil {
 		return nil, err
+	}
+	if cfg.ReasoningLimit < 0 {
+		return nil, errors.New("reasoning limit must not be negative")
 	}
 	var id [16]byte
 	if _, err = rand.Read(id[:]); err != nil {
@@ -331,17 +335,17 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		}
 	}
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
-		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools)}, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
+		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)},
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
-		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools)}))
+		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}))
 	rootTools := s.workflow.RootTools()
 	for i, t := range rootTools {
 		if t.Definition().Name == "wait_for_input" {
 			rootTools[i] = tool.WaitForInputWhen(s.rootMayWait)
 		}
 	}
-	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, Tools: slices.Concat(local, rootTools, []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
+	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), Tools: slices.Concat(local, rootTools, []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {
 			return tool.Result{}, e
@@ -359,7 +363,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
+	s.effective = EffectiveConfig{ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err

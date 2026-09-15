@@ -24,7 +24,18 @@ type Spec struct {
 	Provider provider.Provider
 	Prompt   prompt.Prompt
 	Tools    []tool.Tool
+	// ReasoningLimit is the number of reasoning bytes one model call may
+	// stream before it is cancelled; zero means unlimited. See ErrReasoningLimit.
+	ReasoningLimit uint64
 }
+
+// ErrReasoningLimit marks a model call cancelled for streaming more reasoning
+// than Spec.ReasoningLimit allows. Nothing entered history, so the agent
+// retries once with a notice asking for the action directly; a second
+// consecutive overrun ends the agent.
+var ErrReasoningLimit = errors.New("reasoning limit exceeded")
+
+const maxReasoningRetries = 1
 
 // Clone snapshots the prompt and tool list. Provider and tool implementations
 // remain shared collaborators and must support concurrent use.
@@ -192,6 +203,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		inputs := []message.Message{incoming}
 		admitted := false
 		malformed := 0
+		overrun := 0
 		for {
 			if err := a.checkpoint(ctx); err != nil {
 				return err
@@ -234,10 +246,19 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				}
 				continue
 			}
+			if errors.Is(err, ErrReasoningLimit) && ctx.Err() == nil && overrun < maxReasoningRetries {
+				overrun++
+				notice := fmt.Sprintf("Your previous response was cut off after %d KB of reasoning without a tool call or reply, and nothing ran. Act now: emit the next tool call or the final reply directly, without further deliberation.", a.config.Spec.ReasoningLimit>>10)
+				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, &output); err != nil {
+					return err
+				}
+				continue
+			}
 			if err != nil {
 				return err
 			}
 			malformed = 0
+			overrun = 0
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}

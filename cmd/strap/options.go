@@ -26,6 +26,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	profile := flags.String("profile", "", "Saved model profile (default selected by the catalog)")
 	modelFlags(flags, &o.config.Model)
 	flags.StringVar(&o.config.Dir, "C", o.config.Dir, "Working directory for shell and file tools")
+	flags.IntVar(&o.config.ReasoningLimit, "reasoning-limit", o.config.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	flags.StringVar(&o.config.Events.JSONLPath, "record", "", "Record session events and tool diagnostics to a new JSONL file")
 	flags.StringVar(&o.listen, "listen", "", "Serve the harness HTTP API at a loopback address (requires STRAP_API_TOKEN)")
 	webEnabled := flags.Bool("web", o.config.Web != nil, "Enable web_search and open_url (backends start lazily)")

@@ -34,6 +34,7 @@ type outputBuffer struct {
 	pending            string
 	channel            provider.OutputChannel
 	content, reasoning channelProgress
+	limit              uint64 // Reasoning bytes allowed; zero is unlimited.
 	publicationFailed  bool
 	err                error
 	stop, done         chan struct{}
@@ -108,6 +109,9 @@ func (b *outputBuffer) OnDelta(d provider.Delta) error {
 	progress := b.progress(d.Channel)
 	progress.observed.Write([]byte(d.Text))
 	progress.observedBytes += uint64(len(d.Text))
+	if d.Channel == provider.ChannelReasoning && b.limit > 0 && progress.observedBytes > b.limit {
+		return reject(ErrReasoningLimit)
+	}
 	text := d.Text
 	for len(text) > 0 {
 		n := min(len(text), outputChunkBytes-len(b.pending))
@@ -184,6 +188,7 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 	run, cancel := context.WithCancel(ctx)
 	defer cancel()
 	b := newOutputBuffer(a, run, cancel, id)
+	b.limit = a.config.Spec.ReasoningLimit
 	response, err := a.config.Spec.Provider.Submit(run, request, b)
 	bytes, reasoningBytes, flushErr := b.finish(response, err == nil)
 	err = errors.Join(err, flushErr, a.recordUsage(revision, response.Usage), a.reportError())
@@ -211,7 +216,7 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 			status = OutputComplete
 		}
 	}
-	if err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	if err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrReasoningLimit) {
 		status = OutputCanceled
 	}
 	finishErr := a.report(OutputFinished{Output: id, Status: status, Bytes: bytes, ReasoningBytes: reasoningBytes, HistoryPosition: position, Err: err, FinishedAt: time.Now().UTC()})

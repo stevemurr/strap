@@ -128,6 +128,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	cfg := harness.DefaultConfig()
 	cfg.Model = harness.ModelConfig{Backend: "vllm", Preset: "none", Timeout: cfg.Model.Timeout}
 	modelcatalog.Flags(fs, &cfg.Model)
+	fs.IntVar(&cfg.ReasoningLimit, "reasoning-limit", cfg.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
