@@ -3,8 +3,10 @@ package eval_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,7 +24,7 @@ type script struct {
 	calls   atomic.Int32
 	write   bool
 	block   bool
-	wait    bool // End with wait_for_input instead of a text-only reply.
+	wait    bool // Delegate to a worker that never finishes, then wait on it.
 	content string
 }
 
@@ -37,9 +39,40 @@ func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Obse
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "write_file", Arguments: args}}}, nil
 	}
 	if p.wait {
-		return provider.Response{Content: "Done: Answer returns 42.", ToolCalls: []provider.ToolCall{{ID: "wait-1", Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+		return p.delegate(r, n)
 	}
 	return provider.Response{Content: "Done: Answer returns 42."}, nil
+}
+
+// delegate scripts a root that creates an implementor, assigns it work and
+// waits, and an implementor that only acknowledges. The session then idles
+// with live work and no root reply, which is what the runner's idle rule is
+// for now that a root without live work cannot wait.
+func (p *script) delegate(r provider.Request, n int32) (provider.Response, error) {
+	if r.Agent != "agent-1" {
+		return provider.Response{Content: "Working on it."}, nil
+	}
+	call := func(name, args string) provider.Response {
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("call-%d", n), Name: name, Arguments: json.RawMessage(args)}}}
+	}
+	switch n {
+	case 2:
+		return call("create_agent", `{"role":"implementor"}`), nil
+	case 3:
+		assignee := "agent-2"
+		for i := len(r.Messages) - 1; i >= 0; i-- {
+			if r.Messages[i].Role != "tool" {
+				continue
+			}
+			if m := regexp.MustCompile(`"agent_id":"([^"]+)"`).FindStringSubmatch(r.Messages[i].Content.Text()); m != nil {
+				assignee = m[1]
+			}
+			break
+		}
+		return call("assign_work", fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"Implement Answer in probe.go"}`, assignee)), nil
+	default:
+		return provider.Response{Content: "Waiting for the implementor.", ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("wait-%d", n), Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+	}
 }
 
 func writeLadder(t *testing.T) string {
@@ -47,7 +80,7 @@ func writeLadder(t *testing.T) string {
 	root := t.TempDir()
 	dir := filepath.Join(root, "easy", "00-probe")
 	files := map[string]string{
-		"task.json":                   `{"id":"easy-00-probe","tier":"easy","title":"Probe","insight":"none","prompt":"Implement Answer in probe.go so it returns 42.","timeout":"2s","test_timeout":"1m"}`,
+		"task.json":                   `{"id":"easy-00-probe","tier":"easy","title":"Probe","insight":"none","prompt":"Implement Answer in probe.go so it returns 42.","timeout":"4s","test_timeout":"1m"}`,
 		"workspace/go.mod":            "module probe\n\ngo 1.24\n",
 		"workspace/probe.go":          "package probe\n\nfunc Answer() int { panic(\"not implemented\") }\n",
 		"hidden/probe_hidden_test.go": "package probe\n\nimport \"testing\"\n\nfunc TestHiddenAnswer(t *testing.T) {\n\tif Answer() != 42 {\n\t\tt.Fatal(Answer())\n\t}\n}\n",
@@ -184,7 +217,7 @@ func TestRunFinishesIdleSessionWithoutReply(t *testing.T) {
 		t.Fatal(results, err)
 	}
 	r := results[0]
-	if !r.NoReply || r.TimedOut || r.Replies != 0 || r.Outcome != eval.Passed || r.Duration > 1500*time.Millisecond {
+	if !r.NoReply || r.TimedOut || r.Replies != 0 || r.Outcome != eval.Passed || r.Duration > 3500*time.Millisecond {
 		t.Fatalf("%+v", r)
 	}
 	rep, err := eval.Analyze(ctx, opts.Output)
