@@ -238,6 +238,8 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 	}
 	accepted := []struct{ tool, raw string }{
 		{"create_plan", `{"title":"p","steps":[{"title":"s","acceptance_criteria":["a"]},{"title":"t"}]}`},
+		{"create_plan", `{"steps":[{"title":"Only step"}]}`},
+		{"create_plan", `{"title":"  ","steps":[{"title":"Blank title"}]}`},
 		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","acceptance_criteria":[]}`},
 		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","title":"renamed"}`},
 		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","acceptance_criteria":["b"]}`},
@@ -255,6 +257,8 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 	step := work.StepID("step-y")
 	want := []work.PlanUpdate{
 		{Title: ptr("p"), Steps: []work.StepEdit{{Title: ptr("s"), AcceptanceCriteria: ptr([]string{"a"})}, {Title: ptr("t")}}},
+		{Title: ptr("Only step"), Steps: []work.StepEdit{{Title: ptr("Only step")}}},
+		{Title: ptr("Blank title"), Steps: []work.StepEdit{{Title: ptr("Blank title")}}},
 		{PlanID: &id, ExpectedRevision: &rev, Steps: []work.StepEdit{{Title: ptr("new"), AcceptanceCriteria: ptr([]string{})}}},
 		{PlanID: &id, ExpectedRevision: &rev, Steps: []work.StepEdit{{ID: &step, Title: ptr("renamed")}}},
 		{PlanID: &id, ExpectedRevision: &rev, Steps: []work.StepEdit{{ID: &step, AcceptanceCriteria: ptr([]string{"b"})}}},

@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
@@ -14,7 +15,7 @@ type newPlanStep struct {
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 }
 type createPlanArgs struct {
-	Title string        `json:"title"`
+	Title string        `json:"title,omitempty"` // Defaults to the first step's title.
 	Steps []newPlanStep `json:"steps"`
 }
 type addStepArgs struct {
@@ -63,7 +64,7 @@ func PlanTools(handle Handler[work.PlanUpdate]) []Tool {
 
 func CreatePlan(handle Handler[work.PlanUpdate]) Tool {
 	return builtin("create_plan",
-		"Create the shared plan with a title and its initial steps. Each step has a title and optional acceptance_criteria, an array of strings. Omit IDs, status and revision; new steps start pending. The result issues plan_id, each step_id and revision 1. Change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan, never by creating another plan.",
+		"Create the shared plan with its initial steps and an optional title; a missing title is taken from the first step. Each step has a title and optional acceptance_criteria, an array of strings. Omit IDs, status and revision; new steps start pending. The result issues plan_id, each step_id and revision 1. Change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan, never by creating another plan.",
 		func(ctx context.Context, c Call, a createPlanArgs) (Result, error) {
 			steps := make([]work.StepEdit, len(a.Steps))
 			for i, step := range a.Steps {
@@ -72,9 +73,15 @@ func CreatePlan(handle Handler[work.PlanUpdate]) Tool {
 					steps[i].AcceptanceCriteria = &step.AcceptanceCriteria
 				}
 			}
-			return handle(ctx, c, work.PlanUpdate{Title: &a.Title, Steps: steps})
+			// Models that omit the title retry the identical rejected call
+			// hundreds of times; the first step names the plan well enough.
+			title := strings.TrimSpace(a.Title)
+			if title == "" {
+				title = a.Steps[0].Title
+			}
+			return handle(ctx, c, work.PlanUpdate{Title: &title, Steps: steps})
 		},
-		MinLength("title", 1), MinItems("steps", 1), MinLength("steps[].title", 1),
+		MinItems("steps", 1), MinLength("steps[].title", 1),
 		Reject("", "plan_id", "create_plan takes no plan_id; change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan"),
 		Reject("", "expected_revision", "create_plan takes no revision; change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan"),
 		Reject("steps[]", "step_id", "creation issues step IDs; read them from the result and use edit_step to change a step"),
