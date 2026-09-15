@@ -43,9 +43,9 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// reachable reports whether the corners connect when only cells with
+// hiddenReachable reports whether the corners connect when only cells with
 // elevation <= level may be used.
-func reachable(grid [][]int, level int) bool {
+func hiddenReachable(grid [][]int, level int) bool {
 	rows, cols := len(grid), len(grid[0])
 	if grid[0][0] > level {
 		return false
@@ -74,12 +74,12 @@ func reachable(grid [][]int, level int) bool {
 	return false
 }
 
-func brute(grid [][]int) int {
+func hiddenBrute(grid [][]int) int {
 	if len(grid) == 0 || len(grid[0]) == 0 {
 		return 0
 	}
 	for level := 0; ; level++ {
-		if reachable(grid, level) {
+		if hiddenReachable(grid, level) {
 			return level
 		}
 	}
@@ -97,7 +97,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 				grid[r][c] = rng.Intn(spread)
 			}
 		}
-		got, want := EarliestCrossing(grid), brute(grid)
+		got, want := EarliestCrossing(grid), hiddenBrute(grid)
 		if got != want {
 			t.Fatalf("round %d: EarliestCrossing(%v) = %d, want %d", round, grid, got, want)
 		}

@@ -66,7 +66,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(emails []string) (string, bool) {
+func hiddenBrute(emails []string) (string, bool) {
 	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 	for j := range emails {
 		for i := 0; i < j; i++ {
@@ -97,7 +97,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			emails[i] = pads[rng.Intn(len(pads))] + addr + pads[rng.Intn(len(pads))]
 		}
 		got, ok := FirstDuplicate(emails)
-		want, wantOK := brute(emails)
+		want, wantOK := hiddenBrute(emails)
 		if got != want || ok != wantOK {
 			t.Fatalf("round %d: FirstDuplicate(%q) = (%q, %v), want (%q, %v)", round, emails, got, ok, want, wantOK)
 		}

@@ -47,7 +47,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(needed, available []string) bool {
+func hiddenBrute(needed, available []string) bool {
 	used := make([]bool, len(available))
 	for _, part := range needed {
 		found := false
@@ -79,7 +79,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		distinct := 1 + rng.Intn(len(parts))
 		needed := draw(rng.Intn(8), distinct)
 		available := draw(rng.Intn(12), distinct)
-		if got, want := CanAssemble(needed, available), brute(needed, available); got != want {
+		if got, want := CanAssemble(needed, available), hiddenBrute(needed, available); got != want {
 			t.Fatalf("round %d: CanAssemble(%q, %q) = %v, want %v", round, needed, available, got, want)
 		}
 	}

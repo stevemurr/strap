@@ -44,8 +44,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteStreak checks every contiguous run for duplicates.
-func bruteStreak(ids []int) int {
+// hiddenBruteStreak checks every contiguous run for duplicates.
+func hiddenBruteStreak(ids []int) int {
 	best := 0
 	for i := range ids {
 		for j := i + 1; j <= len(ids); j++ {
@@ -75,7 +75,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range ids {
 			ids[i] = rng.Intn(spread) - spread/2
 		}
-		if got, want := LongestDistinctStreak(ids), bruteStreak(ids); got != want {
+		if got, want := LongestDistinctStreak(ids), hiddenBruteStreak(ids); got != want {
 			t.Fatalf("round %d: LongestDistinctStreak(%v) = %d, want %d", round, ids, got, want)
 		}
 	}

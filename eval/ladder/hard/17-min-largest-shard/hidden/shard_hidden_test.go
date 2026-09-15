@@ -45,8 +45,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// brute is the O(n^2 * shards) dynamic programme over prefixes.
-func brute(sizes []int, shards int) int {
+// hiddenBrute is the O(n^2 * shards) dynamic programme over prefixes.
+func hiddenBrute(sizes []int, shards int) int {
 	n := len(sizes)
 	if shards < 1 || n == 0 {
 		return 0
@@ -91,7 +91,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			sizes[i] = rng.Intn(spread)
 		}
 		shards := rng.Intn(n+2) - 1
-		got, want := MinLargestShard(sizes, shards), brute(sizes, shards)
+		got, want := MinLargestShard(sizes, shards), hiddenBrute(sizes, shards)
 		if got != want {
 			t.Fatalf("round %d: MinLargestShard(%v, %d) = %d, want %d", round, sizes, shards, got, want)
 		}

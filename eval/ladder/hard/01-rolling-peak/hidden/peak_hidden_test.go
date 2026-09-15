@@ -50,7 +50,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(readings []int, k int) []int {
+func hiddenBrute(readings []int, k int) []int {
 	if k < 1 || k > len(readings) {
 		return nil
 	}
@@ -77,7 +77,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			readings[i] = rng.Intn(spread) - spread/2
 		}
 		k := rng.Intn(n+2) - 1
-		got, want := PeakPerWindow(readings, k), brute(readings, k)
+		got, want := PeakPerWindow(readings, k), hiddenBrute(readings, k)
 		if (want == nil) != (got == nil) || !reflect.DeepEqual(got, want) && !(len(got) == 0 && len(want) == 0) {
 			t.Fatalf("round %d: PeakPerWindow(%v, %d) = %v, want %v", round, readings, k, got, want)
 		}
@@ -98,8 +98,8 @@ func TestHiddenLargeInput(t *testing.T) {
 		data []int
 	}{
 		{"random", readings},
-		{"decreasing", decreasing(n)},
-		{"increasing", increasing(n)},
+		{"hiddenDecreasing", hiddenDecreasing(n)},
+		{"hiddenIncreasing", hiddenIncreasing(n)},
 	} {
 		done := make(chan []int, 1)
 		go func() { done <- PeakPerWindow(shape.data, k) }()
@@ -126,7 +126,7 @@ func TestHiddenLargeInput(t *testing.T) {
 	}
 }
 
-func decreasing(n int) []int {
+func hiddenDecreasing(n int) []int {
 	out := make([]int, n)
 	for i := range out {
 		out[i] = n - i
@@ -134,7 +134,7 @@ func decreasing(n int) []int {
 	return out
 }
 
-func increasing(n int) []int {
+func hiddenIncreasing(n int) []int {
 	out := make([]int, n)
 	for i := range out {
 		out[i] = i

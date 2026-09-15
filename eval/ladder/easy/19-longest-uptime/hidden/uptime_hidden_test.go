@@ -45,7 +45,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(up []bool) int {
+func hiddenBrute(up []bool) int {
 	best := 0
 	for start := range up {
 		n := 0
@@ -71,7 +71,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range up {
 			up[i] = rng.Intn(100) < bias
 		}
-		if got, want := Longest(up), brute(up); got != want {
+		if got, want := Longest(up), hiddenBrute(up); got != want {
 			t.Fatalf("round %d: Longest(%v) = %d, want %d", round, up, got, want)
 		}
 	}

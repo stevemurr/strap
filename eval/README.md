@@ -43,6 +43,15 @@ eval/results/<run>/
 Interrupting a run leaves finished tasks in place; rerunning with the same
 `-out` reuses every task that already has a `result.json`.
 
+Keep runs that feed one write-up together in a bundle directory named after
+that write-up, for example
+`eval/results/2026-09-15-three-model-comparison/<run>/`, with a `README.md`
+that lists the runs and links the reports under `docs/evals/`. Run directories
+can be moved: `report` looks for each trace beside its `result.json` under the
+run directory, not at the path recorded when the task ran. Tier runs that
+share a profile can be merged into one run directory by concatenating their
+`results.jsonl` files and moving the task directories together.
+
 ## Completion rule and grading
 
 A task attempt is finished when the root agent has sent a reply to the user and

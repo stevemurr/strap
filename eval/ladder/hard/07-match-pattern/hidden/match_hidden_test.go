@@ -52,19 +52,19 @@ func TestHiddenExamples(t *testing.T) {
 	}
 }
 
-// brute tries every split for every star.
-func brute(pattern, name string) bool {
+// hiddenBrute tries every split for every star.
+func hiddenBrute(pattern, name string) bool {
 	if pattern == "" {
 		return name == ""
 	}
 	if pattern[0] == '*' {
-		return brute(pattern[1:], name) || (name != "" && brute(pattern, name[1:]))
+		return hiddenBrute(pattern[1:], name) || (name != "" && hiddenBrute(pattern, name[1:]))
 	}
 	if name == "" {
 		return false
 	}
 	if pattern[0] == '?' || pattern[0] == name[0] {
-		return brute(pattern[1:], name[1:])
+		return hiddenBrute(pattern[1:], name[1:])
 	}
 	return false
 }
@@ -83,7 +83,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			n[i] = nameBytes[rng.Intn(len(nameBytes))]
 		}
 		pattern, name := string(p), string(n)
-		if got, want := Match(pattern, name), brute(pattern, name); got != want {
+		if got, want := Match(pattern, name), hiddenBrute(pattern, name); got != want {
 			t.Fatalf("round %d: Match(%q, %q) = %v, want %v", round, pattern, name, got, want)
 		}
 	}

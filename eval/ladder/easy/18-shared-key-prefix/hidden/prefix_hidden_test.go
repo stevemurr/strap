@@ -65,7 +65,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(keys []string) string {
+func hiddenBrute(keys []string) string {
 	if len(keys) == 0 {
 		return ""
 	}
@@ -97,7 +97,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 			keys[i] = string(buf)
 		}
-		if got, want := SharedPrefix(keys), brute(keys); got != want {
+		if got, want := SharedPrefix(keys), hiddenBrute(keys); got != want {
 			t.Fatalf("round %d: SharedPrefix(%q) = %q, want %q", round, keys, got, want)
 		}
 	}

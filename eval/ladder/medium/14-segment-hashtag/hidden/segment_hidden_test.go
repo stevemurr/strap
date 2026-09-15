@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// check verifies that parts is a valid segmentation of text.
-func check(t *testing.T, name, text string, words []string, parts []string) {
+// hiddenCheck verifies that parts is a valid segmentation of text.
+func hiddenCheck(t *testing.T, name, text string, words []string, parts []string) {
 	t.Helper()
 	dict := map[string]bool{}
 	for _, w := range words {
@@ -60,7 +60,7 @@ func TestHiddenExamples(t *testing.T) {
 			}
 			continue
 		}
-		check(t, c.name, c.text, c.words, parts)
+		hiddenCheck(t, c.name, c.text, c.words, parts)
 	}
 }
 
@@ -80,12 +80,12 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(text string, words []string) bool {
+func hiddenBrute(text string, words []string) bool {
 	if text == "" {
 		return true
 	}
 	for _, w := range words {
-		if strings.HasPrefix(text, w) && brute(text[len(w):], words) {
+		if strings.HasPrefix(text, w) && hiddenBrute(text[len(w):], words) {
 			return true
 		}
 	}
@@ -120,12 +120,12 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 		}
 		parts, ok := Segment(text, words)
-		want := brute(text, words)
+		want := hiddenBrute(text, words)
 		if ok != want {
 			t.Fatalf("round %d: Segment(%q, %q) ok = %v, want %v", round, text, words, ok, want)
 		}
 		if ok {
-			check(t, "random", text, words, parts)
+			hiddenCheck(t, "random", text, words, parts)
 		} else if parts != nil {
 			t.Fatalf("round %d: parts = %q on failure", round, parts)
 		}
@@ -159,7 +159,7 @@ func TestHiddenLargeInputs(t *testing.T) {
 	if a := run("all a", strings.Repeat("a", 10_000), small); !a.ok {
 		t.Fatal("all a: want a segmentation")
 	} else {
-		check(t, "all a", strings.Repeat("a", 10_000), small, a.parts)
+		hiddenCheck(t, "all a", strings.Repeat("a", 10_000), small, a.parts)
 	}
 
 	rng := rand.New(rand.NewSource(1390))
@@ -183,7 +183,7 @@ func TestHiddenLargeInputs(t *testing.T) {
 	if a := run("long", text, words); !a.ok {
 		t.Fatal("long: want a segmentation")
 	} else {
-		check(t, "long", text, words, a.parts)
+		hiddenCheck(t, "long", text, words, a.parts)
 	}
 	if a := run("long impossible", text+"Z", words); a.ok {
 		t.Fatal("long impossible: want false")

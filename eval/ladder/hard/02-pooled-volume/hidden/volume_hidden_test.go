@@ -48,8 +48,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// brute finds each column's bounding walls by scanning outward from it.
-func brute(heights []int) int {
+// hiddenBrute finds each column's bounding walls by scanning outward from it.
+func hiddenBrute(heights []int) int {
 	total := 0
 	for i, h := range heights {
 		leftMax, rightMax := h, h
@@ -81,15 +81,15 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range heights {
 			heights[i] = rng.Intn(spread)
 		}
-		if got, want := PooledVolume(heights), brute(heights); got != want {
+		if got, want := PooledVolume(heights), hiddenBrute(heights); got != want {
 			t.Fatalf("round %d: PooledVolume(%v) = %d, want %d", round, heights, got, want)
 		}
 	}
 }
 
-// byWalls is a linear check used only at scale: prefix maxima in one pass,
+// hiddenByWalls is a linear check used only at scale: prefix maxima in one pass,
 // suffix maxima folded into the second.
-func byWalls(heights []int) int {
+func hiddenByWalls(heights []int) int {
 	if len(heights) == 0 {
 		return 0
 	}
@@ -146,7 +146,7 @@ func TestHiddenLargeProfile(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%s: PooledVolume took longer than 10s on %d columns", shape.name, n)
 		}
-		if want := byWalls(shape.data); got != want {
+		if want := hiddenByWalls(shape.data); got != want {
 			t.Fatalf("%s: PooledVolume = %d, want %d", shape.name, got, want)
 		}
 	}

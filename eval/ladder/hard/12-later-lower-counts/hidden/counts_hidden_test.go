@@ -49,7 +49,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(prices []int) []int {
+func hiddenBrute(prices []int) []int {
 	out := make([]int, len(prices))
 	for i, p := range prices {
 		for _, q := range prices[i+1:] {
@@ -70,7 +70,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range prices {
 			prices[i] = rng.Intn(spread) - spread/2
 		}
-		got, want := LaterLowerCounts(prices), brute(prices)
+		got, want := LaterLowerCounts(prices), hiddenBrute(prices)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("round %d: LaterLowerCounts(%v) = %v, want %v", round, prices, got, want)
 		}

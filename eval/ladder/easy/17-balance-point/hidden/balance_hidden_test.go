@@ -65,7 +65,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(weights []int) int {
+func hiddenBrute(weights []int) int {
 	for i := range weights {
 		left, right := 0, 0
 		for _, w := range weights[:i] {
@@ -89,7 +89,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range weights {
 			weights[i] = rng.Intn(7) - 3
 		}
-		if got, want := Point(weights), brute(weights); got != want {
+		if got, want := Point(weights), hiddenBrute(weights); got != want {
 			t.Fatalf("round %d: Point(%v) = %d, want %d", round, weights, got, want)
 		}
 	}

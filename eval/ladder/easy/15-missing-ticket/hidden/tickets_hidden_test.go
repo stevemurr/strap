@@ -42,7 +42,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(issued []int) int {
+func hiddenBrute(issued []int) int {
 	for candidate := 0; candidate <= len(issued); candidate++ {
 		found := false
 		for _, v := range issued {
@@ -64,7 +64,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		n := rng.Intn(40)
 		perm := rng.Perm(n + 1)
 		issued := perm[:n] // perm[n] is the number left out
-		got, want := Missing(issued), brute(issued)
+		got, want := Missing(issued), hiddenBrute(issued)
 		if want != perm[n] {
 			t.Fatalf("round %d: oracle disagrees with the construction", round)
 		}

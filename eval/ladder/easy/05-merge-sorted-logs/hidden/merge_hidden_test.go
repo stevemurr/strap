@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func sameEntries(got, want []Entry) bool {
+func hiddenSameEntries(got, want []Entry) bool {
 	if len(got) == 0 && len(want) == 0 {
 		return true
 	}
@@ -39,7 +39,7 @@ func TestHiddenExamples(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := Merge(c.a, c.b)
-		if !sameEntries(got, c.want) {
+		if !hiddenSameEntries(got, c.want) {
 			t.Errorf("%s: Merge = %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -59,7 +59,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(a, b []Entry) []Entry {
+func hiddenBrute(a, b []Entry) []Entry {
 	out := make([]Entry, 0, len(a)+len(b))
 	out = append(out, a...)
 	out = append(out, b...)
@@ -67,7 +67,7 @@ func brute(a, b []Entry) []Entry {
 	return out
 }
 
-func sortedRandom(rng *rand.Rand, prefix string, n int) []Entry {
+func hiddenSortedRandom(rng *rand.Rand, prefix string, n int) []Entry {
 	out := make([]Entry, n)
 	at := int64(rng.Intn(5)) - 2
 	for i := range out {
@@ -80,10 +80,10 @@ func sortedRandom(rng *rand.Rand, prefix string, n int) []Entry {
 func TestHiddenAgainstBruteForce(t *testing.T) {
 	rng := rand.New(rand.NewSource(21))
 	for round := 0; round < 500; round++ {
-		a := sortedRandom(rng, "a", rng.Intn(10))
-		b := sortedRandom(rng, "b", rng.Intn(10))
-		got, want := Merge(a, b), brute(a, b)
-		if !sameEntries(got, want) {
+		a := hiddenSortedRandom(rng, "a", rng.Intn(10))
+		b := hiddenSortedRandom(rng, "b", rng.Intn(10))
+		got, want := Merge(a, b), hiddenBrute(a, b)
+		if !hiddenSameEntries(got, want) {
 			t.Fatalf("round %d: Merge(%v, %v) = %v, want %v", round, a, b, got, want)
 		}
 	}

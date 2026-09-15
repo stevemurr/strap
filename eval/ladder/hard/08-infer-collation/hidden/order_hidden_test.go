@@ -59,8 +59,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// lessUnder compares two words under a letter order given as rank per letter.
-func lessUnder(a, b string, rank map[byte]int) bool {
+// hiddenLessUnder compares two words under a letter order given as rank per letter.
+func hiddenLessUnder(a, b string, rank map[byte]int) bool {
 	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] != b[i] {
 			return rank[a[i]] < rank[b[i]]
@@ -69,22 +69,22 @@ func lessUnder(a, b string, rank map[byte]int) bool {
 	return len(a) < len(b)
 }
 
-func sortedUnder(words []string, order string) bool {
+func hiddenSortedUnder(words []string, order string) bool {
 	rank := map[byte]int{}
 	for i := 0; i < len(order); i++ {
 		rank[order[i]] = i
 	}
 	for i := 1; i < len(words); i++ {
-		if lessUnder(words[i], words[i-1], rank) {
+		if hiddenLessUnder(words[i], words[i-1], rank) {
 			return false
 		}
 	}
 	return true
 }
 
-// brute tries every permutation of the letters that appear and keeps the
+// hiddenBrute tries every permutation of the letters that appear and keeps the
 // lexicographically smallest one under which the list is sorted.
-func brute(words []string) (string, bool) {
+func hiddenBrute(words []string) (string, bool) {
 	seen := map[byte]bool{}
 	var letters []byte
 	for _, w := range words {
@@ -100,7 +100,7 @@ func brute(words []string) (string, bool) {
 	var permute func(prefix []byte, rest []byte)
 	permute = func(prefix []byte, rest []byte) {
 		if len(rest) == 0 {
-			if order := string(prefix); sortedUnder(words, order) && (!found || order < best) {
+			if order := string(prefix); hiddenSortedUnder(words, order) && (!found || order < best) {
 				best, found = order, true
 			}
 			return
@@ -137,10 +137,10 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			for i, l := range perm {
 				rank[l] = i
 			}
-			sort.SliceStable(words, func(i, j int) bool { return lessUnder(words[i], words[j], rank) })
+			sort.SliceStable(words, func(i, j int) bool { return hiddenLessUnder(words[i], words[j], rank) })
 		}
 		got, err := InferOrder(words)
-		want, ok := brute(words)
+		want, ok := hiddenBrute(words)
 		if !ok {
 			if err == nil {
 				t.Fatalf("round %d: InferOrder(%q) = %q, nil; want an error", round, words, got)
@@ -178,8 +178,8 @@ func TestHiddenLargeList(t *testing.T) {
 		}
 		words = append(words, prefix+string(b))
 	}
-	sort.Slice(words, func(i, j int) bool { return lessUnder(words[i], words[j], rank) })
-	if !sortedUnder(words, string(perm)) {
+	sort.Slice(words, func(i, j int) bool { return hiddenLessUnder(words[i], words[j], rank) })
+	if !hiddenSortedUnder(words, string(perm)) {
 		t.Fatal("test setup: list is not sorted under the chosen order")
 	}
 	type answer struct {

@@ -44,8 +44,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteLongest is the quadratic dynamic programme over pairs of positions.
-func bruteLongest(scores []int) int {
+// hiddenBruteLongest is the quadratic dynamic programme over pairs of positions.
+func hiddenBruteLongest(scores []int) int {
 	best := 0
 	ending := make([]int, len(scores))
 	for i := range scores {
@@ -69,7 +69,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range scores {
 			scores[i] = rng.Intn(spread) - spread/2
 		}
-		if got, want := LongestImprovement(scores), bruteLongest(scores); got != want {
+		if got, want := LongestImprovement(scores), hiddenBruteLongest(scores); got != want {
 			t.Fatalf("round %d: LongestImprovement(%v) = %d, want %d", round, scores, got, want)
 		}
 	}

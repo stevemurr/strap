@@ -44,7 +44,7 @@ func TestHiddenExamples(t *testing.T) {
 	}
 }
 
-func brute(template string) bool {
+func hiddenBrute(template string) bool {
 	var kept strings.Builder
 	for i := 0; i < len(template); i++ {
 		if strings.IndexByte("()[]{}", template[i]) >= 0 {
@@ -99,7 +99,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 				s = string(b)
 			}
 		}
-		if got, want := Balanced(s), brute(s); got != want {
+		if got, want := Balanced(s), hiddenBrute(s); got != want {
 			t.Fatalf("round %d: Balanced(%q) = %v, want %v", round, s, got, want)
 		}
 	}

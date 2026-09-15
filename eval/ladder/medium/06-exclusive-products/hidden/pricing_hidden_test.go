@@ -55,8 +55,8 @@ func TestHiddenDoesNotMutateOrAlias(t *testing.T) {
 	}
 }
 
-// bruteProducts multiplies the other factors from scratch for each position.
-func bruteProducts(factors []int) []int {
+// hiddenBruteProducts multiplies the other factors from scratch for each position.
+func hiddenBruteProducts(factors []int) []int {
 	if len(factors) < 2 {
 		return nil
 	}
@@ -81,7 +81,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range factors {
 			factors[i] = rng.Intn(7) - 3
 		}
-		got, want := ExclusiveProducts(factors), bruteProducts(factors)
+		got, want := ExclusiveProducts(factors), hiddenBruteProducts(factors)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("round %d: ExclusiveProducts(%v) = %v, want %v", round, factors, got, want)
 		}

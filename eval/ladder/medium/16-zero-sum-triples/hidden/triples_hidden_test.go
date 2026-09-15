@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func sameTriples(got, want [][3]int) bool {
+func hiddenSameTriples(got, want [][3]int) bool {
 	if len(got) == 0 && len(want) == 0 {
 		return true
 	}
@@ -37,7 +37,7 @@ func TestHiddenExamples(t *testing.T) {
 		{"all negative", []int{-1, -2, -3}, nil},
 	}
 	for _, c := range cases {
-		if got := ZeroSumTriples(c.deltas); !sameTriples(got, c.want) {
+		if got := ZeroSumTriples(c.deltas); !hiddenSameTriples(got, c.want) {
 			t.Errorf("%s: ZeroSumTriples(%v) = %v, want %v", c.name, c.deltas, got, c.want)
 		}
 	}
@@ -52,7 +52,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func sortTriples(s [][3]int) {
+func hiddenSortTriples(s [][3]int) {
 	sort.Slice(s, func(i, j int) bool {
 		if s[i][0] != s[j][0] {
 			return s[i][0] < s[j][0]
@@ -64,7 +64,7 @@ func sortTriples(s [][3]int) {
 	})
 }
 
-func brute(deltas []int) [][3]int {
+func hiddenBrute(deltas []int) [][3]int {
 	seen := map[[3]int]bool{}
 	for i := range deltas {
 		for j := i + 1; j < len(deltas); j++ {
@@ -82,7 +82,7 @@ func brute(deltas []int) [][3]int {
 	for tr := range seen {
 		out = append(out, tr)
 	}
-	sortTriples(out)
+	hiddenSortTriples(out)
 	return out
 }
 
@@ -95,16 +95,16 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range deltas {
 			deltas[i] = rng.Intn(spread) - spread/2
 		}
-		got, want := ZeroSumTriples(deltas), brute(deltas)
-		if !sameTriples(got, want) {
+		got, want := ZeroSumTriples(deltas), hiddenBrute(deltas)
+		if !hiddenSameTriples(got, want) {
 			t.Fatalf("round %d: ZeroSumTriples(%v) = %v, want %v", round, deltas, got, want)
 		}
 	}
 }
 
-// counting enumerates distinct value pairs (a <= b) and looks up c = -a-b,
+// hiddenCounting enumerates distinct value pairs (a <= b) and looks up c = -a-b,
 // checking that the multiset holds enough copies of each value.
-func counting(deltas []int) [][3]int {
+func hiddenCounting(deltas []int) [][3]int {
 	count := map[int]int{}
 	for _, v := range deltas {
 		count[v]++
@@ -180,6 +180,6 @@ func TestHiddenLargeInputs(t *testing.T) {
 		if !reflect.DeepEqual(deltas, before) {
 			t.Fatalf("%s: input modified", shape.name)
 		}
-		compare(shape.name, got, counting(deltas))
+		compare(shape.name, got, hiddenCounting(deltas))
 	}
 }

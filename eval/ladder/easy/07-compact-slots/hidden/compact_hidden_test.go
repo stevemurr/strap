@@ -61,7 +61,7 @@ func TestHiddenOnlyWindowIsTouched(t *testing.T) {
 	}
 }
 
-func brute(in []string) []string {
+func hiddenBrute(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, s := range in {
 		if s != "" {
@@ -82,7 +82,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range in {
 			in[i] = values[rng.Intn(len(values))]
 		}
-		want := brute(in)
+		want := hiddenBrute(in)
 		Compact(in)
 		if len(in) == 0 && len(want) == 0 {
 			continue

@@ -44,7 +44,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(ids []int) int {
+func hiddenBrute(ids []int) int {
 	for _, id := range ids {
 		n := 0
 		for _, other := range ids {
@@ -70,7 +70,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		}
 		ids = append(ids, values[pairs]-30)
 		rng.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
-		if got, want := Unmatched(ids), brute(ids); got != want {
+		if got, want := Unmatched(ids), hiddenBrute(ids); got != want {
 			t.Fatalf("round %d: Unmatched(%v) = %d, want %d", round, ids, got, want)
 		}
 	}

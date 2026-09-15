@@ -45,7 +45,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(heights []int) int {
+func hiddenBrute(heights []int) int {
 	best := 0
 	for l := range heights {
 		m := heights[l]
@@ -70,7 +70,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		for i := range heights {
 			heights[i] = rng.Intn(spread)
 		}
-		got, want := LargestBillboard(heights), brute(heights)
+		got, want := LargestBillboard(heights), hiddenBrute(heights)
 		if got != want {
 			t.Fatalf("round %d: LargestBillboard(%v) = %d, want %d", round, heights, got, want)
 		}

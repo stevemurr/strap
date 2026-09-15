@@ -130,12 +130,12 @@ func TestHiddenDeepNesting(t *testing.T) {
 	}
 }
 
-// generate builds a random valid pattern and its expansion the slow way.
-func generate(rng *rand.Rand, depth int) (pattern, text string) {
+// hiddenGenerate builds a random valid pattern and its expansion the slow way.
+func hiddenGenerate(rng *rand.Rand, depth int) (pattern, text string) {
 	for items := rng.Intn(4); items > 0; items-- {
 		if depth > 0 && rng.Intn(3) == 0 {
 			count := rng.Intn(4) + 1
-			inner, innerText := generate(rng, depth-1)
+			inner, innerText := hiddenGenerate(rng, depth-1)
 			if inner == "" {
 				inner, innerText = "q", "q"
 			}
@@ -153,7 +153,7 @@ func generate(rng *rand.Rand, depth int) (pattern, text string) {
 func TestHiddenAgainstGenerator(t *testing.T) {
 	rng := rand.New(rand.NewSource(394))
 	for round := 0; round < 1000; round++ {
-		pattern, want := generate(rng, 3)
+		pattern, want := hiddenGenerate(rng, 3)
 		got, err := Expand(pattern)
 		if err != nil {
 			t.Fatalf("round %d: Expand(%q) returned error %v", round, pattern, err)

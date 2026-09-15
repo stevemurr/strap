@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func expectGet(t *testing.T, c *Cache, key string, value int, ok bool) {
+func hiddenExpectGet(t *testing.T, c *Cache, key string, value int, ok bool) {
 	t.Helper()
 	if v, got := c.Get(key); v != value || got != ok {
 		t.Fatalf("Get(%q) = (%d, %v), want (%d, %v)", key, v, got, value, ok)
@@ -18,14 +18,14 @@ func TestHiddenReadmeExample(t *testing.T) {
 	c := New(2)
 	c.Put("a", 1)
 	c.Put("b", 2)
-	expectGet(t, c, "a", 1, true)
+	hiddenExpectGet(t, c, "a", 1, true)
 	c.Put("c", 3)
-	expectGet(t, c, "b", 0, false)
-	expectGet(t, c, "c", 3, true)
+	hiddenExpectGet(t, c, "b", 0, false)
+	hiddenExpectGet(t, c, "c", 3, true)
 	c.Put("d", 4)
-	expectGet(t, c, "a", 0, false)
-	expectGet(t, c, "c", 3, true)
-	expectGet(t, c, "d", 4, true)
+	hiddenExpectGet(t, c, "a", 0, false)
+	hiddenExpectGet(t, c, "c", 3, true)
+	hiddenExpectGet(t, c, "d", 4, true)
 	if c.Len() != 2 {
 		t.Fatalf("Len = %d, want 2", c.Len())
 	}
@@ -40,22 +40,22 @@ func TestHiddenReplaceBumpsAndNeverEvicts(t *testing.T) {
 		t.Fatalf("Len = %d, want 2", c.Len())
 	}
 	c.Put("c", 3) // evicts b
-	expectGet(t, c, "b", 0, false)
-	expectGet(t, c, "a", 10, true)
-	expectGet(t, c, "c", 3, true)
+	hiddenExpectGet(t, c, "b", 0, false)
+	hiddenExpectGet(t, c, "a", 10, true)
+	hiddenExpectGet(t, c, "c", 3, true)
 }
 
 func TestHiddenMissChangesNothing(t *testing.T) {
 	c := New(2)
 	c.Put("a", 1)
 	c.Put("b", 2)
-	expectGet(t, c, "zzz", 0, false)
+	hiddenExpectGet(t, c, "zzz", 0, false)
 	if c.Len() != 2 {
 		t.Fatalf("Len = %d, want 2", c.Len())
 	}
 	c.Put("c", 3) // a and b both count 1; a is older
-	expectGet(t, c, "a", 0, false)
-	expectGet(t, c, "b", 2, true)
+	hiddenExpectGet(t, c, "a", 0, false)
+	hiddenExpectGet(t, c, "b", 2, true)
 }
 
 func TestHiddenLenIsNotUse(t *testing.T) {
@@ -67,8 +67,8 @@ func TestHiddenLenIsNotUse(t *testing.T) {
 		_ = c.Len()
 	}
 	c.Put("c", 3)
-	expectGet(t, c, "b", 0, false)
-	expectGet(t, c, "a", 1, true)
+	hiddenExpectGet(t, c, "b", 0, false)
+	hiddenExpectGet(t, c, "a", 1, true)
 }
 
 func TestHiddenFrequencyBeatsRecency(t *testing.T) {
@@ -81,14 +81,14 @@ func TestHiddenFrequencyBeatsRecency(t *testing.T) {
 	c.Get("b")
 	c.Get("c")    // counts: a 3, b 2, c 2; c most recent
 	c.Put("d", 4) // evicts b: lowest count, older than c
-	expectGet(t, c, "b", 0, false)
-	expectGet(t, c, "a", 1, true)
-	expectGet(t, c, "c", 3, true)
-	expectGet(t, c, "d", 4, true)
+	hiddenExpectGet(t, c, "b", 0, false)
+	hiddenExpectGet(t, c, "a", 1, true)
+	hiddenExpectGet(t, c, "c", 3, true)
+	hiddenExpectGet(t, c, "d", 4, true)
 	// d has count 2 now; a 4, c 3. Insert evicts d.
 	c.Put("e", 5)
-	expectGet(t, c, "d", 0, false)
-	expectGet(t, c, "e", 5, true)
+	hiddenExpectGet(t, c, "d", 0, false)
+	hiddenExpectGet(t, c, "e", 5, true)
 }
 
 func TestHiddenTieBrokenByRecency(t *testing.T) {
@@ -100,12 +100,12 @@ func TestHiddenTieBrokenByRecency(t *testing.T) {
 	c.Get("c")
 	c.Get("a") // all count 2; b is least recent
 	c.Put("d", 4)
-	expectGet(t, c, "b", 0, false)
-	expectGet(t, c, "c", 3, true) // c: 3, a: 2, d: 1
-	c.Put("e", 5)                 // evicts d
-	expectGet(t, c, "d", 0, false)
-	expectGet(t, c, "a", 1, true)
-	expectGet(t, c, "e", 5, true)
+	hiddenExpectGet(t, c, "b", 0, false)
+	hiddenExpectGet(t, c, "c", 3, true) // c: 3, a: 2, d: 1
+	c.Put("e", 5)                       // evicts d
+	hiddenExpectGet(t, c, "d", 0, false)
+	hiddenExpectGet(t, c, "a", 1, true)
+	hiddenExpectGet(t, c, "e", 5, true)
 }
 
 func TestHiddenCapacityOne(t *testing.T) {
@@ -114,8 +114,8 @@ func TestHiddenCapacityOne(t *testing.T) {
 	c.Get("a")
 	c.Get("a")
 	c.Put("b", 2) // a goes despite its higher count: it is the only entry
-	expectGet(t, c, "a", 0, false)
-	expectGet(t, c, "b", 2, true)
+	hiddenExpectGet(t, c, "a", 0, false)
+	hiddenExpectGet(t, c, "b", 2, true)
 	if c.Len() != 1 {
 		t.Fatalf("Len = %d, want 1", c.Len())
 	}
@@ -126,7 +126,7 @@ func TestHiddenEmptyCache(t *testing.T) {
 	if c.Len() != 0 {
 		t.Fatalf("Len = %d, want 0", c.Len())
 	}
-	expectGet(t, c, "a", 0, false)
+	hiddenExpectGet(t, c, "a", 0, false)
 }
 
 func TestHiddenInvalidCapacityPanics(t *testing.T) {
@@ -142,21 +142,21 @@ func TestHiddenInvalidCapacityPanics(t *testing.T) {
 	}
 }
 
-// model is a slow LFU cache that scans every entry on eviction.
-type model struct {
+// hiddenModel is a slow LFU cache that scans every entry on eviction.
+type hiddenModel struct {
 	capacity int
-	entries  []*modelEntry
+	entries  []*hiddenModelEntry
 	tick     int
 }
 
-type modelEntry struct {
+type hiddenModelEntry struct {
 	key      string
 	value    int
 	uses     int
 	lastUsed int
 }
 
-func (m *model) find(key string) *modelEntry {
+func (m *hiddenModel) find(key string) *hiddenModelEntry {
 	for _, e := range m.entries {
 		if e.key == key {
 			return e
@@ -165,7 +165,7 @@ func (m *model) find(key string) *modelEntry {
 	return nil
 }
 
-func (m *model) get(key string) (int, bool) {
+func (m *hiddenModel) get(key string) (int, bool) {
 	e := m.find(key)
 	if e == nil {
 		return 0, false
@@ -176,7 +176,7 @@ func (m *model) get(key string) (int, bool) {
 	return e.value, true
 }
 
-func (m *model) put(key string, value int) {
+func (m *hiddenModel) put(key string, value int) {
 	m.tick++
 	if e := m.find(key); e != nil {
 		e.value = value
@@ -194,7 +194,7 @@ func (m *model) put(key string, value int) {
 		}
 		m.entries = append(m.entries[:victim], m.entries[victim+1:]...)
 	}
-	m.entries = append(m.entries, &modelEntry{key: key, value: value, uses: 1, lastUsed: m.tick})
+	m.entries = append(m.entries, &hiddenModelEntry{key: key, value: value, uses: 1, lastUsed: m.tick})
 }
 
 func TestHiddenAgainstModel(t *testing.T) {
@@ -203,7 +203,7 @@ func TestHiddenAgainstModel(t *testing.T) {
 	for round := 0; round < 60; round++ {
 		capacity := rng.Intn(5) + 1
 		c := New(capacity)
-		m := &model{capacity: capacity}
+		m := &hiddenModel{capacity: capacity}
 		for op := 0; op < 400; op++ {
 			key := keys[rng.Intn(len(keys))]
 			if rng.Intn(3) == 0 {

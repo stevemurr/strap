@@ -46,7 +46,7 @@ func TestHiddenExamples(t *testing.T) {
 	}
 }
 
-func replay(log string) string {
+func hiddenReplay(log string) string {
 	var text []byte
 	for i := 0; i < len(log); i++ {
 		if log[i] == '#' {
@@ -60,11 +60,11 @@ func replay(log string) string {
 	return string(text)
 }
 
-func brute(a, b string) bool {
-	return replay(a) == replay(b)
+func hiddenBrute(a, b string) bool {
+	return hiddenReplay(a) == hiddenReplay(b)
 }
 
-func randomLog(rng *rand.Rand, n int) string {
+func hiddenRandomLog(rng *rand.Rand, n int) string {
 	alphabet := []byte("ab#")
 	buf := make([]byte, n)
 	for i := range buf {
@@ -76,10 +76,10 @@ func randomLog(rng *rand.Rand, n int) string {
 func TestHiddenAgainstBruteForce(t *testing.T) {
 	rng := rand.New(rand.NewSource(844))
 	for round := 0; round < 3000; round++ {
-		a := randomLog(rng, rng.Intn(9))
+		a := hiddenRandomLog(rng, rng.Intn(9))
 		var b string
 		if round%2 == 0 {
-			b = randomLog(rng, rng.Intn(9))
+			b = hiddenRandomLog(rng, rng.Intn(9))
 		} else {
 			// Insert a typed-then-deleted letter somewhere in a, so the logs
 			// differ but usually produce the same text.
@@ -89,7 +89,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 				b += "#"
 			}
 		}
-		if got, want := SameTyped(a, b), brute(a, b); got != want {
+		if got, want := SameTyped(a, b), hiddenBrute(a, b); got != want {
 			t.Fatalf("round %d: SameTyped(%q, %q) = %v, want %v", round, a, b, got, want)
 		}
 	}

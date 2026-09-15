@@ -117,14 +117,17 @@ func Analyze(ctx context.Context, dir string) (Report, error) {
 		return a.TaskID < b.TaskID
 	})
 	for _, id := range order {
-		m := analyzeTask(ctx, latest[id])
+		m := analyzeTask(ctx, dir, latest[id])
 		rep.Tasks = append(rep.Tasks, m)
 	}
 	rep.Tiers = summarize(rep.Tasks)
 	return rep, nil
 }
 
-func analyzeTask(ctx context.Context, r Result) TaskMetrics {
+// analyzeTask reads the trace beside result.json under the run directory, so
+// a run that has been moved or bundled still reports; the recorded path is
+// only a fallback.
+func analyzeTask(ctx context.Context, dir string, r Result) TaskMetrics {
 	m := TaskMetrics{TaskID: r.TaskID, Tier: r.Tier, Title: r.Title, Outcome: r.Outcome, Passed: r.Passed, TimedOut: r.TimedOut, Duration: r.Duration, ExecutionError: r.ExecutionError,
 		Roles: map[string]int{}, ToolCalls: map[string]int{}, ToolErrors: map[string]int{}, Work: map[string]int{}, Audits: map[string]int{}, Diagnostics: map[string]int{}}
 	if r.Capture != nil {
@@ -136,7 +139,11 @@ func analyzeTask(ctx context.Context, r Result) TaskMetrics {
 	if r.Error != "" && m.ExecutionError == "" {
 		m.ExecutionError = r.Error
 	}
-	if err := scanTrace(ctx, r.Trace, &m); err != nil {
+	trace := filepath.Join(dir, r.TaskID, "trace.jsonl")
+	if _, err := os.Stat(trace); err != nil {
+		trace = r.Trace
+	}
+	if err := scanTrace(ctx, trace, &m); err != nil {
 		m.Error = err.Error()
 	}
 	return m

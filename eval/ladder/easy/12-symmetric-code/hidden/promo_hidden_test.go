@@ -61,7 +61,7 @@ func TestHiddenNonASCIIBytesAreIgnored(t *testing.T) {
 	}
 }
 
-func brute(code string) bool {
+func hiddenBrute(code string) bool {
 	var kept []byte
 	for i := 0; i < len(code); i++ {
 		b := code[i]
@@ -106,7 +106,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 		}
 		code := string(buf)
-		if got, want := IsSymmetric(code), brute(code); got != want {
+		if got, want := IsSymmetric(code), hiddenBrute(code); got != want {
 			t.Fatalf("round %d: IsSymmetric(%q) = %v, want %v", round, code, got, want)
 		}
 	}

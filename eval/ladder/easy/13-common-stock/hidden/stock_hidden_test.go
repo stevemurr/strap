@@ -52,7 +52,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(a, b []string) []string {
+func hiddenBrute(a, b []string) []string {
 	used := make([]bool, len(b))
 	var out []string
 	for _, sku := range a {
@@ -82,7 +82,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		distinct := 1 + rng.Intn(len(skus))
 		a := draw(rng.Intn(12), distinct)
 		b := draw(rng.Intn(12), distinct)
-		got, want := CommonStock(a, b), brute(a, b)
+		got, want := CommonStock(a, b), hiddenBrute(a, b)
 		if len(got) == 0 && len(want) == 0 {
 			continue
 		}

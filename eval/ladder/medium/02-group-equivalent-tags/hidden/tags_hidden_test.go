@@ -52,8 +52,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteGroups compares byte histograms pairwise instead of keying a map.
-func bruteGroups(tags []string) [][]string {
+// hiddenBruteGroups compares byte histograms pairwise instead of keying a map.
+func hiddenBruteGroups(tags []string) [][]string {
 	var groups [][]string
 	var histograms [][256]int
 	for _, tag := range tags {
@@ -94,7 +94,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 			tags[i] = string(b)
 		}
-		got, want := GroupEquivalent(tags), bruteGroups(tags)
+		got, want := GroupEquivalent(tags), hiddenBruteGroups(tags)
 		if len(got) == 0 && len(want) == 0 {
 			continue
 		}
@@ -132,14 +132,14 @@ func TestHiddenLargeInput(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%s: GroupEquivalent took longer than 10s on %d tags", shape.name, n)
 		}
-		checkGrouping(t, shape.name, tags, got)
+		hiddenCheckGrouping(t, shape.name, tags, got)
 	}
 }
 
-// checkGrouping verifies a result without an oracle: every input tag is used
+// hiddenCheckGrouping verifies a result without an oracle: every input tag is used
 // exactly once, members of a group share a byte multiset, no multiset is split
 // across groups, and both the groups and their members are in order.
-func checkGrouping(t *testing.T, name string, tags []string, got [][]string) {
+func hiddenCheckGrouping(t *testing.T, name string, tags []string, got [][]string) {
 	t.Helper()
 	remaining := make(map[string]int, len(tags))
 	for _, tag := range tags {
@@ -154,7 +154,7 @@ func checkGrouping(t *testing.T, name string, tags []string, got [][]string) {
 		if gi > 0 && got[gi-1][0] >= group[0] {
 			t.Fatalf("%s: groups %d and %d are not in ascending order (%q, %q)", name, gi-1, gi, got[gi-1][0], group[0])
 		}
-		key := sortedKey(group[0])
+		key := hiddenSortedKey(group[0])
 		if seen[key] {
 			t.Fatalf("%s: equivalent tags split across groups (group %d)", name, gi)
 		}
@@ -163,7 +163,7 @@ func checkGrouping(t *testing.T, name string, tags []string, got [][]string) {
 			if i > 0 && group[i-1] > member {
 				t.Fatalf("%s: group %d is not sorted at %d", name, gi, i)
 			}
-			if sortedKey(member) != key {
+			if hiddenSortedKey(member) != key {
 				t.Fatalf("%s: group %d mixes %q with %q", name, gi, group[0], member)
 			}
 			remaining[member]--
@@ -178,7 +178,7 @@ func checkGrouping(t *testing.T, name string, tags []string, got [][]string) {
 	}
 }
 
-func sortedKey(s string) string {
+func hiddenSortedKey(s string) string {
 	b := []byte(s)
 	slices.Sort(b)
 	return string(b)

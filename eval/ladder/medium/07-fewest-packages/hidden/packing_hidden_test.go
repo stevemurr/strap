@@ -46,8 +46,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteFewest tries every combination recursively.
-func bruteFewest(sizes []int, quantity int) int {
+// hiddenBruteFewest tries every combination recursively.
+func hiddenBruteFewest(sizes []int, quantity int) int {
 	if quantity < 0 {
 		return -1
 	}
@@ -59,7 +59,7 @@ func bruteFewest(sizes []int, quantity int) int {
 		if s > quantity {
 			continue
 		}
-		if sub := bruteFewest(sizes, quantity-s); sub >= 0 && (best < 0 || sub+1 < best) {
+		if sub := hiddenBruteFewest(sizes, quantity-s); sub >= 0 && (best < 0 || sub+1 < best) {
 			best = sub + 1
 		}
 	}
@@ -74,7 +74,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			sizes[i] = 1 + rng.Intn(9)
 		}
 		quantity := rng.Intn(21) - 2
-		if got, want := FewestPackages(sizes, quantity), bruteFewest(sizes, quantity); got != want {
+		if got, want := FewestPackages(sizes, quantity), hiddenBruteFewest(sizes, quantity); got != want {
 			t.Fatalf("round %d: FewestPackages(%v, %d) = %d, want %d", round, sizes, quantity, got, want)
 		}
 	}
@@ -103,7 +103,7 @@ func TestHiddenLargeQuantity(t *testing.T) {
 		want     int
 	}{
 		{"consecutive sizes", consecutive, 100_000, 96},
-		{"consecutive sizes shuffled", shuffled(consecutive, 7), 100_000, 96},
+		{"consecutive sizes hiddenShuffled", hiddenShuffled(consecutive, 7), 100_000, 96},
 		{"even sizes odd quantity", even, 99_999, -1},
 		{"with size one", withOne, 100_000, 96},
 		{"just below reach", consecutive, 99_999, 96},
@@ -122,7 +122,7 @@ func TestHiddenLargeQuantity(t *testing.T) {
 	}
 }
 
-func shuffled(sizes []int, seed int64) []int {
+func hiddenShuffled(sizes []int, seed int64) []int {
 	out := slices.Clone(sizes)
 	rand.New(rand.NewSource(seed)).Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
 	return out

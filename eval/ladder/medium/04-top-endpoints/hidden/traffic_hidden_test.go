@@ -60,9 +60,9 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteTop counts every distinct endpoint by rescanning the log and picks the
+// hiddenBruteTop counts every distinct endpoint by rescanning the log and picks the
 // winners by repeated selection.
-func bruteTop(hits []string, k int) []string {
+func hiddenBruteTop(hits []string, k int) []string {
 	if k <= 0 {
 		return nil
 	}
@@ -107,7 +107,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			hits[i] = pool[rng.Intn(len(pool))]
 		}
 		k := rng.Intn(len(names)+2) - 1
-		got, want := TopEndpoints(hits, k), bruteTop(hits, k)
+		got, want := TopEndpoints(hits, k), hiddenBruteTop(hits, k)
 		if len(got) == 0 && len(want) == 0 {
 			continue
 		}

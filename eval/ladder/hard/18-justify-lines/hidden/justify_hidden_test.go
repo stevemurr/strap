@@ -55,9 +55,9 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// check verifies every rule in README.md; together they determine the output
+// hiddenCheck verifies every rule in README.md; together they determine the output
 // uniquely, so a layout that passes is the only correct one.
-func check(words []string, width int, lines []string) error {
+func hiddenCheck(words []string, width int, lines []string) error {
 	next := 0
 	prevMinimal := -1 // minimal length of the previous line's words with single spaces
 	for li, line := range lines {
@@ -125,7 +125,7 @@ func check(words []string, width int, lines []string) error {
 	return nil
 }
 
-func randomWords(rng *rand.Rand, n, maxLen int) []string {
+func hiddenRandomWords(rng *rand.Rand, n, maxLen int) []string {
 	words := make([]string, n)
 	for i := range words {
 		b := make([]byte, rng.Intn(maxLen)+1)
@@ -141,9 +141,9 @@ func TestHiddenRandomLayouts(t *testing.T) {
 	rng := rand.New(rand.NewSource(68))
 	for round := 0; round < 500; round++ {
 		maxLen := rng.Intn(6) + 1
-		words := randomWords(rng, rng.Intn(30)+1, maxLen)
+		words := hiddenRandomWords(rng, rng.Intn(30)+1, maxLen)
 		width := maxLen + rng.Intn(15)
-		if err := check(words, width, Justify(words, width)); err != nil {
+		if err := hiddenCheck(words, width, Justify(words, width)); err != nil {
 			t.Fatalf("round %d: Justify(%q, %d): %v", round, words, width, err)
 		}
 	}
@@ -152,8 +152,8 @@ func TestHiddenRandomLayouts(t *testing.T) {
 func TestHiddenLargeParagraph(t *testing.T) {
 	const n = 200_000
 	rng := rand.New(rand.NewSource(5))
-	prose := randomWords(rng, n, 10)
-	letters := randomWords(rng, n, 1)
+	prose := hiddenRandomWords(rng, n, 10)
+	letters := hiddenRandomWords(rng, n, 1)
 	for _, shape := range []struct {
 		name  string
 		words []string
@@ -170,7 +170,7 @@ func TestHiddenLargeParagraph(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%s: Justify took longer than 10s on %d words", shape.name, n)
 		}
-		if err := check(shape.words, shape.width, got); err != nil {
+		if err := hiddenCheck(shape.words, shape.width, got); err != nil {
 			t.Fatalf("%s: %v", shape.name, err)
 		}
 	}

@@ -47,7 +47,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(bookings [][2]int) bool {
+func hiddenBrute(bookings [][2]int) bool {
 	for i := range bookings {
 		for j := i + 1; j < len(bookings); j++ {
 			if bookings[i][0] < bookings[j][1] && bookings[j][0] < bookings[i][1] {
@@ -67,7 +67,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			start := rng.Intn(16) - 4
 			bookings[i] = [2]int{start, start + 1 + rng.Intn(4)}
 		}
-		if got, want := HasConflict(bookings), brute(bookings); got != want {
+		if got, want := HasConflict(bookings), hiddenBrute(bookings); got != want {
 			t.Fatalf("round %d: HasConflict(%v) = %v, want %v", round, bookings, got, want)
 		}
 	}

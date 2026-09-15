@@ -46,8 +46,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// brute enumerates every trail from every cell without memoization.
-func brute(g [][]int) int {
+// hiddenBrute enumerates every trail from every cell without memoization.
+func hiddenBrute(g [][]int) int {
 	rows := len(g)
 	if rows == 0 || len(g[0]) == 0 {
 		return 0
@@ -89,13 +89,13 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 				g[r][c] = rng.Intn(spread) - spread/2
 			}
 		}
-		if got, want := LongestDescent(g), brute(g); got != want {
+		if got, want := LongestDescent(g), hiddenBrute(g); got != want {
 			t.Fatalf("round %d: LongestDescent(%v) = %d, want %d", round, g, got, want)
 		}
 	}
 }
 
-func diagonal(rows, cols int) [][]int {
+func hiddenDiagonal(rows, cols int) [][]int {
 	g := make([][]int, rows)
 	for r := range g {
 		g[r] = make([]int, cols)
@@ -106,7 +106,7 @@ func diagonal(rows, cols int) [][]int {
 	return g
 }
 
-func spiral(rows, cols int) [][]int {
+func hiddenSpiral(rows, cols int) [][]int {
 	g := make([][]int, rows)
 	for r := range g {
 		g[r] = make([]int, cols)
@@ -149,8 +149,8 @@ func TestHiddenLargeGrid(t *testing.T) {
 		grid [][]int
 		want int
 	}{
-		{"diagonal", diagonal(size, size), 2*size - 1},
-		{"spiral", spiral(size, size), size * size},
+		{"hiddenDiagonal", hiddenDiagonal(size, size), 2*size - 1},
+		{"hiddenSpiral", hiddenSpiral(size, size), size * size},
 	}
 	for _, shape := range shapes {
 		done := make(chan int, 1)

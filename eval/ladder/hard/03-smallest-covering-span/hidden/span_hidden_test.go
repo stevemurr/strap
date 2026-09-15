@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func split(s string) []string {
+func hiddenSplit(s string) []string {
 	if s == "" {
 		return nil
 	}
@@ -42,7 +42,7 @@ func TestHiddenExamples(t *testing.T) {
 		{"longer names", "login retry error retry crash", "retry error", 1, 3, true},
 	}
 	for _, c := range cases {
-		start, end, ok := SmallestCoveringSpan(split(c.events), split(c.required))
+		start, end, ok := SmallestCoveringSpan(hiddenSplit(c.events), hiddenSplit(c.required))
 		if start != c.start || end != c.end || ok != c.ok {
 			t.Errorf("%s: SmallestCoveringSpan(%q, %q) = (%d, %d, %v), want (%d, %d, %v)", c.name, c.events, c.required, start, end, ok, c.start, c.end, c.ok)
 		}
@@ -61,7 +61,7 @@ func TestHiddenTieBreak(t *testing.T) {
 		{"a a b b a a", "a b", 1, 3},
 	}
 	for _, c := range cases {
-		start, end, ok := SmallestCoveringSpan(split(c.events), split(c.required))
+		start, end, ok := SmallestCoveringSpan(hiddenSplit(c.events), hiddenSplit(c.required))
 		if !ok || start != c.start || end != c.end {
 			t.Errorf("SmallestCoveringSpan(%q, %q) = (%d, %d, %v), want (%d, %d, true)", c.events, c.required, start, end, ok, c.start, c.end)
 		}
@@ -69,8 +69,8 @@ func TestHiddenTieBreak(t *testing.T) {
 }
 
 func TestHiddenDoesNotMutate(t *testing.T) {
-	events := split("b a c x a b")
-	required := split("a b b")
+	events := hiddenSplit("b a c x a b")
+	required := hiddenSplit("a b b")
 	eventsBefore := append([]string(nil), events...)
 	requiredBefore := append([]string(nil), required...)
 	SmallestCoveringSpan(events, required)
@@ -82,7 +82,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func covers(window []string, required []string) bool {
+func hiddenCovers(window []string, required []string) bool {
 	need := map[string]int{}
 	for _, r := range required {
 		need[r]++
@@ -98,15 +98,15 @@ func covers(window []string, required []string) bool {
 	return true
 }
 
-// brute tries every start and grows the span until it covers required.
-func brute(events, required []string) (int, int, bool) {
+// hiddenBrute tries every start and grows the span until it hiddenCovers required.
+func hiddenBrute(events, required []string) (int, int, bool) {
 	if len(required) == 0 {
 		return 0, 0, false
 	}
 	bestStart, bestEnd, found := 0, 0, false
 	for s := range events {
 		for e := s + 1; e <= len(events); e++ {
-			if covers(events[s:e], required) {
+			if hiddenCovers(events[s:e], required) {
 				if !found || e-s < bestEnd-bestStart {
 					bestStart, bestEnd, found = s, e, true
 				}
@@ -131,7 +131,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			required[i] = types[rng.Intn(len(types))]
 		}
 		gs, ge, gok := SmallestCoveringSpan(events, required)
-		ws, we, wok := brute(events, required)
+		ws, we, wok := hiddenBrute(events, required)
 		if gs != ws || ge != we || gok != wok {
 			t.Fatalf("round %d: SmallestCoveringSpan(%v, %v) = (%d, %d, %v), want (%d, %d, %v)", round, events, required, gs, ge, gok, ws, we, wok)
 		}
@@ -179,7 +179,7 @@ func TestHiddenLargeLog(t *testing.T) {
 	}
 	if a := run("two rare events", required); !a.ok || a.start != 160_000 || a.end != 265_001 {
 		t.Fatalf("two rare events: got %+v, want {160000 265001 true}", a)
-	} else if !covers(events[a.start:a.end], required) {
+	} else if !hiddenCovers(events[a.start:a.end], required) {
 		t.Fatalf("two rare events: returned span does not cover required")
 	}
 	if a := run("impossible", append([]string{"never"}, required...)); a.ok {

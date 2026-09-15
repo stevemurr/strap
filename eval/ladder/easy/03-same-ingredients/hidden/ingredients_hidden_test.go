@@ -27,7 +27,7 @@ func TestHiddenExamples(t *testing.T) {
 		{"different single", []string{"egg"}, []string{"milk"}, false},
 		{"trailing space", []string{"egg"}, []string{"egg "}, false},
 		{"empty string ingredient", []string{"", "egg"}, []string{"egg", ""}, true},
-		{"empty string count", []string{"", "", "egg"}, []string{"", "egg", "egg"}, false},
+		{"empty string hiddenCount", []string{"", "", "egg"}, []string{"", "egg", "egg"}, false},
 		{"disjoint", []string{"egg", "milk"}, []string{"flour", "salt"}, false},
 		{"partial overlap", []string{"egg", "milk", "milk"}, []string{"egg", "egg", "milk"}, false},
 		{"same set different counts", []string{"a", "a", "b"}, []string{"a", "b", "b"}, false},
@@ -56,7 +56,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func count(list []string, name string) int {
+func hiddenCount(list []string, name string) int {
 	n := 0
 	for _, v := range list {
 		if v == name {
@@ -66,12 +66,12 @@ func count(list []string, name string) int {
 	return n
 }
 
-func brute(a, b []string) bool {
+func hiddenBrute(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for _, name := range a {
-		if count(a, name) != count(b, name) {
+		if hiddenCount(a, name) != hiddenCount(b, name) {
 			return false
 		}
 	}
@@ -102,7 +102,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		} else {
 			b = pick(rng.Intn(9))
 		}
-		if got, want := SameIngredients(a, b), brute(a, b); got != want {
+		if got, want := SameIngredients(a, b), hiddenBrute(a, b); got != want {
 			t.Fatalf("round %d: SameIngredients(%q, %q) = %v, want %v", round, a, b, got, want)
 		}
 	}

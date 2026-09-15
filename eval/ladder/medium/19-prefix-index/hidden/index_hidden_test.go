@@ -101,10 +101,10 @@ func TestHiddenSingleLetters(t *testing.T) {
 	}
 }
 
-// oracle answers queries from a sorted slice of the distinct terms.
-type oracle struct{ terms []string }
+// hiddenOracle answers queries from a sorted slice of the distinct terms.
+type hiddenOracle struct{ terms []string }
 
-func newOracle(added []string) oracle {
+func hiddenNewOracle(added []string) hiddenOracle {
 	set := map[string]bool{}
 	for _, s := range added {
 		set[s] = true
@@ -114,15 +114,15 @@ func newOracle(added []string) oracle {
 		terms = append(terms, s)
 	}
 	sort.Strings(terms)
-	return oracle{terms}
+	return hiddenOracle{terms}
 }
 
-func (o oracle) contains(term string) bool {
+func (o hiddenOracle) contains(term string) bool {
 	i := sort.SearchStrings(o.terms, term)
 	return i < len(o.terms) && o.terms[i] == term
 }
 
-func (o oracle) countPrefix(prefix string) int {
+func (o hiddenOracle) countPrefix(prefix string) int {
 	lo := sort.SearchStrings(o.terms, prefix)
 	hi := sort.Search(len(o.terms), func(i int) bool {
 		return o.terms[i] > prefix && !strings.HasPrefix(o.terms[i], prefix)
@@ -130,7 +130,7 @@ func (o oracle) countPrefix(prefix string) int {
 	return hi - lo
 }
 
-func randomTerm(rng *rand.Rand, minLen, maxLen, letters int) string {
+func hiddenRandomTerm(rng *rand.Rand, minLen, maxLen, letters int) string {
 	b := make([]byte, rng.Intn(maxLen-minLen+1)+minLen)
 	for i := range b {
 		b[i] = byte('a' + rng.Intn(letters))
@@ -144,13 +144,13 @@ func TestHiddenAgainstOracle(t *testing.T) {
 		x := New()
 		var added []string
 		for i := rng.Intn(20); i > 0; i-- {
-			term := randomTerm(rng, 1, 5, 3)
+			term := hiddenRandomTerm(rng, 1, 5, 3)
 			added = append(added, term)
 			x.Add(term)
 		}
-		o := newOracle(added)
+		o := hiddenNewOracle(added)
 		for q := 0; q < 30; q++ {
-			s := randomTerm(rng, 0, 6, 3)
+			s := hiddenRandomTerm(rng, 0, 6, 3)
 			if q%2 == 0 && len(added) > 0 {
 				term := added[rng.Intn(len(added))]
 				s = term[:rng.Intn(len(term)+1)]
@@ -175,7 +175,7 @@ func TestHiddenManyTermsAndQueries(t *testing.T) {
 	added := make([]string, 0, terms+terms/5)
 	seen := map[string]bool{}
 	for len(seen) < terms {
-		term := randomTerm(rng, 3, 12, 26)
+		term := hiddenRandomTerm(rng, 3, 12, 26)
 		if seen[term] {
 			continue
 		}
@@ -191,7 +191,7 @@ func TestHiddenManyTermsAndQueries(t *testing.T) {
 	}
 	qs := make([]query, queries)
 	for i := range qs {
-		arg := randomTerm(rng, 0, 12, 26)
+		arg := hiddenRandomTerm(rng, 0, 12, 26)
 		switch rng.Intn(3) {
 		case 0:
 			arg = added[rng.Intn(len(added))]
@@ -201,7 +201,7 @@ func TestHiddenManyTermsAndQueries(t *testing.T) {
 		}
 		qs[i] = query{i % 3, arg}
 	}
-	o := newOracle(added)
+	o := hiddenNewOracle(added)
 
 	done := make(chan error, 1)
 	go func() {

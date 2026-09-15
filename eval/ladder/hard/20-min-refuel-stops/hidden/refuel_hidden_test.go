@@ -47,8 +47,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// brute tries every subset of stations in road order.
-func brute(target, startFuel int, stations [][2]int) int {
+// hiddenBrute tries every subset of stations in road order.
+func hiddenBrute(target, startFuel int, stations [][2]int) int {
 	best := -1
 	for mask := 0; mask < 1<<len(stations); mask++ {
 		reach, ok := startFuel, true
@@ -78,19 +78,19 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 		startFuel := rng.Intn(target)
 		n := rng.Intn(min(10, target-1)) + 1
 		positions := rng.Perm(target - 1)[:n]
-		sortInts(positions)
+		hiddenSortInts(positions)
 		stations := make([][2]int, n)
 		for i, p := range positions {
 			stations[i] = [2]int{p + 1, rng.Intn(12)}
 		}
-		got, want := MinRefuelStops(target, startFuel, stations), brute(target, startFuel, stations)
+		got, want := MinRefuelStops(target, startFuel, stations), hiddenBrute(target, startFuel, stations)
 		if got != want {
 			t.Fatalf("round %d: MinRefuelStops(%d, %d, %v) = %d, want %d", round, target, startFuel, stations, got, want)
 		}
 	}
 }
 
-func sortInts(a []int) {
+func hiddenSortInts(a []int) {
 	for i := 1; i < len(a); i++ {
 		for j := i; j > 0 && a[j] < a[j-1]; j-- {
 			a[j], a[j-1] = a[j-1], a[j]

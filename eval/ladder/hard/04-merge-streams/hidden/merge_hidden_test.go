@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func sameInts(got, want []int) bool {
+func hiddenSameInts(got, want []int) bool {
 	if len(got) == 0 && len(want) == 0 {
 		return true
 	}
@@ -36,7 +36,7 @@ func TestHiddenExamples(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := Merge(c.streams)
-		if !sameInts(got, c.want) {
+		if !hiddenSameInts(got, c.want) {
 			t.Errorf("%s: Merge(%v) = %v, want %v", c.name, c.streams, got, c.want)
 		}
 	}
@@ -83,7 +83,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			all = append(all, s...)
 		}
 		sort.Ints(all)
-		if got := Merge(streams); !sameInts(got, all) {
+		if got := Merge(streams); !hiddenSameInts(got, all) {
 			t.Fatalf("round %d: Merge(%v) = %v, want %v", round, streams, got, all)
 		}
 	}

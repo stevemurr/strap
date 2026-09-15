@@ -45,17 +45,17 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(toll [][]int, r, c int) int {
+func hiddenBrute(toll [][]int, r, c int) int {
 	cost := toll[r][c]
 	if r == len(toll)-1 && c == len(toll[0])-1 {
 		return cost
 	}
 	best := -1
 	if r+1 < len(toll) {
-		best = brute(toll, r+1, c)
+		best = hiddenBrute(toll, r+1, c)
 	}
 	if c+1 < len(toll[0]) {
-		if v := brute(toll, r, c+1); best < 0 || v < best {
+		if v := hiddenBrute(toll, r, c+1); best < 0 || v < best {
 			best = v
 		}
 	}
@@ -74,7 +74,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 				toll[r][c] = rng.Intn(spread)
 			}
 		}
-		got, want := CheapestRoute(toll), brute(toll, 0, 0)
+		got, want := CheapestRoute(toll), hiddenBrute(toll, 0, 0)
 		if got != want {
 			t.Fatalf("round %d: CheapestRoute(%v) = %d, want %d", round, toll, got, want)
 		}

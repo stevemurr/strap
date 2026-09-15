@@ -47,8 +47,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// brute explores every legal sequence of buys and sells day by day.
-func brute(prices []int, k int) int {
+// hiddenBrute explores every legal sequence of buys and sells day by day.
+func hiddenBrute(prices []int, k int) int {
 	var rec func(day, left int, holding bool, cost int) int
 	rec = func(day, left int, holding bool, cost int) int {
 		if day == len(prices) {
@@ -82,7 +82,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			prices[i] = rng.Intn(spread)
 		}
 		k := rng.Intn(n + 2)
-		got, want := MaxProfit(prices, k), brute(prices, k)
+		got, want := MaxProfit(prices, k), hiddenBrute(prices, k)
 		if got != want {
 			t.Fatalf("round %d: MaxProfit(%v, %d) = %d, want %d", round, prices, k, got, want)
 		}

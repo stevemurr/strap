@@ -51,7 +51,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(votes []string) (string, bool) {
+func hiddenBrute(votes []string) (string, bool) {
 	for _, v := range votes {
 		n := 0
 		for _, w := range votes {
@@ -87,7 +87,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 		}
 		got, ok := Consensus(votes)
-		want, wantOK := brute(votes)
+		want, wantOK := hiddenBrute(votes)
 		if got != want || ok != wantOK {
 			t.Fatalf("round %d: Consensus(%q) = (%q, %v), want (%q, %v)", round, votes, got, ok, want, wantOK)
 		}

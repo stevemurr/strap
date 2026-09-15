@@ -113,19 +113,19 @@ func TestHiddenErrors(t *testing.T) {
 	}
 }
 
-// gen builds random formulas straight from the grammar and computes their
+// hiddenGen builds random formulas straight from the grammar and computes their
 // value alongside, so it doubles as the oracle. divZero records that some
 // division by zero was generated, in which case an error is expected.
-type gen struct {
+type hiddenGen struct {
 	rng     *rand.Rand
 	divZero bool
 }
 
-func (g *gen) sp() string {
+func (g *hiddenGen) sp() string {
 	return strings.Repeat(" ", g.rng.Intn(3))
 }
 
-func (g *gen) expr(depth int) (string, int) {
+func (g *hiddenGen) expr(depth int) (string, int) {
 	s, v := g.term(depth)
 	for k := g.rng.Intn(3); k > 0; k-- {
 		t, tv := g.term(depth)
@@ -140,7 +140,7 @@ func (g *gen) expr(depth int) (string, int) {
 	return s, v
 }
 
-func (g *gen) term(depth int) (string, int) {
+func (g *hiddenGen) term(depth int) (string, int) {
 	s, v := g.factor(depth)
 	for k := g.rng.Intn(2); k > 0; k-- {
 		f, fv := g.factor(depth)
@@ -159,7 +159,7 @@ func (g *gen) term(depth int) (string, int) {
 	return s, v
 }
 
-func (g *gen) factor(depth int) (string, int) {
+func (g *hiddenGen) factor(depth int) (string, int) {
 	choice := g.rng.Intn(10)
 	switch {
 	case depth > 0 && choice < 2:
@@ -180,7 +180,7 @@ func (g *gen) factor(depth int) (string, int) {
 func TestHiddenAgainstGrammarOracle(t *testing.T) {
 	rng := rand.New(rand.NewSource(224))
 	for round := 0; round < 2000; round++ {
-		g := &gen{rng: rng}
+		g := &hiddenGen{rng: rng}
 		expr, want := g.expr(2)
 		expr = g.sp() + expr + g.sp()
 		got, err := Evaluate(expr)

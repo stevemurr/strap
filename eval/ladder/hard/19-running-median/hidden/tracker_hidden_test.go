@@ -64,7 +64,7 @@ func TestHiddenIndependentTrackers(t *testing.T) {
 	}
 }
 
-func sortedMedian(samples []int) float64 {
+func hiddenSortedMedian(samples []int) float64 {
 	s := append([]int(nil), samples...)
 	sort.Ints(s)
 	n := len(s)
@@ -84,7 +84,7 @@ func TestHiddenAgainstSortedCopy(t *testing.T) {
 			v := rng.Intn(spread) - spread/2
 			samples = append(samples, v)
 			tr.Add(v)
-			if got, want := tr.Median(), sortedMedian(samples); got != want {
+			if got, want := tr.Median(), hiddenSortedMedian(samples); got != want {
 				t.Fatalf("round %d: after %d samples Median() = %v, want %v", round, len(samples), got, want)
 			}
 		}
@@ -121,7 +121,7 @@ func TestHiddenLargeStream(t *testing.T) {
 						return
 					}
 				} else if checkpoints[count] {
-					if want := sortedMedian(shape.data[:count]); got != want {
+					if want := hiddenSortedMedian(shape.data[:count]); got != want {
 						done <- "after " + strconv.Itoa(count) + " samples Median() is wrong"
 						return
 					}

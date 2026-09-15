@@ -93,9 +93,9 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteOrder enumerates every permutation of the targets and keeps the
+// hiddenBruteOrder enumerates every permutation of the targets and keeps the
 // smallest one that satisfies all deps; ok is false when none does.
-func bruteOrder(targets []string, deps [][2]string) (best []string, ok bool) {
+func hiddenBruteOrder(targets []string, deps [][2]string) (best []string, ok bool) {
 	perm := slices.Clone(targets)
 	var walk func(k int)
 	walk = func(k int) {
@@ -140,7 +140,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 			deps[i] = [2]string{targets[rng.Intn(len(targets))], targets[rng.Intn(len(targets))]}
 		}
-		want, valid := bruteOrder(targets, deps)
+		want, valid := hiddenBruteOrder(targets, deps)
 		got, err := Order(targets, deps)
 		switch {
 		case !valid && err == nil:

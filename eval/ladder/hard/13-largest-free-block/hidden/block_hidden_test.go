@@ -36,7 +36,7 @@ func TestHiddenExamples(t *testing.T) {
 	}
 }
 
-func brute(grid []string) int {
+func hiddenBrute(grid []string) int {
 	best := 0
 	if len(grid) == 0 {
 		return 0
@@ -84,7 +84,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 			grid[r] = b.String()
 		}
-		got, want := LargestFreeBlock(grid), brute(grid)
+		got, want := LargestFreeBlock(grid), hiddenBrute(grid)
 		if got != want {
 			t.Fatalf("round %d: LargestFreeBlock(%q) = %d, want %d", round, grid, got, want)
 		}

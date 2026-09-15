@@ -41,8 +41,8 @@ func TestHiddenExamples(t *testing.T) {
 	}
 }
 
-// wellFormed checks a substring with a running depth.
-func wellFormed(s string) bool {
+// hiddenWellFormed checks a substring with a running depth.
+func hiddenWellFormed(s string) bool {
 	depth := 0
 	for i := 0; i < len(s); i++ {
 		if s[i] == '(' {
@@ -57,11 +57,11 @@ func wellFormed(s string) bool {
 	return depth == 0
 }
 
-func brute(markers string) int {
+func hiddenBrute(markers string) int {
 	best := 0
 	for i := 0; i < len(markers); i++ {
 		for j := i + 2; j <= len(markers); j += 2 {
-			if j-i > best && wellFormed(markers[i:j]) {
+			if j-i > best && hiddenWellFormed(markers[i:j]) {
 				best = j - i
 			}
 		}
@@ -83,7 +83,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 		}
 		s := string(b)
-		if got, want := LongestBalanced(s), brute(s); got != want {
+		if got, want := LongestBalanced(s), hiddenBrute(s); got != want {
 			t.Fatalf("round %d: LongestBalanced(%q) = %d, want %d", round, s, got, want)
 		}
 	}

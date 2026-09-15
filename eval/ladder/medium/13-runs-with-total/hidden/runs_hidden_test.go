@@ -45,7 +45,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(amounts []int, target int) int {
+func hiddenBrute(amounts []int, target int) int {
 	runs := 0
 	for i := range amounts {
 		sum := 0
@@ -69,7 +69,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			amounts[i] = rng.Intn(spread) - spread/2
 		}
 		target := rng.Intn(2*spread+1) - spread
-		got, want := RunsWithTotal(amounts, target), brute(amounts, target)
+		got, want := RunsWithTotal(amounts, target), hiddenBrute(amounts, target)
 		if got != want {
 			t.Fatalf("round %d: RunsWithTotal(%v, %d) = %d, want %d", round, amounts, target, got, want)
 		}

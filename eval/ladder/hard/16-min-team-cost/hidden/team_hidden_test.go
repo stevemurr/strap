@@ -49,8 +49,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// brute tries every team of k workers; the team's rate is its largest ratio.
-func brute(quality, wage []int, k int) float64 {
+// hiddenBrute tries every team of k workers; the team's rate is its largest ratio.
+func hiddenBrute(quality, wage []int, k int) float64 {
 	n := len(quality)
 	if k < 1 || k > n {
 		return 0
@@ -86,7 +86,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			wage[i] = rng.Intn(50) + 1
 		}
 		k := rng.Intn(n+2) - 1
-		got, want := MinTeamCost(quality, wage, k), brute(quality, wage, k)
+		got, want := MinTeamCost(quality, wage, k), hiddenBrute(quality, wage, k)
 		if math.Abs(got-want) > tolerance {
 			t.Fatalf("round %d: MinTeamCost(%v, %v, %d) = %v, want %v", round, quality, wage, k, got, want)
 		}

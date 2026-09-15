@@ -54,7 +54,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func scan(ids []int, target int) int {
+func hiddenScan(ids []int, target int) int {
 	for i, v := range ids {
 		if v == target {
 			return i
@@ -81,7 +81,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			if q%2 == 0 {
 				target = ids[rng.Intn(n)]
 			}
-			got, want := Find(ids, target), scan(ids, target)
+			got, want := Find(ids, target), hiddenScan(ids, target)
 			if got != want {
 				t.Fatalf("round %d: Find(%v, %d) = %d, want %d", round, ids, target, got, want)
 			}

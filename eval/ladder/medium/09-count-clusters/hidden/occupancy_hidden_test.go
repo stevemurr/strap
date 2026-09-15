@@ -37,9 +37,9 @@ func TestHiddenExamples(t *testing.T) {
 	}
 }
 
-// bruteClusters relabels every occupied cell with the smallest label among
+// hiddenBruteClusters relabels every occupied cell with the smallest label among
 // its neighbours until nothing changes, then counts the distinct labels.
-func bruteClusters(grid []string) int {
+func hiddenBruteClusters(grid []string) int {
 	rows := len(grid)
 	if rows == 0 || len(grid[0]) == 0 {
 		return 0
@@ -102,7 +102,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 			grid[r] = string(b)
 		}
-		if got, want := CountClusters(grid), bruteClusters(grid); got != want {
+		if got, want := CountClusters(grid), hiddenBruteClusters(grid); got != want {
 			t.Fatalf("round %d: CountClusters(%q) = %d, want %d", round, grid, got, want)
 		}
 	}

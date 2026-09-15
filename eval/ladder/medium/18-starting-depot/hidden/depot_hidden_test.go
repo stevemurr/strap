@@ -46,7 +46,7 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-func brute(fuel, cost []int) int {
+func hiddenBrute(fuel, cost []int) int {
 	n := len(fuel)
 	for s := 0; s < n; s++ {
 		tank := 0
@@ -77,7 +77,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			fuel[i] = rng.Intn(spread)
 			cost[i] = rng.Intn(spread)
 		}
-		got, want := StartingDepot(fuel, cost), brute(fuel, cost)
+		got, want := StartingDepot(fuel, cost), hiddenBrute(fuel, cost)
 		if got != want {
 			t.Fatalf("round %d: StartingDepot(%v, %v) = %d, want %d", round, fuel, cost, got, want)
 		}

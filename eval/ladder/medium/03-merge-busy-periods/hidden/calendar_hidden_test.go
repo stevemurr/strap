@@ -54,9 +54,9 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// bruteMerge marks every covered half-minute so that touching periods share a
+// hiddenBruteMerge marks every covered half-minute so that touching periods share a
 // point while periods one minute apart leave a gap, then reads off the runs.
-func bruteMerge(periods [][2]int) [][2]int {
+func hiddenBruteMerge(periods [][2]int) [][2]int {
 	if len(periods) == 0 {
 		return nil
 	}
@@ -94,7 +94,7 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			start := rng.Intn(40) - 10
 			periods[i] = [2]int{start, start + rng.Intn(7)}
 		}
-		got, want := MergeBusy(periods), bruteMerge(periods)
+		got, want := MergeBusy(periods), hiddenBruteMerge(periods)
 		if len(got) == 0 && len(want) == 0 {
 			continue
 		}

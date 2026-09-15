@@ -51,8 +51,8 @@ func TestHiddenDoesNotMutate(t *testing.T) {
 	}
 }
 
-// simulate is the minute-by-minute brute force.
-func simulate(grid []string) int {
+// hiddenSimulate is the minute-by-minute brute force.
+func hiddenSimulate(grid []string) int {
 	rows := make([][]byte, len(grid))
 	for r := range grid {
 		rows[r] = []byte(grid[r])
@@ -108,17 +108,17 @@ func TestHiddenAgainstBruteForce(t *testing.T) {
 			}
 			grid[r] = string(row)
 		}
-		got, want := SpreadTime(grid), simulate(grid)
+		got, want := SpreadTime(grid), hiddenSimulate(grid)
 		if got != want {
 			t.Fatalf("round %d: SpreadTime(%q) = %d, want %d", round, grid, got, want)
 		}
 	}
 }
 
-// serpentine builds an n x n grid whose susceptible cells form one winding
+// hiddenSerpentine builds an n x n grid whose susceptible cells form one winding
 // corridor: even rows are corridors, odd rows are walls with a single
 // connector cell at alternating ends. The infection starts at (0, 0).
-func serpentine(n int) []string {
+func hiddenSerpentine(n int) []string {
 	grid := make([]string, n)
 	for r := 0; r < n; r++ {
 		row := make([]byte, n)
@@ -159,17 +159,17 @@ func TestHiddenLargeGrid(t *testing.T) {
 	// Corridor of 500 rows of n-1 steps each plus the connectors between
 	// them: the end of corridor row 2m is 999 + 1001*m steps away, so the
 	// last row's connector at (999, 0) is 999 + 1001*499 + 1 = 500499 away.
-	if got, want := run("serpentine", serpentine(n)), 500499; got != want {
-		t.Fatalf("serpentine: got %d, want %d", got, want)
+	if got, want := run("hiddenSerpentine", hiddenSerpentine(n)), 500499; got != want {
+		t.Fatalf("hiddenSerpentine: got %d, want %d", got, want)
 	}
 
 	// Cutting the last corridor row leaves its left part unreachable.
-	cut := serpentine(n)
+	cut := hiddenSerpentine(n)
 	row := []byte(cut[n-2])
 	row[n/2] = '.'
 	cut[n-2] = string(row)
-	if got := run("cut serpentine", cut); got != -1 {
-		t.Fatalf("cut serpentine: got %d, want -1", got)
+	if got := run("cut hiddenSerpentine", cut); got != -1 {
+		t.Fatalf("cut hiddenSerpentine: got %d, want -1", got)
 	}
 
 	// Open floor: the far corner is (n-1)+(n-1) steps away.
