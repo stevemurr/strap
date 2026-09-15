@@ -22,6 +22,7 @@ type script struct {
 	calls   atomic.Int32
 	write   bool
 	block   bool
+	wait    bool // End with wait_for_input instead of a text-only reply.
 	content string
 }
 
@@ -34,6 +35,9 @@ func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Obse
 	if p.write && n == 1 {
 		args, _ := json.Marshal(map[string]string{"path": "probe.go", "content": p.content})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "write_file", Arguments: args}}}, nil
+	}
+	if p.wait {
+		return provider.Response{Content: "Done: Answer returns 42.", ToolCalls: []provider.ToolCall{{ID: "wait-1", Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
 	}
 	return provider.Response{Content: "Done: Answer returns 42."}, nil
 }
@@ -166,6 +170,26 @@ func TestRunBudgetExhausted(t *testing.T) {
 	r := results[0]
 	if !r.TimedOut || r.Outcome != eval.Failed || r.Replies != 0 || r.Grade == nil {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestRunFinishesIdleSessionWithoutReply(t *testing.T) {
+	ladder := writeLadder(t)
+	opts := options(t, ladder, &script{write: true, wait: true, content: "package probe\n\nfunc Answer() int { return 42 }\n"})
+	opts.Idle = 500 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	results, err := eval.Run(ctx, opts)
+	if err != nil || len(results) != 1 {
+		t.Fatal(results, err)
+	}
+	r := results[0]
+	if !r.NoReply || r.TimedOut || r.Replies != 0 || r.Outcome != eval.Passed || r.Duration > 1500*time.Millisecond {
+		t.Fatalf("%+v", r)
+	}
+	rep, err := eval.Analyze(ctx, opts.Output)
+	if err != nil || len(rep.Tiers) != 1 || rep.Tiers[0].NoReply != 1 || !strings.Contains(rep.Markdown(), "(no reply)") {
+		t.Fatal(rep, err)
 	}
 }
 

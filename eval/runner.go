@@ -31,6 +31,10 @@ type Options struct {
 	Filter   func(Task) bool
 	Log      io.Writer
 	Quiet    time.Duration // Silence required after the root's final reply; default 3s.
+	// Idle finishes a task whose agents are all idle with nothing queued and no
+	// root reply after this much silence, flagged NoReply; default 3m. Without
+	// it a root that ends on wait_for_input costs the whole session budget.
+	Idle time.Duration
 	// Scratch holds each live workspace while its session runs; default
 	// os.TempDir(). Keeping sessions out of the repository tree stops an agent
 	// from finding the ladder, its hidden tests and reference solutions by
@@ -56,6 +60,7 @@ type Result struct {
 	Outcome        Outcome          `json:"outcome"`
 	Passed         bool             `json:"passed"`
 	TimedOut       bool             `json:"timed_out"`
+	NoReply        bool             `json:"no_reply"`
 	Error          string           `json:"error,omitempty"`
 	StartedAt      time.Time        `json:"started_at"`
 	FinishedAt     time.Time        `json:"finished_at"`
@@ -96,6 +101,9 @@ func Run(ctx context.Context, opts Options) ([]Result, error) {
 	}
 	if opts.Quiet <= 0 {
 		opts.Quiet = 3 * time.Second
+	}
+	if opts.Idle <= 0 {
+		opts.Idle = 3 * time.Minute
 	}
 	tasks, err := LoadLadder(opts.Ladder)
 	if err != nil {
@@ -186,6 +194,9 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if opts.Quiet <= 0 {
 		opts.Quiet = 3 * time.Second
 	}
+	if opts.Idle <= 0 {
+		opts.Idle = 3 * time.Minute
+	}
 	taskDir := filepath.Join(opts.Output, task.ID)
 	r = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, StartedAt: time.Now(), Trace: filepath.Join(taskDir, "trace.jsonl"), Workspace: filepath.Join(taskDir, "workspace")}
 	defer func() {
@@ -269,16 +280,17 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 		return fail(err)
 	}
 	w := watcher{root: session.Root(), states: map[identity.ActorID]agent.State{}, working: map[identity.ActorID]bool{}, tools: map[string]bool{}, pending: map[message.MessageID]identity.ActorID{}}
-	waitErr := w.wait(ctx, session, sub, task.SessionTimeout(), opts.Quiet, func(format string, args ...any) {
+	waitErr := w.wait(ctx, session, sub, task.SessionTimeout(), opts.Quiet, opts.Idle, func(format string, args ...any) {
 		fmt.Fprintf(opts.Log, "[%s] %s\n", task.ID, fmt.Sprintf(format, args...))
 	})
 	r.TimedOut = errors.Is(waitErr, errBudget)
+	r.NoReply = errors.Is(waitErr, errNoReply)
 	r.Replies, r.Reply = w.replies, bound(w.lastReply, replyLimit)
 	cleanup()
 	if ctx.Err() != nil {
 		return fail(ctx.Err())
 	}
-	if waitErr != nil && !r.TimedOut {
+	if waitErr != nil && !r.TimedOut && !r.NoReply {
 		return fail(waitErr)
 	}
 	if err := ApplyHidden(task, workspace); err != nil {
@@ -301,6 +313,8 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 }
 
 var errBudget = errors.New("session budget exhausted")
+
+var errNoReply = errors.New("session idle without a root reply")
 
 // watcher decides when a task attempt is finished: the root has replied to the
 // user and no agent is running, no tool call is open, and no message is still
@@ -388,12 +402,18 @@ func (w *watcher) observe(e conversation.Event, logf func(string, ...any)) {
 // Only these kinds influence completion; streamed output is left undecoded.
 var watchedKinds = map[string]bool{"agent_started": true, "agent_state": true, "agent_exited": true, "tool": true, "ack": true, "message": true}
 
-func (w *watcher) wait(ctx context.Context, session *harness.Session, sub *eventlog.Subscription, budget, quiet time.Duration, logf func(string, ...any)) error {
+func (w *watcher) wait(ctx context.Context, session *harness.Session, sub *eventlog.Subscription, budget, quiet, idle time.Duration, logf func(string, ...any)) error {
 	deadline := time.Now().Add(budget)
+	last := time.Now()
 	for {
 		limit := deadline
-		if w.done() {
+		switch {
+		case w.done():
 			limit = time.Now().Add(quiet)
+		case !w.busy() && !w.replied:
+			if silent := last.Add(idle); silent.Before(limit) {
+				limit = silent
+			}
 		}
 		waitCtx, cancel := context.WithDeadline(ctx, limit)
 		e, err := sub.Next(waitCtx)
@@ -403,13 +423,18 @@ func (w *watcher) wait(ctx context.Context, session *harness.Session, sub *event
 				return ctx.Err()
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
-				if w.done() {
+				switch {
+				case w.done():
 					return nil
+				case !w.busy() && !w.replied && time.Since(last) >= idle:
+					logf("idle for %s without a root reply", idle)
+					return errNoReply
 				}
 				return errBudget
 			}
 			return fmt.Errorf("read session events: %w", err)
 		}
+		last = time.Now()
 		if !watchedKinds[e.Kind] {
 			continue
 		}

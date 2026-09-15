@@ -65,9 +65,13 @@ A task attempt is finished when the root agent has sent a reply to the user and
 nothing is still in flight: no agent is running, no tool call is open, and no
 message is queued for a live agent. Those are the same signals the TUI uses for
 its activity indicator. The attempt then has to stay silent for the quiet
-period. If the tier's session budget runs out first (15, 25 or 40 minutes by
-default, overridable per task), the session is closed and the result is marked
-`timed_out`, but the workspace is still graded.
+period. A session whose agents are all idle with nothing queued and no root
+reply for the idle period (`-idle`, default 3 minutes) is finished early and
+flagged `no_reply`; a root that ends its turn with `wait_for_input` instead of
+a reply would otherwise cost the whole budget. If the tier's session budget
+runs out first (15, 25 or 40 minutes by default, overridable per task), the
+session is closed and the result is marked `timed_out`. In every case the
+workspace is still graded.
 
 Grading copies `hidden/` into the workspace and runs
 `go test ./... -count=1 -run ^TestHidden`. The agent's own test files still

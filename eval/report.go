@@ -30,6 +30,7 @@ type TaskMetrics struct {
 	Outcome          Outcome        `json:"outcome"`
 	Passed           bool           `json:"passed"`
 	TimedOut         bool           `json:"timed_out"`
+	NoReply          bool           `json:"no_reply"`
 	Duration         time.Duration  `json:"duration_ns"`
 	Events           int            `json:"events"`
 	Agents           int            `json:"agents"`
@@ -67,6 +68,7 @@ type TierSummary struct {
 	BuildFailed     int           `json:"build_failed"`
 	Errored         int           `json:"errored"`
 	TimedOut        int           `json:"timed_out"`
+	NoReply         int           `json:"no_reply"`
 	PassRate        float64       `json:"pass_rate"`
 	MeanDuration    time.Duration `json:"mean_duration_ns"`
 	MeanModelCalls  float64       `json:"mean_model_calls"`
@@ -128,7 +130,7 @@ func Analyze(ctx context.Context, dir string) (Report, error) {
 // a run that has been moved or bundled still reports; the recorded path is
 // only a fallback.
 func analyzeTask(ctx context.Context, dir string, r Result) TaskMetrics {
-	m := TaskMetrics{TaskID: r.TaskID, Tier: r.Tier, Title: r.Title, Outcome: r.Outcome, Passed: r.Passed, TimedOut: r.TimedOut, Duration: r.Duration, ExecutionError: r.ExecutionError,
+	m := TaskMetrics{TaskID: r.TaskID, Tier: r.Tier, Title: r.Title, Outcome: r.Outcome, Passed: r.Passed, TimedOut: r.TimedOut, NoReply: r.NoReply, Duration: r.Duration, ExecutionError: r.ExecutionError,
 		Roles: map[string]int{}, ToolCalls: map[string]int{}, ToolErrors: map[string]int{}, Work: map[string]int{}, Audits: map[string]int{}, Diagnostics: map[string]int{}}
 	if r.Capture != nil {
 		m.CaptureError = r.Capture.CaptureError
@@ -300,6 +302,9 @@ func summarize(tasks []TaskMetrics) []TierSummary {
 		if t.TimedOut {
 			s.TimedOut++
 		}
+		if t.NoReply {
+			s.NoReply++
+		}
 		s.MeanDuration += t.Duration
 		s.MeanModelCalls += float64(t.ModelCalls)
 		s.MeanToolCalls += float64(t.ToolTotal)
@@ -335,10 +340,10 @@ func (r Report) Markdown() string {
 	if r.Run.Model.Model != "" {
 		fmt.Fprintf(&b, "Model %s at %s (backend %s, preset %s). Started %s, parallel %d.\n\n", r.Run.Model.Model, r.Run.Model.BaseURL, r.Run.Model.Backend, r.Run.Model.Preset, r.Run.StartedAt.Format(time.RFC3339), r.Run.Parallel)
 	}
-	b.WriteString("## Tiers\n\n| tier | tasks | passed | rate | failed | build failed | error | timed out | mean time | calls | tools | tool errs | agents | tokens in | tokens out |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("## Tiers\n\n| tier | tasks | passed | rate | failed | build failed | error | timed out | no reply | mean time | calls | tools | tool errs | agents | tokens in | tokens out |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	total := TierSummary{Tier: "all"}
 	for _, s := range r.Tiers {
-		fmt.Fprintf(&b, "| %s | %d | %d | %.0f%% | %d | %d | %d | %d | %s | %.1f | %.1f | %.1f | %.1f | %.0f | %.0f |\n", s.Tier, s.Tasks, s.Passed, 100*s.PassRate, s.Failed, s.BuildFailed, s.Errored, s.TimedOut, s.MeanDuration.Round(time.Second), s.MeanModelCalls, s.MeanToolCalls, s.MeanToolErrors, s.MeanAgents, s.MeanInputTokens, s.MeanOutput)
+		fmt.Fprintf(&b, "| %s | %d | %d | %.0f%% | %d | %d | %d | %d | %d | %s | %.1f | %.1f | %.1f | %.1f | %.0f | %.0f |\n", s.Tier, s.Tasks, s.Passed, 100*s.PassRate, s.Failed, s.BuildFailed, s.Errored, s.TimedOut, s.NoReply, s.MeanDuration.Round(time.Second), s.MeanModelCalls, s.MeanToolCalls, s.MeanToolErrors, s.MeanAgents, s.MeanInputTokens, s.MeanOutput)
 		total.Tasks += s.Tasks
 		total.Passed += s.Passed
 	}
@@ -350,6 +355,9 @@ func (r Report) Markdown() string {
 		outcome := string(t.Outcome)
 		if t.TimedOut {
 			outcome += " (timed out)"
+		}
+		if t.NoReply {
+			outcome += " (no reply)"
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %s | %d | %d | %d | %d (%d) | %d | %d | %s | %d | %s | %d | %d/%d |\n", t.TaskID, outcome, t.Duration.Round(time.Second), t.TimeToFirstReply.Round(time.Second), t.ModelCalls, t.LongestCall.Round(time.Second), t.ReasoningBytes/1024, t.OutputFailures, t.MaxContextTokens, t.ToolTotal, t.ToolErrorTotal, t.ToolCalls["shell"], t.Agents, countList(t.Roles), sumMap(t.Work), countList(t.Audits), t.Replies, t.InputTokens, t.OutputTokens)
 	}
@@ -365,6 +373,9 @@ func (r Report) Markdown() string {
 			fmt.Fprintf(&b, "- **%s** (%s): %s", t.TaskID, t.Tier, t.Outcome)
 			if t.TimedOut {
 				b.WriteString(", session budget exhausted")
+			}
+			if t.NoReply {
+				b.WriteString(", finished idle without a root reply")
 			}
 			if t.ExecutionError != "" {
 				fmt.Fprintf(&b, "; execution: %s", oneLine(t.ExecutionError))

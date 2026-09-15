@@ -121,6 +121,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	out := fs.String("out", "", "Run directory (default eval/results/<timestamp>)")
 	parallel := fs.Int("parallel", 1, "Concurrent sessions")
 	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
+	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
 	scratch := fs.String("scratch", "", "Parent directory for live workspaces while sessions run (default the system temp directory)")
 	configPath := fs.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
 	profile := fs.String("profile", "", "Saved model profile (default selected by the catalog)")
@@ -149,7 +150,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 		*out = filepath.Join("eval", "results", time.Now().Format("20060102-150405"))
 	}
 	fmt.Fprintf(stderr, "model %s at %s; results in %s\n", cfg.Model.Model, cfg.Model.BaseURL, *out)
-	results, err := eval.Run(ctx, eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Scratch: *scratch})
+	results, err := eval.Run(ctx, eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch})
 	if len(results) > 0 {
 		passed := 0
 		for _, r := range results {
