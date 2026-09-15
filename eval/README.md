@@ -37,11 +37,18 @@ eval/results/<run>/
   <task-id>/
     trace.jsonl         the session recording (same format as strap -record)
     workspace/          the agent's module, plus the hidden tests copied in afterwards
+                        (during the session it lives under the system temp directory)
     result.json         outcome, grade output, final root reply, capture health
 ```
 
 Interrupting a run leaves finished tasks in place; rerunning with the same
 `-out` reuses every task that already has a `result.json`.
+
+While a session runs, its workspace lives in a fresh directory under the
+system temp directory (`-scratch` overrides the parent), not under `-out`. An
+agent that explores upward from its working directory therefore finds other
+temporary workspaces at most, never the repository with the ladder's hidden
+tests and reference solutions. The workspace moves under `-out` after grading.
 
 Keep runs that feed one write-up together in a bundle directory named after
 that write-up, for example

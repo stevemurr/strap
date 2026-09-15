@@ -31,6 +31,12 @@ type Options struct {
 	Filter   func(Task) bool
 	Log      io.Writer
 	Quiet    time.Duration // Silence required after the root's final reply; default 3s.
+	// Scratch holds each live workspace while its session runs; default
+	// os.TempDir(). Keeping sessions out of the repository tree stops an agent
+	// from finding the ladder, its hidden tests and reference solutions by
+	// walking up from its working directory. The workspace moves under Output
+	// once the task is graded.
+	Scratch string
 }
 
 // Outcome classifies a task attempt by its grade, not by how the session ended.
@@ -170,9 +176,9 @@ func Run(ctx context.Context, opts Options) ([]Result, error) {
 	return results, ctx.Err()
 }
 
-// RunTask runs one task in <Output>/<task id>/: workspace/ holds the agent's
-// module, trace.jsonl the session recording, and the hidden tests are copied
-// into the workspace after the session closes.
+// RunTask runs one task. The agent works in a temporary directory under
+// Scratch; afterwards <Output>/<task id>/ holds that workspace with the hidden
+// tests copied in, trace.jsonl and result.json.
 func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if opts.Log == nil {
 		opts.Log = io.Discard
@@ -198,11 +204,32 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if err := os.Remove(r.Trace); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fail(err)
 	}
-	if err := Materialize(task, r.Workspace); err != nil {
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		return fail(err)
+	}
+	scratch := opts.Scratch
+	if scratch == "" {
+		scratch = os.TempDir()
+	}
+	live, err := os.MkdirTemp(scratch, "strap-eval-"+task.ID+"-")
+	if err != nil {
+		return fail(err)
+	}
+	defer os.RemoveAll(live)
+	workspace := filepath.Join(live, "workspace")
+	defer func() {
+		// Keep whatever the agent left, graded or not, beside the trace.
+		if err := os.Rename(workspace, r.Workspace); err != nil {
+			if err := copyTree(workspace, r.Workspace); err != nil {
+				fmt.Fprintf(opts.Log, "[%s] keep workspace: %v\n", task.ID, err)
+			}
+		}
+	}()
+	if err := Materialize(task, workspace); err != nil {
 		return fail(err)
 	}
 	cfg := opts.Config.Clone()
-	cfg.Dir = r.Workspace
+	cfg.Dir = workspace
 	cfg.Web = nil
 	cfg.LocalTools = true
 	cfg.Events.JSONLPath = r.Trace
@@ -254,10 +281,10 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if waitErr != nil && !r.TimedOut {
 		return fail(waitErr)
 	}
-	if err := ApplyHidden(task, r.Workspace); err != nil {
+	if err := ApplyHidden(task, workspace); err != nil {
 		return fail(err)
 	}
-	grade, err := RunHiddenTests(ctx, task, r.Workspace)
+	grade, err := RunHiddenTests(ctx, task, workspace)
 	if err != nil {
 		return fail(err)
 	}

@@ -65,7 +65,7 @@ func options(t *testing.T, ladder string, p provider.Provider) eval.Options {
 	t.Helper()
 	cfg := harness.DefaultConfig()
 	cfg.Web = nil
-	return eval.Options{Config: cfg, Deps: harness.Dependencies{Provider: p}, Ladder: ladder, Output: filepath.Join(t.TempDir(), "run"), Log: testWriter{t}, Quiet: 200 * time.Millisecond}
+	return eval.Options{Config: cfg, Deps: harness.Dependencies{Provider: p}, Ladder: ladder, Output: filepath.Join(t.TempDir(), "run"), Scratch: t.TempDir(), Log: testWriter{t}, Quiet: 200 * time.Millisecond}
 }
 
 type testWriter struct{ t *testing.T }
@@ -103,6 +103,15 @@ func TestRunPassesAndResumes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(opts.Output, r.TaskID, "workspace", "probe_hidden_test.go")); err != nil {
 		t.Fatal("hidden test not applied:", err)
+	}
+	// The session ran in the scratch directory, not under the run directory,
+	// and nothing was left behind there once the workspace moved.
+	trace, _ := os.ReadFile(r.Trace)
+	if !strings.Contains(string(trace), opts.Scratch) || strings.Contains(string(trace), filepath.Join(opts.Output, r.TaskID, "workspace")) {
+		t.Fatal("session did not run in the scratch directory")
+	}
+	if left, _ := os.ReadDir(opts.Scratch); len(left) != 0 {
+		t.Fatalf("scratch not cleaned: %v", left)
 	}
 	lines, _ := os.ReadFile(filepath.Join(opts.Output, "results.jsonl"))
 	if strings.Count(string(lines), "\n") != 1 {
