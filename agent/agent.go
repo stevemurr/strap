@@ -77,6 +77,15 @@ type Agent struct {
 	usage          usageTracker
 	started        atomic.Bool
 	control        lifecycle
+	repeated       repeatedCall
+}
+
+// repeatedCall counts consecutive tool calls with the same name and the same
+// argument bytes, across batches. A model that re-issues one rejected call
+// verbatim can otherwise spend an entire session budget on it.
+type repeatedCall struct {
+	key   string
+	count int
 }
 
 func New(config Config) (*Agent, error) {
@@ -125,6 +134,14 @@ func New(config Config) (*Agent, error) {
 // nothing entered history, so asking again is safe; a persistent failure still
 // ends the agent.
 const maxMalformedCalls = 2
+
+// repeatedCallHint is the consecutive identical call at which the tool result
+// starts carrying a notice; maxRepeatedCalls ends the agent. Calls that differ
+// in any argument byte, such as a revision, restart the count.
+const (
+	repeatedCallHint = 3
+	maxRepeatedCalls = 12
+)
 
 // Run starts exactly one loop. A text response ends an exchange, not the agent.
 // Each tool batch settles before inbox input is consumed and another model call
@@ -270,6 +287,17 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 				}
 				if err != nil && result.Execution == nil {
 					result.Content = append(result.Content, tool.Text("Tool error: "+err.Error()).Content...)
+				}
+				if key := call.Name + "\x00" + string(call.Arguments); key == a.repeated.key {
+					a.repeated.count++
+				} else {
+					a.repeated = repeatedCall{key: key, count: 1}
+				}
+				if a.repeated.count >= maxRepeatedCalls {
+					return fmt.Errorf("tool %s called %d times in a row with identical arguments; stopping", call.Name, a.repeated.count)
+				}
+				if a.repeated.count >= repeatedCallHint {
+					result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with identical arguments. If the result is not what you need, change the arguments or the approach instead of repeating the call; after %d identical calls this agent stops.", a.repeated.count, call.Name, maxRepeatedCalls)).Content...)
 				}
 				toolRevision, err = a.appendHistory(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,
