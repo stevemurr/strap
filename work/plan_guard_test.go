@@ -26,3 +26,36 @@ func TestAddedStepWithLiveTitleNamesTheExistingStep(t *testing.T) {
 		t.Fatalf("creation guarded: %v", err)
 	}
 }
+
+// Edits that change nothing are rejected and consume no revision, so a model
+// re-sending a step's current values gets an error instead of a fresh
+// revision to re-send it with.
+func TestNoOpPlanEditsAreRejected(t *testing.T) {
+	s := New()
+	p, err := s.UpdatePlan("root", PlanUpdate{Title: ptr("Plan"), Steps: []StepEdit{{Title: ptr("Implement"), AcceptanceCriteria: ptr([]string{"builds"})}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := p.Revision
+	same := StepEdit{ID: &p.Steps[0].ID, Title: ptr("Implement"), AcceptanceCriteria: ptr([]string{"builds"})}
+	if _, err := s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: &rev, Steps: []StepEdit{same}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("no-op step edit accepted: %v", err)
+	}
+	titleOnly := StepEdit{ID: &p.Steps[0].ID, Title: ptr(" Implement ")}
+	if _, err := s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: &rev, Steps: []StepEdit{titleOnly}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("whitespace-only title change accepted: %v", err)
+	}
+	if _, err := s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: &rev, Title: ptr("Plan")}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("no-op rename accepted: %v", err)
+	}
+	if got, err := s.GetPlan("root", p.ID); err != nil || got.Revision != rev {
+		t.Fatal("rejected edits must not consume a revision", got.Revision, rev, err)
+	}
+	if _, err := s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: &rev, Order: []StepID{p.Steps[0].ID}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("no-op reorder accepted: %v", err)
+	}
+	criteria := StepEdit{ID: &p.Steps[0].ID, AcceptanceCriteria: ptr([]string{"builds", "vets"})}
+	if p, err = s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: &rev, Steps: []StepEdit{criteria}}); err != nil || p.Revision != rev+1 {
+		t.Fatal("real change rejected", err)
+	}
+}

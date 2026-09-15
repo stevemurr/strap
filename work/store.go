@@ -225,6 +225,9 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 		if blank(*u.Title) {
 			return Plan{}, invalid("empty title")
 		}
+		if strings.TrimSpace(*u.Title) == strings.TrimSpace(p.Title) {
+			return Plan{}, fmt.Errorf("%w: plan %s already has title %q; nothing to change", ErrInvalid, p.ID, p.Title)
+		}
 		p.Title = *u.Title
 	}
 	seen := map[StepID]bool{}
@@ -264,14 +267,23 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 		if p.Steps[i].Status == Completed {
 			return Plan{}, fmt.Errorf("%w: step %s is completed; omit completed steps from edits", ErrState, *edit.ID)
 		}
+		// A model that re-sends a step's current values reads the new revision
+		// as progress and sends them again; one session did so 155 times. An
+		// edit that changes nothing is an error and consumes no revision.
+		changed := false
 		if edit.Title != nil {
 			if blank(*edit.Title) {
 				return Plan{}, invalid("empty step title")
 			}
+			changed = changed || strings.TrimSpace(*edit.Title) != strings.TrimSpace(p.Steps[i].Title)
 			p.Steps[i].Title = *edit.Title
 		}
 		if edit.AcceptanceCriteria != nil {
+			changed = changed || !slices.Equal(*edit.AcceptanceCriteria, p.Steps[i].AcceptanceCriteria)
 			p.Steps[i].AcceptanceCriteria = slices.Clone(*edit.AcceptanceCriteria)
+		}
+		if !changed {
+			return Plan{}, fmt.Errorf("%w: step %s already has that title and acceptance criteria; nothing to change", ErrInvalid, *edit.ID)
 		}
 	}
 	for _, id := range u.Cancel {
@@ -304,6 +316,9 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 			}
 			seen[id] = true
 			ordered = append(ordered, p.Steps[i])
+		}
+		if slices.EqualFunc(ordered, p.Steps, func(a, b Step) bool { return a.ID == b.ID }) {
+			return Plan{}, fmt.Errorf("%w: steps are already in that order; nothing to change", ErrInvalid)
 		}
 		p.Steps = ordered
 	}
