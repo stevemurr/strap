@@ -1,0 +1,9 @@
+{
+  "id": "hard-16-min-team-cost",
+  "tier": "hard",
+  "title": "Cheapest team of k workers at one pay rate",
+  "insight": "LeetCode 857 Minimum Cost to Hire K Workers: sort workers by wage/quality ratio, sweep with a max-heap holding the k smallest qualities, O(n log n)",
+  "prompt": "Can you implement MinTeamCost in team.go for the hiring marketplace? The contract is in README.md, including the payment rules and the 100,000-worker requirement. Keep the package name and the exported signature intact, use the standard library only, and make sure `go build ./...` and `go vet ./...` pass before you finish.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

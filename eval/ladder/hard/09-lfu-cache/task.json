@@ -1,0 +1,9 @@
+{
+  "id": "hard-09-lfu-cache",
+  "tier": "hard",
+  "title": "Least-frequently-used template cache",
+  "insight": "LeetCode 460 LFU Cache: hash map from key to node plus one recency-ordered list per use count and a tracked minimum count, giving O(1) get, put and eviction",
+  "prompt": "The rendering service's compiled-template cache lives in cache.go and is still a stub. Please implement the Cache type as README.md specifies: fixed capacity, least-frequently-used eviction with least-recently-used tie-breaking, and constant-time operations even at 50,000 entries. Keep the package name and exported API exactly as they are, use only the standard library, and confirm that `go build ./...` and `go vet ./...` succeed.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

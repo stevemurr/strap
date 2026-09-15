@@ -1,0 +1,9 @@
+{
+  "id": "easy-06-best-single-trade",
+  "tier": "easy",
+  "title": "Best single buy-then-sell on a price history",
+  "insight": "LeetCode 121 Best Time to Buy and Sell Stock: track the running minimum and the best profit in one pass",
+  "prompt": "For the backtesting notebook we need BestTrade in trade.go to return the most profitable single buy-then-sell on a price series; README.md has the exact rules, including how ties are broken. Keep package trading and the exported signature exactly as they are, use the standard library only, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

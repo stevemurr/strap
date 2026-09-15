@@ -1,0 +1,9 @@
+{
+  "id": "medium-16-zero-sum-triples",
+  "tier": "medium",
+  "title": "Zero-sum triples of reconciliation deltas",
+  "insight": "LeetCode 15 3Sum: sort, fix the smallest value, walk two pointers inward, skip duplicate values, O(n^2)",
+  "prompt": "Reconciliation needs ZeroSumTriples implemented in triples.go. The exact output ordering, the de-duplication rules and the input sizes are in README.md. Keep the package name and exported signature, standard library only, and run `go build ./...` and `go vet ./...` before you hand it back.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

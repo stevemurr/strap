@@ -1,0 +1,9 @@
+{
+  "id": "medium-17-find-in-rotated",
+  "tier": "medium",
+  "title": "Find an id in a rotated log ring",
+  "insight": "LeetCode 33 Search in Rotated Sorted Array: binary search that decides which half is sorted and whether the target lies in it",
+  "prompt": "The ring-buffer crash log needs a lookup: implement Find in find.go according to README.md, which explains the rotated ordering and how many lookups we do per run. Please don't change the package name or exported signature, use just the standard library, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

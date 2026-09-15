@@ -1,0 +1,9 @@
+{
+  "id": "medium-05-longest-distinct-streak",
+  "tier": "medium",
+  "title": "Longest run of packets with unique ids",
+  "insight": "LeetCode 3 Longest Substring Without Repeating Characters: sliding window with a last-seen index map",
+  "prompt": "Can you implement LongestDistinctStreak in packets.go? README.md has the contract, the edge cases and the performance target for a million packet ids. Please keep the package name and exported signature unchanged, use nothing outside the standard library, and verify with `go build ./...` and `go vet ./...`.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "medium-20-expand-pattern",
+  "tier": "medium",
+  "title": "Expand a fixture pattern",
+  "insight": "LeetCode 394 Decode String: a stack of (count, buffer) frames or recursive descent, checking the length budget before each repeat",
+  "prompt": "Our fixture loader needs its pattern expander. Implement Expand in expand.go per README.md, including every error case and the size limit it lists. Keep the package name and exported signature, use the standard library only, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

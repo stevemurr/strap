@@ -1,0 +1,9 @@
+{
+  "id": "easy-14-assemble-from-parts",
+  "tier": "easy",
+  "title": "Can a unit be assembled from the bin",
+  "insight": "LeetCode 383 Ransom Note: count the available parts in a hash map and take one off per needed part",
+  "prompt": "The kitting station module in this directory is missing its CanAssemble implementation in assembly.go. Read README.md for the contract and implement it, keeping the package name and the exported signature unchanged and using the standard library only. Please confirm `go build ./...` and `go vet ./...` both pass before you hand it back.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

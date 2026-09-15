@@ -1,0 +1,9 @@
+{
+  "id": "easy-18-shared-key-prefix",
+  "tier": "easy",
+  "title": "Longest prefix shared by a group of keys",
+  "insight": "LeetCode 14 Longest Common Prefix: shrink a candidate prefix against every key, stopping at the first differing byte",
+  "prompt": "We need SharedPrefix in prefix.go working for the config admin UI; README.md is the spec, including how empty and single-key groups behave. Keep the config package name and the exported signature untouched, use only the standard library, and check that `go build ./...` and `go vet ./...` come back clean.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

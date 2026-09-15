@@ -1,0 +1,9 @@
+{
+  "id": "hard-08-infer-collation",
+  "tier": "hard",
+  "title": "Infer a partner's letter ordering from a sorted word list",
+  "insight": "LeetCode 269 Alien Dictionary: adjacent word pairs give precedence edges between letters, then Kahn's topological sort picking the smallest ready letter; cycles and prefix violations are errors",
+  "prompt": "We need InferOrder in order.go to reconstruct a partner's alphabet ordering from a word list they sorted with it. README.md is the contract: which order to return when several fit, what counts as an error, and the 100,000-word performance target. Keep the package name and exported signature as they are, standard library only, and ensure `go build ./...` and `go vet ./...` are clean.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

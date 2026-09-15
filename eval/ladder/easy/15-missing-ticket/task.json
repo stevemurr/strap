@@ -1,0 +1,9 @@
+{
+  "id": "easy-15-missing-ticket",
+  "tier": "easy",
+  "title": "Find the ticket number missing from the log",
+  "insight": "LeetCode 268 Missing Number: XOR (or sum) of 0..n against the logged values; everything present cancels out",
+  "prompt": "Can you implement Missing in tickets.go? README.md describes the ticket log format and the one number we need back. Don't rename the package or change the exported signature, stay within the standard library, and run `go build ./...` and `go vet ./...` to make sure everything is clean.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "hard-03-smallest-covering-span",
+  "tier": "hard",
+  "title": "Smallest span of events covering a required mix",
+  "insight": "LeetCode 76 Minimum Window Substring: sliding window with a count of missing types, advance the right end to satisfy, shrink the left end while satisfied, O(n) overall",
+  "prompt": "Can you implement SmallestCoveringSpan in span.go for the incident tooling? The contract, tie-breaking rule and the million-event performance target are all in README.md. Keep the package name and exported signature intact, stick to the standard library, and confirm `go build ./...` and `go vet ./...` are clean before you finish.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "hard-18-justify-lines",
+  "tier": "hard",
+  "title": "Fully justify text for a fixed-width printer",
+  "insight": "LeetCode 68 Text Justification: greedy line packing, then distribute width minus text length across the gaps with the leftmost gaps taking the remainder",
+  "prompt": "Our receipt-printer driver needs Justify in justify.go implemented according to README.md, which pins down the packing and spacing rules and the volume of text it must handle. Please keep the package name and exported signature as they are, use only the standard library, and ensure `go build ./...` and `go vet ./...` pass before you're done.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

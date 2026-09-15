@@ -1,0 +1,9 @@
+{
+  "id": "medium-08-longest-improvement",
+  "tier": "medium",
+  "title": "Longest run of strictly improving scores",
+  "insight": "LeetCode 300 Longest Increasing Subsequence: patience sorting with binary search over the tails array, O(n log n)",
+  "prompt": "Please write LongestImprovement in scores.go as described in README.md. The performance section matters: it has to handle 300,000 scores quickly, so the textbook quadratic approach won't do. Keep the package name and exported signature, standard library only, and confirm `go build ./...` and `go vet ./...` pass.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

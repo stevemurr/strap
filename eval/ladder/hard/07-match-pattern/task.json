@@ -1,0 +1,9 @@
+{
+  "id": "hard-07-match-pattern",
+  "tier": "hard",
+  "title": "Whole-name wildcard matching for deploy manifests",
+  "insight": "LeetCode 44 Wildcard Matching: greedy scan that remembers the last star and retries from it on mismatch (or an O(n*m) DP), never exponential backtracking",
+  "prompt": "The artifact store's manifest selector needs Match in match.go. README.md defines the two wildcards, the whole-name rule and a performance requirement for long names against star-heavy patterns. Please keep the package name and exported signature unchanged, use the standard library only, and verify that `go build ./...` and `go vet ./...` pass before handing it back.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

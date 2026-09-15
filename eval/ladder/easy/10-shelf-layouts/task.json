@@ -1,0 +1,9 @@
+{
+  "id": "easy-10-shelf-layouts",
+  "tier": "easy",
+  "title": "Count box layouts that exactly fill a shelf",
+  "insight": "LeetCode 70 Climbing Stairs: Fibonacci recurrence computed iteratively in O(n)",
+  "prompt": "The warehouse planner wants to know how many distinct ways a shelf can be filled with our 1-unit and 2-unit boxes. Implement Layouts in layouts.go as specified in README.md, keep package shelving and the exported signature as they are, use only the standard library, and confirm that `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

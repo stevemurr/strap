@@ -1,0 +1,9 @@
+{
+  "id": "easy-01-budget-pair",
+  "tier": "easy",
+  "title": "Spend a gift card exactly with two items",
+  "insight": "LeetCode 1 Two Sum: one pass with a hash map from price to first index",
+  "prompt": "There's a small Go module in this directory for our gift-card checkout. Please implement PairForBudget in budget.go according to README.md. Keep the package name, file name and exported signature as they are, stick to the standard library, and make sure `go build ./...` and `go vet ./...` pass before you finish.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

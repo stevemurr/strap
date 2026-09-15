@@ -1,0 +1,9 @@
+{
+  "id": "hard-01-rolling-peak",
+  "tier": "hard",
+  "title": "Peak reading per rolling window",
+  "insight": "LeetCode 239 Sliding Window Maximum: monotonic deque of candidate indexes, O(n) overall",
+  "prompt": "The dashboards team needs PeakPerWindow in peak.go implemented; README.md has the full contract, including the performance requirement for a million readings. Keep the package name and exported signature unchanged, use only the standard library, and verify with `go build ./...` and `go vet ./...` plus whatever tests you find useful.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

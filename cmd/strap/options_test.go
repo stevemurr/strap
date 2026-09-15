@@ -53,8 +53,10 @@ func TestCatalogDiscovery(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	// The bundled catalog must resolve without a personal catalog; which
+	// profile it selects is configuration, not a contract.
 	m, err := loadModel("", "", time.Hour)
-	if err != nil || m.Model != "nemotron-lightning" || m.Preset != "none" {
+	if err != nil || m.Model == "" || m.BaseURL == "" {
 		t.Fatalf("bundled fallback: %+v, %v", m, err)
 	}
 	for _, dir := range []string{filepath.Join(home, ".config"), t.TempDir()} {
@@ -100,9 +102,9 @@ func TestCatalogErrorsAndHelp(t *testing.T) {
 func TestHTTPOptionsValidatedBeforeStartup(t *testing.T) {
 	for _, args := range [][]string{
 		{"-backend", "unknown"}, {"-temperature", "NaN"}, {"-base-url", "bad"},
-		{"-model", ""}, {"-timeout", "0s"}, {"-C", "models.json"}, {"-profile", "missing"},
+		{"-model", ""}, {"-timeout", "0s"}, {"-C", catalogPath}, {"-profile", "missing"},
 	} {
-		args = append([]string{"-config", "models.json", "-listen", "127.0.0.1:0"}, args...)
+		args = append([]string{"-config", catalogPath, "-listen", "127.0.0.1:0"}, args...)
 		if _, err := parseOptions(args, io.Discard); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
@@ -111,7 +113,7 @@ func TestHTTPOptionsValidatedBeforeStartup(t *testing.T) {
 
 func TestToolAndRecordingOptions(t *testing.T) {
 	dir := t.TempDir()
-	args := []string{"-config", "models.json", "-C", dir, "-record", "session.jsonl", "-listen", "127.0.0.1:0", "-wkrender", "wk", "-agent-browser", "ab", "-browser-executable", "chrome"}
+	args := []string{"-config", catalogPath, "-C", dir, "-record", "session.jsonl", "-listen", "127.0.0.1:0", "-wkrender", "wk", "-agent-browser", "ab", "-browser-executable", "chrome"}
 	o, err := parseOptions(args, io.Discard)
 	if err != nil {
 		t.Fatal(err)

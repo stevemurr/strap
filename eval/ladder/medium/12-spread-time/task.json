@@ -1,0 +1,9 @@
+{
+  "id": "medium-12-spread-time",
+  "tier": "medium",
+  "title": "Minutes for an infection to spread across a rack",
+  "insight": "LeetCode 994 Rotting Oranges: multi-source breadth-first search from every infected cell, one BFS level per minute",
+  "prompt": "Ops asked for a spread-time estimate for the outbreak simulator in this module. Implement SpreadTime in spread.go as specified in README.md; the README also has the grid format and the performance target. Don't change the package name or the exported signature, standard library only, and check that `go build ./...` and `go vet ./...` are clean.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

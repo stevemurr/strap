@@ -1,0 +1,9 @@
+{
+  "id": "hard-04-merge-streams",
+  "tier": "hard",
+  "title": "Merge many sorted feeds into one timeline",
+  "insight": "LeetCode 23 Merge k Sorted Lists: min-heap of one head per stream, pop the smallest and push that stream's next, O(n log k)",
+  "prompt": "The activity service needs Merge in merge.go implemented so that any number of already-sorted feeds come out as one sorted timeline. README.md describes the contract and the size the hidden checks run at, so please read it first. Leave the package name and exported signature as they are, use only the standard library, and make sure `go build ./...` and `go vet ./...` succeed.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

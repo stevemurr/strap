@@ -1,0 +1,9 @@
+{
+  "id": "easy-04-balanced-template",
+  "tier": "easy",
+  "title": "Check delimiter nesting in a page template",
+  "insight": "LeetCode 20 Valid Parentheses: push openers on a stack and match each closer against the top",
+  "prompt": "The template linter in this module still has Balanced in balanced.go stubbed out. Implement it as described in README.md, keeping package templates and the exported signature as they are and using nothing outside the standard library. `go build ./...` and `go vet ./...` need to pass before you hand it back.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

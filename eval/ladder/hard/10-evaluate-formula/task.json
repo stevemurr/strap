@@ -1,0 +1,9 @@
+{
+  "id": "hard-10-evaluate-formula",
+  "tier": "hard",
+  "title": "Evaluate integer pricing formulas",
+  "insight": "LeetCode 224 Basic Calculator (with * and /): recursive descent or a shunting-yard operator stack over the precedence grammar, one linear pass, no string rewriting",
+  "prompt": "Please implement Evaluate in evaluate.go for the pricing rules engine. README.md lays out the grammar, precedence, truncating division, what has to be rejected with an error, and how deep the nesting can get in the performance check. Don't change the package name or the exported signature, use only the standard library, and make sure `go build ./...` and `go vet ./...` both pass.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

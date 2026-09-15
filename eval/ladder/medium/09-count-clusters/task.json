@@ -1,0 +1,9 @@
+{
+  "id": "medium-09-count-clusters",
+  "tier": "medium",
+  "title": "Count clusters of occupied desks",
+  "insight": "LeetCode 200 Number of Islands: flood fill with an explicit stack and a visited bitmap",
+  "prompt": "We need CountClusters in occupancy.go for the floor-plan tool. README.md gives the contract and the grid sizes it must cope with, including a fully occupied 1000x1000 floor. Keep the package name and exported signature exactly as they are, use only the standard library, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

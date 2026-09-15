@@ -1,0 +1,9 @@
+{
+  "id": "medium-11-days-until-higher",
+  "tier": "medium",
+  "title": "Days until a higher closing price",
+  "insight": "LeetCode 739 Daily Temperatures: monotonic stack of unresolved indexes, popped when a higher price arrives, O(n)",
+  "prompt": "We show a \"days until a higher close\" column on the pricing dashboard and need the backing function. Please implement DaysUntilHigher in prices.go following the contract in README.md, keeping the package name and exported signature, using only the standard library, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

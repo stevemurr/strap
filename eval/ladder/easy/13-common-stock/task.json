@@ -1,0 +1,9 @@
+{
+  "id": "easy-13-common-stock",
+  "tier": "easy",
+  "title": "Units stocked in both warehouses",
+  "insight": "LeetCode 350 Intersection of Two Arrays II: count one list in a hash map, consume counts while scanning the other, sort the matches",
+  "prompt": "I need CommonStock in stock.go filled in for the inventory reconciliation job; the contract, including how duplicates and ordering work, is in README.md. Keep the inventory package name and the exported signature exactly as they are, use only the standard library, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

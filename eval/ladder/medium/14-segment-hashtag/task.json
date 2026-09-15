@@ -1,0 +1,9 @@
+{
+  "id": "medium-14-segment-hashtag",
+  "tier": "medium",
+  "title": "Segment a hashtag into dictionary words",
+  "insight": "LeetCode 139 Word Break: dynamic programming over prefixes with back-pointers instead of exhaustive backtracking",
+  "prompt": "The feed team wants hashtags split back into words. Can you implement Segment in segment.go per README.md? Any valid segmentation is fine, but it has to cope with the adversarial input described there. Keep the package and exported signature unchanged, no third-party dependencies, and verify with `go build ./...` and `go vet ./...`.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

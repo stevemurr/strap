@@ -1,0 +1,9 @@
+{
+  "id": "hard-17-min-largest-shard",
+  "tier": "hard",
+  "title": "Balance ordered batches across shards",
+  "insight": "LeetCode 410 Split Array Largest Sum: binary search on the answer between max(sizes) and sum(sizes) with a greedy feasibility count, O(n log sum)",
+  "prompt": "The index builder's MinLargestShard in shard.go is still a stub; README.md has the precise contract and the million-batch performance requirement. Please implement it in place, keeping the package name and exported signature, standard library only, and confirm `go build ./...` and `go vet ./...` pass.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

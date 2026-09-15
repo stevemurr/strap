@@ -1,0 +1,9 @@
+{
+  "id": "medium-18-starting-depot",
+  "tier": "medium",
+  "title": "Starting depot for a circular delivery route",
+  "insight": "LeetCode 134 Gas Station: one pass moving the candidate start past every point where the tank goes negative; a loop exists iff total fuel >= total cost",
+  "prompt": "Routing needs StartingDepot in depot.go implemented; README.md defines the circular route, the feasibility rule and the tie-break. Keep the package name and the exported signature unchanged and use only the standard library. `go build ./...` and `go vet ./...` should pass when you're done.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

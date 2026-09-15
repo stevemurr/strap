@@ -1,0 +1,9 @@
+{
+  "id": "hard-12-later-lower-counts",
+  "tier": "hard",
+  "title": "Count later days with a lower price",
+  "insight": "LeetCode 315 Count of Smaller Numbers After Self: sweep from the right with a Fenwick tree over compressed values (or count inversions during merge sort), O(n log n)",
+  "prompt": "The price-history page needs LaterLowerCounts implemented in counts.go; README.md spells out the contract and the size of series it has to handle. Keep the package name and exported signature unchanged and stay within the standard library. Before you finish, please make sure `go build ./...` and `go vet ./...` are clean.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

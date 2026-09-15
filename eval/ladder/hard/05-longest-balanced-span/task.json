@@ -1,0 +1,9 @@
+{
+  "id": "hard-05-longest-balanced-span",
+  "tier": "hard",
+  "title": "Longest well-formed run of brackets",
+  "insight": "LeetCode 32 Longest Valid Parentheses: stack of unmatched indexes (or two counter passes, left to right and right to left), O(n) time",
+  "prompt": "I need LongestBalanced in balanced.go written for the template linter. README.md has the exact contract, the examples and the five-million-byte performance requirement. Please don't change the package name or the exported signature, don't pull in anything beyond the standard library, and check that `go build ./...` and `go vet ./...` pass.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "medium-03-merge-busy-periods",
+  "tier": "medium",
+  "title": "Merge overlapping busy periods",
+  "insight": "LeetCode 56 Merge Intervals: sort a copy by start, then sweep and extend the current block",
+  "prompt": "Please implement MergeBusy in calendar.go for the scheduling service. README.md describes exactly how busy periods merge and what the output has to look like. Don't change the package name or the exported signature, stay within the standard library, and check that `go build ./...` and `go vet ./...` both succeed.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

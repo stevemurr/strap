@@ -1,0 +1,9 @@
+{
+  "id": "easy-12-symmetric-code",
+  "tier": "easy",
+  "title": "Promo codes that read the same backwards",
+  "insight": "LeetCode 125 Valid Palindrome: two pointers from both ends, skipping non-alphanumeric bytes and folding case",
+  "prompt": "Our promo-code service has a stub for IsSymmetric in promo.go; README.md spells out exactly which characters count and what happens with empty input. Could you implement it? Please keep the package name and exported signature, use nothing beyond the standard library, and check that `go build ./...` and `go vet ./...` are clean when you're done.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

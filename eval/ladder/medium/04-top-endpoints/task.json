@@ -1,0 +1,9 @@
+{
+  "id": "medium-04-top-endpoints",
+  "tier": "medium",
+  "title": "Busiest endpoints in an access log",
+  "insight": "LeetCode 347 Top K Frequent Elements: count with a map, then order the distinct keys by count descending and name ascending",
+  "prompt": "We need TopEndpoints in traffic.go for the API analytics page. The contract in README.md covers the ordering, the tie-break and the size of the logs it has to handle. Keep the package name and exported signature as they are, standard library only, and make sure `go build ./...` and `go vet ./...` pass before you hand it back.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

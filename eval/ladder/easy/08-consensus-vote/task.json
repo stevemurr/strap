@@ -1,0 +1,9 @@
+{
+  "id": "easy-08-consensus-vote",
+  "tier": "easy",
+  "title": "Find the value a strict majority of replicas agree on",
+  "insight": "LeetCode 169 Majority Element: Boyer-Moore voting candidate plus a verification pass",
+  "prompt": "The replica reconciler needs Consensus in consensus.go: given the values reported by every replica it should return the one that a strict majority agree on, per README.md. Keep the voting package name and the exported signature unchanged, stay within the standard library, and run `go build ./...` and `go vet ./...` to make sure everything is clean.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

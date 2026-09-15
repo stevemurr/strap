@@ -1,0 +1,9 @@
+{
+  "id": "hard-14-max-profit-k-trades",
+  "tier": "hard",
+  "title": "Best profit from at most k trades",
+  "insight": "LeetCode 188 Best Time to Buy and Sell Stock IV: O(n*k) DP over (trades used, holding) states, falling back to summing positive day-to-day gains when k >= n/2",
+  "prompt": "The backtesting service is missing MaxProfit in profit.go. README.md describes exactly what it must compute and the sizes it has to handle, including very large k. Please implement it without changing the package name or the exported signature, using only the standard library, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

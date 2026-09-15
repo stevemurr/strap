@@ -1,0 +1,9 @@
+{
+  "id": "easy-17-balance-point",
+  "tier": "easy",
+  "title": "Where a row of parcels balances",
+  "insight": "LeetCode 724 Find Pivot Index: one pass with the total and a running left sum",
+  "prompt": "Please fill in Point in balance.go for the conveyor loading software. The exact semantics, including how negatives and ties are handled, are in README.md. Leave the package name and exported signature alone, don't add dependencies beyond the standard library, and make sure `go build ./...` and `go vet ./...` succeed.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

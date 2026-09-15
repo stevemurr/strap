@@ -1,0 +1,9 @@
+{
+  "id": "hard-02-pooled-volume",
+  "tier": "hard",
+  "title": "Water pooled on a terrain profile",
+  "insight": "LeetCode 42 Trapping Rain Water: two pointers moving inward, the side with the lower running maximum is settled by that maximum, O(n) time and O(1) space",
+  "prompt": "Our flood-model service needs PooledVolume in volume.go filled in; README.md spells out the contract and the five-million-column performance target. Please keep the package name and the exported signature exactly as they are and use nothing outside the standard library. When you're done, `go build ./...` and `go vet ./...` both need to pass.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

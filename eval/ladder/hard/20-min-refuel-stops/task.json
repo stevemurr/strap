@@ -1,0 +1,9 @@
+{
+  "id": "hard-20-min-refuel-stops",
+  "tier": "hard",
+  "title": "Fewest fuel stops on a highway run",
+  "insight": "LeetCode 871 Minimum Number of Refueling Stops: drive as far as possible, keep passed stations in a max-heap, and when stranded take the largest fuel seen so far, O(n log n)",
+  "prompt": "Please finish MinRefuelStops in refuel.go for the route planner. README.md defines the station format, the exact reachability rule and the half-million-station requirement. Don't change the package name or the exported signature, stick to the standard library, and make sure `go build ./...` and `go vet ./...` pass when you're done.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

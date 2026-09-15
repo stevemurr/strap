@@ -1,0 +1,9 @@
+{
+  "id": "easy-19-longest-uptime",
+  "tier": "easy",
+  "title": "Longest unbroken stretch of passing checks",
+  "insight": "LeetCode 485 Max Consecutive Ones: one pass tracking the current run and the best run",
+  "prompt": "Implement Longest in uptime.go for the status page's monthly report, following the contract in README.md. The package name and the exported signature must stay as they are, and only the standard library is allowed; please make sure `go build ./...` and `go vet ./...` pass before you finish.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

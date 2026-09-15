@@ -1,0 +1,9 @@
+{
+  "id": "easy-09-unmatched-receipt",
+  "tier": "easy",
+  "title": "Find the receipt without a matching pair",
+  "insight": "LeetCode 136 Single Number: XOR of all values cancels every pair",
+  "prompt": "Our nightly reconciliation dumps receipt ids where every id should appear exactly twice, and once a night one of them doesn't. Implement Unmatched in unmatched.go following README.md so we can find that id. Keep package receipts and the exported signature as they are, use only the standard library, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

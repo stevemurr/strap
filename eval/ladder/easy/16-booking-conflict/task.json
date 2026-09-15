@@ -1,0 +1,9 @@
+{
+  "id": "easy-16-booking-conflict",
+  "tier": "easy",
+  "title": "Detect overlapping room bookings",
+  "insight": "LeetCode 252 Meeting Rooms: sort a copy by start time, after which only neighbours can overlap",
+  "prompt": "The meeting-room service needs HasConflict in bookings.go implemented; README.md has the overlap rules and the input size we have to handle. Keep the bookings package and its exported signature as they are, standard library only please, and verify that `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

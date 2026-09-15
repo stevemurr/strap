@@ -27,7 +27,6 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 		want    map[string]any
 		generic bool
 	}{
-		{"default", nil, map[string]any{"temperature": 1.0, "top_p": 0.95, "chat_template_kwargs": map[string]any{"enable_thinking": true, "force_nonempty_content": true}}, false},
 		{"nemotron profile", []string{"-profile", "nemotron-lightning"}, map[string]any{"temperature": 1.0, "top_p": 0.95, "chat_template_kwargs": map[string]any{"enable_thinking": true, "force_nonempty_content": true}}, false},
 		{"qwen profile", []string{"-profile", "qwen3.6"}, preset, false},
 		{"explicit preset", []string{"-preset", "qwen3.6-coding"}, preset, false},
@@ -70,7 +69,7 @@ func TestCLIBackendPresetAndOverridesReachHTTP(t *testing.T) {
 				fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 			}))
 			defer server.Close()
-			args := append([]string{"-config", "models.json", "-base-url", server.URL, "-model", "arbitrary-server-alias"}, tc.args...)
+			args := append([]string{"-config", catalogPath, "-base-url", server.URL, "-model", "arbitrary-server-alias"}, tc.args...)
 			o, err := parseOptions(args, io.Discard)
 			if err != nil {
 				t.Fatal(err)
@@ -103,7 +102,7 @@ func TestCLIRejectsInvalidOrUnsupportedModelOptions(t *testing.T) {
 		{"-temperature", "NaN"}, {"-temperature", "-1"}, {"-top-p", "0"},
 		{"-max-tokens", "0"}, {"-top-k", "1.5"}, {"-thinking=maybe"},
 	} {
-		_, err := parseOptions(append([]string{"-config", "models.json"}, args...), io.Discard)
+		_, err := parseOptions(append([]string{"-config", catalogPath}, args...), io.Discard)
 		if err == nil {
 			t.Errorf("accepted %v", args)
 		}

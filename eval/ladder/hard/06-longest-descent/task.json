@@ -1,0 +1,9 @@
+{
+  "id": "hard-06-longest-descent",
+  "tier": "hard",
+  "title": "Longest downhill trail across an elevation grid",
+  "insight": "LeetCode 329 Longest Increasing Path in a Matrix: memoized DFS (or DP over cells sorted by elevation) so each cell's best trail is computed once, O(rows*cols)",
+  "prompt": "For the trail-planning tool, please implement LongestDescent in descent.go. README.md gives the contract and the 500 x 500 performance target, including grids where one trail winds through every cell. Keep the package name and the exported signature, use only the standard library, and make sure `go build ./...` and `go vet ./...` pass; feel free to add your own tests.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

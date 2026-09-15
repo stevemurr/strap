@@ -1,0 +1,9 @@
+{
+  "id": "medium-19-prefix-index",
+  "tier": "medium",
+  "title": "Prefix index for search suggestions",
+  "insight": "LeetCode 208 Implement Trie: one node per character with a terminal flag and a pass-through count, so every query walks only the argument",
+  "prompt": "This module is the suggestion index behind the search box. Implement the Index type in index.go so it matches README.md: Add, Contains, HasPrefix and CountPrefix with the performance the README asks for. Keep the exported API and package name as they are, standard library only, and check that `go build ./...` and `go vet ./...` are clean. Feel free to add your own tests.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

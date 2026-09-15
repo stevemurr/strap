@@ -1,0 +1,9 @@
+{
+  "id": "easy-03-same-ingredients",
+  "tier": "easy",
+  "title": "Detect recipes with identical ingredient lists",
+  "insight": "LeetCode 242 Valid Anagram: count multiplicities in a hash map and compare",
+  "prompt": "Our recipe deduplicator needs SameIngredients in ingredients.go; README.md spells out the contract and the sizes we run it at. Leave the package name and exported signature untouched, stick to the standard library, and make sure `go build ./...` and `go vet ./...` both pass when you're done.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

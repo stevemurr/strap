@@ -1,0 +1,9 @@
+{
+  "id": "easy-07-compact-slots",
+  "tier": "easy",
+  "title": "Push empty slots to the end of a roster",
+  "insight": "LeetCode 283 Move Zeroes: two-pointer in-place compaction that writes non-empty values forward",
+  "prompt": "Please implement Compact in compact.go for the shift roster. It has to work in place on the caller's slice, and README.md describes exactly what that means. No changes to the package name or exported signature, standard library only, and please verify that `go build ./...` and `go vet ./...` succeed.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

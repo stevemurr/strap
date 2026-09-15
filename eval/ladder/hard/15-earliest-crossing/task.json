@@ -1,0 +1,9 @@
+{
+  "id": "hard-15-earliest-crossing",
+  "tier": "hard",
+  "title": "Earliest time a flooded grid can be crossed",
+  "insight": "LeetCode 778 Swim in Rising Water: minimax path, i.e. Dijkstra with a heap keyed by the highest elevation seen so far (or binary search on t with a BFS), O(RC log RC)",
+  "prompt": "For the flood-planning tool, please implement EarliestCrossing in crossing.go. README.md is the contract, including the 500 x 500 grids it has to handle quickly. Leave the package name and the exported signature as they are, rely only on the standard library, and verify that `go build ./...` and `go vet ./...` pass before you report back.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "hard-19-running-median",
+  "tier": "hard",
+  "title": "Median latency over a growing stream",
+  "insight": "LeetCode 295 Find Median from Data Stream: a max-heap for the lower half and a min-heap for the upper half kept within one element of each other, O(log n) add and O(1) median",
+  "prompt": "The latency dashboard needs the Tracker type in tracker.go implemented: New, Add and Median, exactly as README.md specifies, including a Median query after every single Add on a million-sample stream. Keep the package name and the exported API unchanged, standard library only, and check that `go build ./...` and `go vet ./...` pass before you wrap up.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

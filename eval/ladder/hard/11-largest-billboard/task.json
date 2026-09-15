@@ -1,0 +1,9 @@
+{
+  "id": "hard-11-largest-billboard",
+  "tier": "hard",
+  "title": "Largest billboard under a skyline",
+  "insight": "LeetCode 84 Largest Rectangle in Histogram: monotonic stack of increasing heights, each bar popped once, O(n)",
+  "prompt": "Our outdoor-advertising planner needs LargestBillboard in billboard.go filled in; the contract, including the million-slot performance requirement, is in README.md. Please keep the package name and the exported signature exactly as they are, use nothing outside the standard library, and confirm that `go build ./...` and `go vet ./...` both pass when you are done.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

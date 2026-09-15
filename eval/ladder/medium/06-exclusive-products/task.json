@@ -1,0 +1,9 @@
+{
+  "id": "medium-06-exclusive-products",
+  "tier": "medium",
+  "title": "Product of every factor except the current one",
+  "insight": "LeetCode 238 Product of Array Except Self: prefix products times suffix products, no division",
+  "prompt": "The pricing module needs ExclusiveProducts in pricing.go filled in per README.md; pay attention to the zero cases and to the performance note. Leave the package name and the exported signature alone, standard library only, and run `go build ./...` and `go vet ./...` to make sure everything is clean.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

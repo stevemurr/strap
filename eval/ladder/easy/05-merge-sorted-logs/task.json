@@ -1,0 +1,9 @@
+{
+  "id": "easy-05-merge-sorted-logs",
+  "tier": "easy",
+  "title": "Merge two time-ordered log streams",
+  "insight": "LeetCode 21 Merge Two Sorted Lists: walk both inputs with two cursors and take the smaller head",
+  "prompt": "I need Merge in merge.go filled in for the log viewer; the contract, including the stability rule for equal timestamps, is in README.md. Don't rename the package, the Entry type or the function, keep to the standard library, and confirm `go build ./...` and `go vet ./...` are clean.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

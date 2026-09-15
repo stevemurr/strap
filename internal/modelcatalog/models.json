@@ -1,5 +1,5 @@
 {
-  "default": "nemotron-lightning",
+  "default": "qwen3.6",
   "models": {
     "nemotron-lightning": {
       "backend": "vllm",

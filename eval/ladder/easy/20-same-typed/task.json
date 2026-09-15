@@ -1,0 +1,9 @@
+{
+  "id": "easy-20-same-typed",
+  "tier": "easy",
+  "title": "Compare keystroke logs by the text they produce",
+  "insight": "LeetCode 844 Backspace String Compare: walk both logs from the end, skipping characters that later backspaces delete",
+  "prompt": "There's a stub for SameTyped in editor.go in this module for the collaborative editor; README.md explains the keystroke log format and what counts as the same text. Please implement it with the standard library only, keep the package name and exported signature unchanged, and confirm `go build ./...` and `go vet ./...` are happy.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

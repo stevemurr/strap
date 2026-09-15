@@ -1,0 +1,9 @@
+{
+  "id": "medium-13-runs-with-total",
+  "tier": "medium",
+  "title": "Count ledger runs with a given total",
+  "insight": "LeetCode 560 Subarray Sum Equals K: running prefix sum with a hash map counting earlier prefix values, O(n)",
+  "prompt": "Implement RunsWithTotal in runs.go for the ledger reconciliation job; README.md spells out exactly what counts as a run and the sizes we run it at. Please keep the package name and the exported signature as they are, use only the standard library, and confirm `go build ./...` and `go vet ./...` pass.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

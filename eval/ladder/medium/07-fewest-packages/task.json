@@ -1,0 +1,9 @@
+{
+  "id": "medium-07-fewest-packages",
+  "tier": "medium",
+  "title": "Fewest packages that fill an order exactly",
+  "insight": "LeetCode 322 Coin Change: bottom-up DP over quantities, best[q] = 1 + min over sizes of best[q-size]",
+  "prompt": "Implement FewestPackages in packing.go following README.md, which defines the impossible and zero cases and the sizes the tests use. Keep the package name and exported signature, standard library only, and ensure `go build ./...` and `go vet ./...` succeed. Feel free to add your own tests along the way.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

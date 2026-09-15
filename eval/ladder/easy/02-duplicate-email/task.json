@@ -1,0 +1,9 @@
+{
+  "id": "easy-02-duplicate-email",
+  "tier": "easy",
+  "title": "First duplicate address in a contact import",
+  "insight": "LeetCode 217 Contains Duplicate: one pass with a hash set of normalized values",
+  "prompt": "We import contact lists from customer spreadsheets and need to flag the first address that shows up twice. Could you implement FirstDuplicate in duplicate.go following the contract in README.md? Please keep the package name and the exported signature exactly as they are, use only the standard library, and check that `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}

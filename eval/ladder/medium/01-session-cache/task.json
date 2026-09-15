@@ -1,0 +1,9 @@
+{
+  "id": "medium-01-session-cache",
+  "tier": "medium",
+  "title": "Least-recently-used session cache",
+  "insight": "LeetCode 146 LRU Cache: hash map plus doubly linked list for O(1) get, put and eviction",
+  "prompt": "This module is our in-memory session cache. Implement the Cache type in cache.go so it behaves as README.md describes: fixed capacity, least-recently-used eviction, and constant-time operations. Keep the exported API and package name unchanged, use only the standard library, and make sure `go build ./...` and `go vet ./...` pass. Add tests if that helps you verify it.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "hard-13-largest-free-block",
+  "tier": "hard",
+  "title": "Largest free block of seats",
+  "insight": "LeetCode 85 Maximal Rectangle: treat each row as a histogram of consecutive free seats above it and solve largest-rectangle-in-histogram per row with a monotonic stack, O(rows*cols)",
+  "prompt": "I need the group-booking helper finished: implement LargestFreeBlock in block.go following the contract in README.md, which also states the grid sizes it must cope with. Don't rename the package or change the exported signature, use only the standard library, and check that `go build ./...` and `go vet ./...` succeed before you hand it back.",
+  "timeout": "40m",
+  "test_timeout": "3m"
+}

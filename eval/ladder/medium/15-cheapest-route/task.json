@@ -1,0 +1,9 @@
+{
+  "id": "medium-15-cheapest-route",
+  "tier": "medium",
+  "title": "Cheapest toll route across a grid",
+  "insight": "LeetCode 64 Minimum Path Sum: row-by-row dynamic programming, each cell is its toll plus the cheaper of the cell above and the cell to the left",
+  "prompt": "Please fill in CheapestRoute in route.go for the courier planner. README.md describes the grid, the allowed moves and the sizes involved. Leave the package name and exported signature as they are, stick to the standard library, and make sure `go build ./...` and `go vet ./...` both succeed.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

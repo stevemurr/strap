@@ -1,0 +1,9 @@
+{
+  "id": "medium-10-build-order",
+  "tier": "medium",
+  "title": "Deterministic build order from dependencies",
+  "insight": "LeetCode 210 Course Schedule II: Kahn's topological sort with a min-heap of ready targets",
+  "prompt": "Implement Order in builds.go for our build scheduler according to README.md, including the deterministic tie-break and the three error cases. Keep the package name and exported signature, use the standard library only, and check that `go build ./...` and `go vet ./...` pass; add tests if you find them useful.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

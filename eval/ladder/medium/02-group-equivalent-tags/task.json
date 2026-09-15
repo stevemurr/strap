@@ -1,0 +1,9 @@
+{
+  "id": "medium-02-group-equivalent-tags",
+  "tier": "medium",
+  "title": "Group tags that are rearrangements of each other",
+  "insight": "LeetCode 49 Group Anagrams: key each tag by its sorted bytes and bucket the tags in a map",
+  "prompt": "Our tagging service needs GroupEquivalent in tags.go implemented; README.md spells out the contract, including how the groups and their members have to be ordered. Keep the package name and the exported signature, use only the standard library, and confirm that `go build ./...` and `go vet ./...` pass when you're done.",
+  "timeout": "25m",
+  "test_timeout": "3m"
+}

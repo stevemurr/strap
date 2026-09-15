@@ -1,0 +1,9 @@
+{
+  "id": "easy-11-first-failing-build",
+  "tier": "easy",
+  "title": "Bisect the first failing build",
+  "insight": "LeetCode 278 First Bad Version: binary search on a monotonic predicate",
+  "prompt": "CI bisection is blocked because FirstFailing in bisect.go is still a stub. README.md has the contract, including the hard limit on how many times the failing callback may be invoked. Implement it without changing the package name or the exported signature, standard library only, and make sure `go build ./...` and `go vet ./...` pass.",
+  "timeout": "15m",
+  "test_timeout": "3m"
+}
