@@ -42,13 +42,13 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 			"temperature": 0.7, "top_p": 0.8, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
 		}, false},
 		{"flash next thinking", []string{"-profile", "qwen3.8-flash-next-thinking"}, map[string]any{
-			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "reasoning_effort": "xhigh"},
+			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "reasoning_effort": "medium"},
 		}, false},
 		{"flash next stream", []string{"-profile", "qwen3.8-flash-next-stream"}, map[string]any{
 			"max_tokens": 400.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
 		}, false},
-		{"flash next effort override", []string{"-profile", "qwen3.8-flash-next-thinking", "-reasoning-effort", "medium"}, map[string]any{
-			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "reasoning_effort": "medium"},
+		{"flash next effort override", []string{"-profile", "qwen3.8-flash-next-thinking", "-reasoning-effort", "low"}, map[string]any{
+			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "reasoning_effort": "low"},
 		}, false},
 		{"effort only", []string{"-config", bare, "-reasoning-effort", "xhigh"}, map[string]any{
 			"chat_template_kwargs": map[string]any{"reasoning_effort": "xhigh"},

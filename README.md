@@ -73,11 +73,25 @@ generation policy stated in the catalog:
 | Profile | Thinking | Temperature / top-p | Max tokens |
 |---|---|---|---|
 | `qwen3.8-flash-next-nothink` | Off | `0.7` / `0.80` | `32000` |
-| `qwen3.8-flash-next-thinking` | On, `xhigh` effort | `1.0` / `0.95` | `32000` |
+| `qwen3.8-flash-next-thinking` | On, `medium` effort | `1.0` / `0.95` | `32000` |
 | `qwen3.8-flash-next-stream` | Off | Server defaults | `400` |
 
 All Strap requests already stream, including the first two profiles. The stream
 profile keeps the short output budget and unspecified sampling from the example.
+
+Two profiles target the dense **Qwen3.8-27B** at `http://192.168.1.237:8360` with
+the sampling its [model card](https://huggingface.co/Qwen/Qwen3.8-27B) recommends
+(checked September 16, 2026):
+
+| Profile | Thinking | Temperature / top-p / top-k | Presence penalty | Max tokens |
+|---|---|---|---|---|
+| `qwen3.8-27b` | On, `xhigh` effort | `1.0` / `0.95` / `20` | `0` | `131072` |
+| `qwen3.8-27b-nothink` | Off | `0.7` / `0.80` / `20` | `1.5` | `131072` |
+
+Both set min-p `0` and repetition penalty `1`. The card suggests generous output
+budgets for agentic work (up to `262144` reasoning tokens and `131072` response
+tokens); the profiles use `131072` for the whole call, and the harness's
+reasoning limit cuts off a call that reasons past 192 KB regardless.
 Use `-reasoning-effort low`, `medium`, or `xhigh` to override the profile's effort;
 the value is sent inside `chat_template_kwargs`. Configure the server with
 `--reasoning-parser qwen3` to return reasoning separately from answer content.
