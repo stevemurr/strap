@@ -93,25 +93,15 @@ func (s *Session) wakeContext(actor identity.ActorID) agent.WakeContext {
 
 func (s *Session) inboxAdmission(actor identity.ActorID) agent.InboxAdmission {
 	return func(ctx context.Context, inputs []message.Message) (agent.InboxDecision, error) {
+		// Classification reads the notice alone, so admission never replays a
+		// projection to decide whether to wake.
 		head, err := s.progressReads.Reader.Head(ctx)
 		if err != nil {
 			return agent.InboxDecision{}, err
 		}
-		v, err := s.progressReads.Reader.At(ctx, head.Cursor)
-		if err != nil {
-			return agent.InboxDecision{}, err
-		}
 		decision := agent.InboxDecision{Session: head.Cursor.Session, Through: head.Cursor.Sequence}
-		get := func(a identity.ActorID, id work.ID) (work.Work, error) {
-			w, e := v.InspectWork(ctx, a, id)
-			return w.Work, e
-		}
 		for _, m := range inputs {
-			wake, e := workflow.ProgressNoticeWakes(m, get)
-			if e != nil {
-				return decision, e
-			}
-			decision.Wake = decision.Wake || wake
+			decision.Wake = decision.Wake || workflow.ProgressNoticeWakes(m)
 		}
 		return decision, nil
 	}

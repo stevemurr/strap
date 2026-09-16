@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"errors"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/work"
@@ -9,27 +8,22 @@ import (
 )
 
 // ProgressNoticeWakes classifies only the host's structured ordinary notices.
-// Current state retires a reporting binding even if dispatcher timers lag behind.
-func ProgressNoticeWakes(m message.Message, get func(identity.ActorID, work.ID) (work.Work, error)) (bool, error) {
+// A notice that merely records findings never wakes its owner. The report is
+// already in the owner's history and the worker is still working, so there is
+// nothing to decide; waking costs a model call that reads the report and
+// returns to waiting. Only a notice that needs the owner wakes it: a blocker
+// or decision need, which the store marks actionable and the dispatcher sends
+// with Attention, a delivered research brief, an assignment that ended, or a
+// work event riding along. Anything that is not a progress notice wakes as
+// before.
+func ProgressNoticeWakes(m message.Message) bool {
 	if m.Kind == message.Observation {
-		return false, nil
+		return false
 	}
-	if m.Progress == nil || m.Progress.Attention || m.Event != nil || len(m.Progress.Briefs) > 0 || len(m.Progress.Covered) > 0 {
-		return true, nil
+	if m.Progress == nil {
+		return true
 	}
-	for _, r := range m.Progress.Reports {
-		w, err := get(m.To, r.WorkID)
-		if errors.Is(err, work.ErrNotFound) || errors.Is(err, work.ErrForbidden) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		if w.State == work.Active && w.AssignedAtRevision == r.AssignedAtRevision && w.Owner == m.To {
-			return true, nil
-		}
-	}
-	return false, nil
+	return m.Progress.Attention || m.Event != nil || len(m.Progress.Briefs) > 0 || len(m.Progress.Covered) > 0
 }
 
 // coverageChange inspects all changed work, including closed repair/audit siblings.

@@ -69,15 +69,41 @@ func TestRetireBeforeTimerAndClassifyQueuedNotice(t *testing.T) {
 	if len(ack) != 1 || ack[0] != "a" {
 		t.Fatal(ack)
 	}
+	// A report-only notice never wakes its owner, whatever the work state.
 	for _, id := range []work.ID{"a", "b"} {
 		m := message.Message{To: "root", Kind: message.Notification, Progress: &message.WorkProgressNotice{Reports: []message.ProgressReportRef{{WorkID: id, AssignedAtRevision: 1}}}}
-		wake, err := ProgressNoticeWakes(m, get)
-		if err != nil || wake != (id == "b") {
-			t.Fatal(id, wake, err)
+		if ProgressNoticeWakes(m) {
+			t.Fatal("report-only notice woke the owner", id)
 		}
 	}
-	wake, _ := ProgressNoticeWakes(message.Message{Kind: message.Notification, Content: "authored"}, get)
-	if !wake {
+	if !ProgressNoticeWakes(message.Message{Kind: message.Notification, Content: "authored"}) {
 		t.Fatal("arbitrary notice suppressed")
+	}
+}
+
+// Routine findings cost the owner nothing; only a notice that needs a decision
+// starts an exchange. Before this rule, half of every root model call in a
+// ladder run was spent waking on progress the owner could not act on.
+func TestOnlyAttentionBearingNoticesWakeTheOwner(t *testing.T) {
+	refs := []message.ProgressReportRef{{WorkID: "w", AssignedAtRevision: 1}}
+	notice := func(n message.WorkProgressNotice) message.Message {
+		return message.Message{To: "root", Kind: message.Notification, Progress: &n}
+	}
+	for _, c := range []struct {
+		name string
+		m    message.Message
+		wake bool
+	}{
+		{"routine findings", notice(message.WorkProgressNotice{Reports: refs}), false},
+		{"blocker or decision need", notice(message.WorkProgressNotice{Reports: refs, Attention: true}), true},
+		{"research delivered", notice(message.WorkProgressNotice{Briefs: []message.ResearchBriefRef{{WorkID: "w"}}}), true},
+		{"assignment ended", notice(message.WorkProgressNotice{Covered: []message.ProgressCoverage{{WorkID: "w"}}}), true},
+		{"work event attached", message.Message{To: "root", Kind: message.Notification, Progress: &message.WorkProgressNotice{Reports: refs}, Event: &work.Event{Kind: work.ReviewRequested}}, true},
+		{"observation", message.Message{To: "root", Kind: message.Observation, Progress: &message.WorkProgressNotice{Reports: refs, Attention: true}}, false},
+		{"worker message", message.Message{To: "root", Kind: message.Instruction, Content: "question"}, true},
+	} {
+		if got := ProgressNoticeWakes(c.m); got != c.wake {
+			t.Errorf("%s: wake=%v, want %v", c.name, got, c.wake)
+		}
 	}
 }
