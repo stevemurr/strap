@@ -334,3 +334,27 @@ func TestWorkToolsDeclareRevisionBookkeeping(t *testing.T) {
 		t.Fatalf("report_work_progress: %v", got)
 	}
 }
+
+// Models put objective at the top level and send null for omitted optional
+// fields; both are repaired before validation, while unknown fields are still
+// rejected.
+func TestProgressReportAcceptsTopLevelObjectiveAndNulls(t *testing.T) {
+	var got work.ReportWorkProgressRequest
+	report := ReportWorkProgress(func(_ context.Context, _ Call, r work.ReportWorkProgressRequest) (Result, error) {
+		got = r
+		return Text("ok"), nil
+	})
+	raw := `{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"objective":"Ship it","findings":null,"steps":null}`
+	if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(raw)}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Position == nil || got.Position.Objective != "Ship it" || got.Findings != nil || got.Steps != nil {
+		t.Fatalf("%+v", got)
+	}
+	if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"x"},"priority":1}`)}); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+	if got := report.(interface{ BookkeepingParameters() []string }).BookkeepingParameters(); len(got) != 2 {
+		t.Fatalf("bookkeeping lost through the wrapper: %v", got)
+	}
+}

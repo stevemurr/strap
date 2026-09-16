@@ -1,7 +1,9 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
+
 	"github.com/stevemurr/strap/work"
 )
 
@@ -16,5 +18,59 @@ func DecodeProgressReport(raw json.RawMessage) (work.ReportWorkProgressRequest, 
 	return progressParameters.Decode(raw)
 }
 func ReportWorkProgress(h Handler[work.ReportWorkProgressRequest]) Tool {
-	return Func[work.ReportWorkProgressRequest]{Spec: Definition[work.ReportWorkProgressRequest]{Bookkeeping: []string{"expected_revision", "assigned_at_revision"}, Name: "report_work_progress", Description: "Record progress for your active assignment using work_id, expected_revision and assigned_at_revision from current work. Supply a full position to replace its previous fields; omit position to preserve it. Findings accumulate; corrections/retractions reference supersedes. Only scoped implementation/repair work may update steps. The receipt returns work_revision for the next mutation. Reporting does not submit an outcome or complete work.", Parameters: progressParameters}, Invoke: h}
+	return lenientProgress{Func[work.ReportWorkProgressRequest]{Spec: Definition[work.ReportWorkProgressRequest]{Bookkeeping: []string{"expected_revision", "assigned_at_revision"}, Name: "report_work_progress", Description: "Record progress for your active assignment using work_id, expected_revision and assigned_at_revision from current work. Supply a full position to replace its previous fields; omit position to preserve it. Findings accumulate; corrections/retractions reference supersedes. Only scoped implementation/repair work may update steps. The receipt returns work_revision for the next mutation. Reporting does not submit an outcome or complete work.", Parameters: progressParameters}, Invoke: h}}
+}
+
+// lenientProgress repairs two slips every evaluated model made before the
+// strict decoder sees the arguments: an objective at the top level instead of
+// under position, and null for an omitted optional field. Everything else is
+// validated exactly as before.
+type lenientProgress struct {
+	Func[work.ReportWorkProgressRequest]
+}
+
+func (t lenientProgress) Call(ctx context.Context, c Call) (Result, error) {
+	c.Arguments = normalizeProgressArguments(c.Arguments)
+	return t.Func.Call(ctx, c)
+}
+
+func normalizeProgressArguments(raw json.RawMessage) json.RawMessage {
+	var object map[string]any
+	if json.Unmarshal(raw, &object) != nil || object == nil {
+		return raw
+	}
+	dropNulls(object)
+	if objective, ok := object["objective"]; ok {
+		position, _ := object["position"].(map[string]any)
+		if position == nil {
+			position = map[string]any{}
+		}
+		if _, set := position["objective"]; !set {
+			position["objective"] = objective
+		}
+		object["position"] = position
+		delete(object, "objective")
+	}
+	out, err := json.Marshal(object)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func dropNulls(v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		for k, x := range v {
+			if x == nil {
+				delete(v, k)
+				continue
+			}
+			dropNulls(x)
+		}
+	case []any:
+		for _, x := range v {
+			dropNulls(x)
+		}
+	}
 }
