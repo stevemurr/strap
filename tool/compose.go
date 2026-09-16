@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -22,6 +23,11 @@ type preparedTool interface {
 type composedTool struct {
 	spec     provider.ToolDefinition
 	branches []preparedTool
+	// A discriminated composition dispatches on one field instead of trying
+	// every branch; values holds each branch's value in branch order.
+	discriminator string
+	values        []string
+	byValue       map[string]int
 }
 
 // Compose exposes complete typed tools under one name. Definitions are snapshotted
@@ -29,10 +35,30 @@ type composedTool struct {
 // Parameters on definition must be empty: the alternatives supply the schema.
 // Arbitrary Tool implementations cannot participate without a typed contract.
 func Compose(definition provider.ToolDefinition, branches ...Tool) (Tool, error) {
+	return composeTool(definition, "", branches...)
+}
+
+// ComposeBy is Compose for alternatives that one field tells apart, such as
+// assign_work's kind or submit_audit's verdict. Every branch must constrain
+// field to exactly one enum value. Instead of a oneOf, the advertised schema
+// is one flat object: the union of the branches' properties, field as a single
+// enum of every branch value, and a top-level required naming field plus
+// every property all branches require. Models that flatten or ignore oneOf
+// otherwise never learn that the field is mandatory or what it accepts.
+// Dispatch reads field and runs that branch's strict decode, so a rejection
+// states one form's rule instead of one contradictory verdict per form.
+func ComposeBy(field string, definition provider.ToolDefinition, branches ...Tool) (Tool, error) {
+	if field == "" {
+		return nil, fmt.Errorf("composition discriminator must be named")
+	}
+	return composeTool(definition, field, branches...)
+}
+
+func composeTool(definition provider.ToolDefinition, discriminator string, branches ...Tool) (Tool, error) {
 	if definition.Name == "" || len(definition.Parameters) > 0 || len(branches) == 0 {
 		return nil, fmt.Errorf("composition requires a name, branches and no supplied parameters")
 	}
-	result := &composedTool{spec: definition}
+	result := &composedTool{spec: definition, discriminator: discriminator}
 	schemas := []json.RawMessage{}
 	names := map[string]bool{}
 	for _, branch := range branches {
@@ -69,15 +95,97 @@ func Compose(definition provider.ToolDefinition, branches ...Tool) (Tool, error)
 		schemas = append(schemas, raw)
 	}
 	var err error
-	if len(schemas) == 1 {
+	switch {
+	case discriminator != "":
+		result.values, result.byValue, err = discriminatorValues(schemas, discriminator)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", definition.Name, err)
+		}
+		result.spec.Parameters, err = discriminatedSchema(schemas, discriminator, result.values)
+	case len(schemas) == 1:
 		result.spec.Parameters = append(json.RawMessage(nil), schemas[0]...)
-	} else {
+	default:
 		result.spec.Parameters, err = compositionSchema(schemas)
 	}
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// discriminatorValues reads each branch's single allowed value for field.
+func discriminatorValues(schemas []json.RawMessage, field string) ([]string, map[string]int, error) {
+	values := make([]string, 0, len(schemas))
+	byValue := map[string]int{}
+	for i, raw := range schemas {
+		var schema struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			return nil, nil, err
+		}
+		property, ok := schema.Properties[field]
+		if !ok || len(property.Enum) != 1 || property.Enum[0] == "" {
+			return nil, nil, fmt.Errorf("branch %d must constrain %s to exactly one enum value", i+1, field)
+		}
+		if _, dup := byValue[property.Enum[0]]; dup {
+			return nil, nil, fmt.Errorf("branches share %s value %q", field, property.Enum[0])
+		}
+		byValue[property.Enum[0]] = i
+		values = append(values, property.Enum[0])
+	}
+	return values, byValue, nil
+}
+
+// discriminatedSchema flattens the branches into one object schema keyed by
+// the discriminator; see ComposeBy.
+func discriminatedSchema(schemas []json.RawMessage, field string, values []string) (json.RawMessage, error) {
+	hints, err := compositionHints(schemas, values, "Only when "+field+" is ")
+	if err != nil {
+		return nil, err
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(hints, &schema); err != nil {
+		return nil, err
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if properties == nil {
+		properties = map[string]any{}
+	}
+	properties[field] = map[string]any{"type": "string", "enum": values, "description": "Selects the operation; which other fields apply depends on it."}
+	schema["type"] = "object"
+	schema["properties"] = properties
+	required := []string{field}
+	for _, name := range requiredByAll(schemas) {
+		if name != field {
+			required = append(required, name)
+		}
+	}
+	schema["required"] = required
+	return json.Marshal(schema)
+}
+
+// requiredByAll returns the properties every branch requires, in the first
+// branch's order. They are safe to advertise at the top level of any
+// composition: whichever form the model means, it must supply them.
+func requiredByAll(schemas []json.RawMessage) []string {
+	var common []string
+	for i, raw := range schemas {
+		var schema struct {
+			Required []string `json:"required"`
+		}
+		if json.Unmarshal(raw, &schema) != nil {
+			return nil
+		}
+		if i == 0 {
+			common = schema.Required
+			continue
+		}
+		common = slices.DeleteFunc(common, func(name string) bool { return !slices.Contains(schema.Required, name) })
+	}
+	return common
 }
 func (t *composedTool) Definition() provider.ToolDefinition {
 	d := t.spec
@@ -115,6 +223,9 @@ func (t *composedTool) prepare(ctx context.Context, c Call) (func() (Result, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if t.discriminator != "" {
+		return t.prepareBy(ctx, c)
+	}
 	var selected func() (Result, error)
 	failures := []string{}
 	for i, branch := range t.branches {
@@ -133,6 +244,31 @@ func (t *composedTool) prepare(ctx context.Context, c Call) (func() (Result, err
 	}
 	return selected, nil
 }
+
+// prepareBy selects the branch named by the discriminator and reports that
+// one branch's rejection, so the model learns which field of which form was
+// wrong instead of receiving every form's complaint.
+func (t *composedTool) prepareBy(ctx context.Context, c Call) (func() (Result, error), error) {
+	allowed := strings.Join(t.values, ", ")
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(c.Arguments, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("%s arguments must be a JSON object with %s set to one of %s", t.spec.Name, t.discriminator, allowed)
+	}
+	var value string
+	if raw, ok := object[t.discriminator]; !ok || json.Unmarshal(raw, &value) != nil || value == "" {
+		return nil, fmt.Errorf("%s requires %s: one of %s", t.spec.Name, t.discriminator, allowed)
+	}
+	i, ok := t.byValue[value]
+	if !ok {
+		return nil, fmt.Errorf("%s %s must be one of %s, not %q", t.spec.Name, t.discriminator, allowed, value)
+	}
+	invoke, err := t.branches[i].prepare(ctx, c)
+	if err != nil {
+		return nil, fmt.Errorf("%s with %s %s: %w", t.spec.Name, t.discriminator, value, err)
+	}
+	return invoke, nil
+}
+
 func (t *composedTool) Call(ctx context.Context, c Call) (Result, error) {
 	invoke, err := t.prepare(ctx, c)
 	if err != nil {
@@ -158,8 +294,16 @@ func compose(def provider.ToolDefinition, branches ...Tool) Tool {
 	return result
 }
 
+func composeBy(field string, def provider.ToolDefinition, branches ...Tool) Tool {
+	result, err := ComposeBy(field, def, branches...)
+	if err != nil {
+		panic(err)
+	}
+	return result
+}
+
 func (t *composedTool) snapshot() preparedTool {
-	copy := &composedTool{spec: t.Definition()}
+	copy := &composedTool{spec: t.Definition(), discriminator: t.discriminator, values: slices.Clone(t.values), byValue: maps.Clone(t.byValue)}
 	for _, branch := range t.branches {
 		copy.branches = append(copy.branches, branch.snapshot())
 	}
@@ -178,13 +322,18 @@ func compositionSchema(branches []json.RawMessage) (json.RawMessage, error) {
 		_ = json.Unmarshal(raw, &branch)
 		labels[i] = hintLabel(i, branch.Description)
 	}
-	hints, err := compositionHints(branches, labels)
+	hints, err := compositionHints(branches, labels, "Only in ")
 	if err != nil {
 		return nil, err
 	}
 	var schema map[string]json.RawMessage
 	if err := json.Unmarshal(hints, &schema); err != nil {
 		return nil, err
+	}
+	// Properties every form requires are required whichever form is meant;
+	// a model that only reads the top level then still supplies them.
+	if common := requiredByAll(branches); len(common) > 0 {
+		schema["required"], _ = json.Marshal(common)
 	}
 	schema["oneOf"], err = json.Marshal(branches)
 	if err != nil {
@@ -205,7 +354,7 @@ func hintLabel(i int, description string) string {
 // Servers that flatten oneOf show every property as if it applied everywhere.
 // A property present in only some alternatives is annotated with the forms that
 // accept it, so the model reads the restriction where it reads the field.
-func compositionHints(alternatives []json.RawMessage, labels []string) (json.RawMessage, error) {
+func compositionHints(alternatives []json.RawMessage, labels []string, prefix string) (json.RawMessage, error) {
 	if len(alternatives) == 0 {
 		return json.RawMessage(`{}`), nil
 	}
@@ -250,12 +399,12 @@ func compositionHints(alternatives []json.RawMessage, labels []string) (json.Raw
 	if kind == "object" {
 		fields := map[string]json.RawMessage{}
 		for name, choices := range properties {
-			field, err := compositionHints(choices, pick(labels, owners[name]))
+			field, err := compositionHints(choices, pick(labels, owners[name]), prefix)
 			if err != nil {
 				return nil, err
 			}
 			if len(owners[name]) < len(alternatives) && len(labels) == len(alternatives) {
-				field, err = describe(field, "Only in "+strings.Join(pick(labels, owners[name]), " or "))
+				field, err = describe(field, prefix+strings.Join(pick(labels, owners[name]), " or "))
 				if err != nil {
 					return nil, err
 				}
@@ -266,7 +415,7 @@ func compositionHints(alternatives []json.RawMessage, labels []string) (json.Raw
 		hint["properties"] = fields
 	}
 	if kind == "array" {
-		item, err := compositionHints(items, labels)
+		item, err := compositionHints(items, labels, prefix)
 		if err != nil {
 			return nil, err
 		}

@@ -69,10 +69,20 @@ func TestAssignmentSchemaDoesNotAdvertiseInternalCallableNames(t *testing.T) {
 			t.Fatalf("schema exposes internal tool name %s", name)
 		}
 	}
+	// The four operations are one flat object keyed by kind, never a oneOf.
 	var schema struct {
-		OneOf []map[string]json.RawMessage `json:"oneOf"`
+		Type       string   `json:"type"`
+		Required   []string `json:"required"`
+		Properties struct {
+			Kind struct {
+				Enum []string `json:"enum"`
+			} `json:"kind"`
+		} `json:"properties"`
 	}
-	if e := json.Unmarshal([]byte(raw), &schema); e != nil || len(schema.OneOf) != 4 {
-		t.Fatal("lost variants", e)
+	if e := json.Unmarshal([]byte(raw), &schema); e != nil || schema.Type != "object" || len(schema.Properties.Kind.Enum) != 4 || strings.Contains(raw, "oneOf") {
+		t.Fatalf("lost variants: %v %+v", e, schema)
+	}
+	if len(schema.Required) != 2 || schema.Required[0] != "kind" || schema.Required[1] != "assignee" {
+		t.Fatalf("required %v", schema.Required)
 	}
 }

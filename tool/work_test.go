@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -157,41 +158,29 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 			}
 		})
 	}
+	// The pass and fail forms are one flat object keyed by verdict. Findings
+	// stay optional at the top level because only the fail form requires
+	// them; that form's rule is enforced at dispatch and tested above.
 	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { return Result{}, nil })
 	var schema struct {
-		Branches []struct {
-			Properties map[string]struct {
-				Enum     []string `json:"enum"`
-				MinItems *int     `json:"minItems"`
-				MaxItems *int     `json:"maxItems"`
-			} `json:"properties"`
-			Required []string `json:"required"`
-		} `json:"oneOf"`
+		Type       string   `json:"type"`
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Enum        []string `json:"enum"`
+			Description string   `json:"description"`
+		} `json:"properties"`
 	}
 	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if len(schema.Branches) != 2 {
-		t.Fatal("missing audit alternatives")
+	if schema.Type != "object" || !slices.Equal(schema.Properties["verdict"].Enum, []string{"pass", "fail"}) || strings.Contains(string(op.Definition().Parameters), "oneOf") {
+		t.Fatalf("audit schema shape: %+v", schema)
 	}
-	for _, branch := range schema.Branches {
-		verdict := branch.Properties["verdict"].Enum[0]
-		findings, exists := branch.Properties["findings"]
-		if !exists {
-			t.Fatalf("%s schema omits findings", verdict)
-		}
-		required := false
-		for _, field := range branch.Required {
-			if field == "findings" {
-				required = true
-			}
-		}
-		if verdict == "pass" && (required || findings.MaxItems == nil || *findings.MaxItems != 0) {
-			t.Fatal("pass must allow optional empty findings only")
-		}
-		if verdict == "fail" && (!required || findings.MinItems == nil || *findings.MinItems != 1) {
-			t.Fatal("fail must require nonempty findings")
-		}
+	if !slices.Equal(schema.Required, []string{"verdict", "expected_revision", "submission_id", "summary", "work_id"}) {
+		t.Fatalf("required %v", schema.Required)
+	}
+	if _, ok := schema.Properties["findings"]; !ok {
+		t.Fatal("schema omits findings")
 	}
 }
 

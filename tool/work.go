@@ -168,7 +168,7 @@ func AssignWork(handle Handler[AssignWorkArgs]) Tool {
 	for _, b := range assignmentContracts() {
 		branches = append(branches, b.tool(handle))
 	}
-	return compose(provider.ToolDefinition{Name: "assign_work", Description: "Create NEW tracked implementation, audit, repair, or research work for a required existing assignee. To transfer an existing work item to a replacement agent, use reassign_work. Use create_agent first to create one. Implementation requires task; scope is optional. Research requires task and forbids scope, work_id, expected_revision, submission_id and audit_id. Omit work_id, expected_revision, submission_id, and audit_id for implementation, including when reusing an agent. Audit and repair use the original implementation work_id and its current expected_revision. Audit requires submission_id; repair requires the failing verdict audit_id. For audit/repair, omit task, context, expected_output, and scope: the server derives them. Returns work registration, not delivery or completion."}, branches...)
+	return composeBy("kind", provider.ToolDefinition{Name: "assign_work", Description: "Create NEW tracked implementation, audit, repair, or research work for a required existing assignee. To transfer an existing work item to a replacement agent, use reassign_work. Use create_agent first to create one. Implementation requires task; scope is optional. Research requires task and forbids scope, work_id, expected_revision, submission_id and audit_id. Omit work_id, expected_revision, submission_id, and audit_id for implementation, including when reusing an agent. Audit and repair use the original implementation work_id and its current expected_revision. Audit requires submission_id; repair requires the failing verdict audit_id. For audit/repair, omit task, context, expected_output, and scope: the server derives them. Returns work registration, not delivery or completion."}, branches...)
 }
 func SubmitWork(handle Handler[work.SubmitRequest]) Tool {
 	return builtin("submit_work",
@@ -185,7 +185,7 @@ func SubmitAudit(handle Handler[work.AuditRequest]) Tool {
 		Summary      string            `json:"summary"`
 		Findings     []work.Finding    `json:"findings"`
 	}
-	return compose(provider.ToolDefinition{Name: "submit_audit", Description: "Record pass or fail for your assigned submission. Pass permits omitted or empty findings. Fail requires nonempty findings and requests changes. The owner must explicitly assign repairs. If unable to verify, report your work blocker instead."},
+	return composeBy("verdict", provider.ToolDefinition{Name: "submit_audit", Description: "Record pass or fail for your assigned submission. Pass permits omitted or empty findings. Fail requires nonempty findings and requests changes. The owner must explicitly assign repairs. If unable to verify, report your work blocker instead."},
 		// The wrapper is load-bearing: compose validates branches eagerly, so a
 		// composed branch needs a non-nil Invoke even when handle is nil. Passing
 		// handle directly panics at construction (tool/work_test.go:162).
