@@ -3,6 +3,7 @@ package eval_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +25,8 @@ type script struct {
 	calls   atomic.Int32
 	write   bool
 	block   bool
-	wait    bool // Delegate to a worker that never finishes, then wait on it.
+	wait    bool  // Delegate to a worker that never finishes, then wait on it.
+	fail    error // Returned from every Submit, like an unreachable server.
 	content string
 }
 
@@ -32,6 +34,9 @@ func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Obse
 	if p.block {
 		<-ctx.Done()
 		return provider.Response{}, ctx.Err()
+	}
+	if p.fail != nil {
+		return provider.Response{}, p.fail
 	}
 	n := p.calls.Add(1)
 	if p.write && n == 1 {
@@ -223,6 +228,24 @@ func TestRunFinishesIdleSessionWithoutReply(t *testing.T) {
 	rep, err := eval.Analyze(ctx, opts.Output)
 	if err != nil || len(rep.Tiers) != 1 || rep.Tiers[0].NoReply != 1 || !strings.Contains(rep.Markdown(), "(no reply)") {
 		t.Fatal(rep, err)
+	}
+}
+
+// A session whose model never answered is an infrastructure error, not a
+// failed attempt: three ladder tasks were graded as failures during a server
+// outage.
+func TestRunClassifiesNeverConnectedSessionAsError(t *testing.T) {
+	ladder := writeLadder(t)
+	opts := options(t, ladder, &script{fail: errors.New(`vllm: submit: Post "http://model.test/v1/chat/completions": dial tcp: connection refused`)})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	results, err := eval.Run(ctx, opts)
+	if err != nil || len(results) != 1 {
+		t.Fatal(results, err)
+	}
+	r := results[0]
+	if r.Outcome != eval.Errored || r.Grade != nil || !strings.Contains(r.Error, "no model call completed") || !strings.Contains(r.Error, "connection refused") {
+		t.Fatalf("%+v", r)
 	}
 }
 

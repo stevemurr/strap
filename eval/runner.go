@@ -293,6 +293,11 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if waitErr != nil && !r.TimedOut && !r.NoReply {
 		return fail(waitErr)
 	}
+	if w.completed == 0 && r.ExecutionError != "" {
+		// The model never answered once: an unreachable server or a bad
+		// endpoint, not something the workspace can be graded on.
+		return fail(fmt.Errorf("no model call completed: %s", r.ExecutionError))
+	}
 	if err := ApplyHidden(task, workspace); err != nil {
 		return fail(err)
 	}
@@ -329,6 +334,7 @@ type watcher struct {
 	replied   bool
 	replies   int
 	lastReply string
+	completed int // Model calls that produced a response.
 }
 
 func (w *watcher) busy() bool {
@@ -382,6 +388,10 @@ func (w *watcher) observe(e conversation.Event, logf func(string, ...any)) {
 			delete(w.pending, e.Receipt.MessageID)
 			logf("%s undelivered: %s", e.Receipt.MessageID, e.Receipt.Detail)
 		}
+	case conversation.AgentEvent:
+		if f, ok := e.Event.(agent.OutputFinished); ok && f.Status == agent.OutputComplete {
+			w.completed++
+		}
 	case conversation.MessageEvent:
 		m := e.Message
 		if m.To != message.User {
@@ -400,7 +410,7 @@ func (w *watcher) observe(e conversation.Event, logf func(string, ...any)) {
 }
 
 // Only these kinds influence completion; streamed output is left undecoded.
-var watchedKinds = map[string]bool{"agent_started": true, "agent_state": true, "agent_exited": true, "tool": true, "ack": true, "message": true}
+var watchedKinds = map[string]bool{"agent_started": true, "agent_state": true, "agent_exited": true, "tool": true, "ack": true, "message": true, "output_finished": true}
 
 func (w *watcher) wait(ctx context.Context, session *harness.Session, sub *eventlog.Subscription, budget, quiet, idle time.Duration, logf func(string, ...any)) error {
 	deadline := time.Now().Add(budget)
