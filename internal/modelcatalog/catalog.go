@@ -41,13 +41,21 @@ type profile struct {
 // back to the bundled catalog; an explicit path must exist. An empty profile
 // selects the catalog default.
 func Load(path, profile string, timeout time.Duration) (harness.ModelConfig, error) {
+	model, _, err := Resolve(path, profile, timeout)
+	return model, err
+}
+
+// Resolve is Load that also returns the selected profile's name. The eval
+// runner names run directories by it: a model id alone cannot tell apart
+// profiles that share a model, such as thinking and no-thinking variants.
+func Resolve(path, profile string, timeout time.Duration) (harness.ModelConfig, string, error) {
 	explicit := path != ""
 	if !explicit {
 		dir := os.Getenv("XDG_CONFIG_HOME")
 		if dir == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return harness.ModelConfig{}, err
+				return harness.ModelConfig{}, "", err
 			}
 			dir = filepath.Join(home, ".config")
 		}
@@ -59,28 +67,28 @@ func Load(path, profile string, timeout time.Duration) (harness.ModelConfig, err
 		path = "bundled models.json"
 	}
 	if err != nil {
-		return harness.ModelConfig{}, fmt.Errorf("model catalog: %w", err)
+		return harness.ModelConfig{}, "", fmt.Errorf("model catalog: %w", err)
 	}
 	var c catalog
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&c); err != nil {
-		return harness.ModelConfig{}, fmt.Errorf("model catalog %s: %w", path, err)
+		return harness.ModelConfig{}, "", fmt.Errorf("model catalog %s: %w", path, err)
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return harness.ModelConfig{}, fmt.Errorf("model catalog %s: expected one JSON object", path)
+		return harness.ModelConfig{}, "", fmt.Errorf("model catalog %s: expected one JSON object", path)
 	}
 	if profile == "" {
 		profile = c.Default
 	}
 	p, ok := c.Models[profile]
 	if !ok || profile == "" {
-		return harness.ModelConfig{}, fmt.Errorf("model catalog %s: unknown profile %q; set default or use -profile", path, profile)
+		return harness.ModelConfig{}, "", fmt.Errorf("model catalog %s: unknown profile %q; set default or use -profile", path, profile)
 	}
 	if p.Timeout != "" {
 		timeout, err = time.ParseDuration(p.Timeout)
 		if err != nil {
-			return harness.ModelConfig{}, fmt.Errorf("profile %q timeout: %w", profile, err)
+			return harness.ModelConfig{}, "", fmt.Errorf("profile %q timeout: %w", profile, err)
 		}
 	}
 	if p.Backend == "" {
@@ -89,7 +97,7 @@ func Load(path, profile string, timeout time.Duration) (harness.ModelConfig, err
 	if p.Preset == "" {
 		p.Preset = "none"
 	}
-	return harness.ModelConfig{Backend: p.Backend, BaseURL: p.BaseURL, Model: p.Model, Preset: p.Preset, Timeout: timeout, Generation: p.Generation}, nil
+	return harness.ModelConfig{Backend: p.Backend, BaseURL: p.BaseURL, Model: p.Model, Preset: p.Preset, Timeout: timeout, Generation: p.Generation}, profile, nil
 }
 
 // Flags registers the model override flags. Model aliases never select a

@@ -41,6 +41,10 @@ type Options struct {
 	// walking up from its working directory. The workspace moves under Output
 	// once the task is graded.
 	Scratch string
+	// Commit and Profile are recorded in run.json so a run can be traced to
+	// the harness build and the model profile that produced it.
+	Commit  string
+	Profile string
 }
 
 // Outcome classifies a task attempt by its grade, not by how the session ended.
@@ -78,6 +82,8 @@ type Result struct {
 // RunInfo is written to run.json when a run starts.
 type RunInfo struct {
 	StartedAt time.Time           `json:"started_at"`
+	Commit    string              `json:"commit,omitempty"`
+	Profile   string              `json:"profile,omitempty"`
 	Ladder    string              `json:"ladder"`
 	Model     harness.ModelConfig `json:"model"`
 	Parallel  int                 `json:"parallel"`
@@ -124,7 +130,7 @@ func Run(ctx context.Context, opts Options) ([]Result, error) {
 	if err := os.MkdirAll(opts.Output, 0o755); err != nil {
 		return nil, err
 	}
-	info := RunInfo{StartedAt: time.Now(), Ladder: opts.Ladder, Model: opts.Config.Model, Parallel: opts.Parallel}
+	info := RunInfo{StartedAt: time.Now(), Commit: opts.Commit, Profile: opts.Profile, Ladder: opts.Ladder, Model: opts.Config.Model, Parallel: opts.Parallel}
 	for _, t := range tasks {
 		info.Tasks = append(info.Tasks, t.ID)
 	}

@@ -118,7 +118,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	fs.SetOutput(stderr)
 	var sel selection
 	sel.flags(fs)
-	out := fs.String("out", "", "Run directory (default eval/results/<timestamp>)")
+	out := fs.String("out", "", "Run directory (default eval/results/<commit>_<profile>_<timestamp>)")
 	parallel := fs.Int("parallel", 1, "Concurrent sessions")
 	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
@@ -132,7 +132,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	model, err := modelcatalog.Load(*configPath, *profile, cfg.Model.Timeout)
+	model, profileName, err := modelcatalog.Resolve(*configPath, *profile, cfg.Model.Timeout)
 	if err != nil {
 		return err
 	}
@@ -147,11 +147,12 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if _, err := cfg.Model.NewProvider(nil); err != nil {
 		return err
 	}
+	commit := eval.BuildCommit()
 	if *out == "" {
-		*out = filepath.Join("eval", "results", time.Now().Format("20060102-150405"))
+		*out = filepath.Join("eval", "results", eval.RunName(commit, profileName, time.Now()))
 	}
 	fmt.Fprintf(stderr, "model %s at %s; results in %s\n", cfg.Model.Model, cfg.Model.BaseURL, *out)
-	results, err := eval.Run(ctx, eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch})
+	results, err := eval.Run(ctx, eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch, Commit: commit, Profile: profileName})
 	if len(results) > 0 {
 		passed := 0
 		for _, r := range results {

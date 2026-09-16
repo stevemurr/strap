@@ -29,6 +29,12 @@ final reply before the attempt is considered finished (default 3s).
 
 ## Run layout
 
+A run directory defaults to `<commit>_<profile>_<timestamp>`: the harness
+build's short git hash (`-dirty` when the tree had uncommitted changes,
+`nogit` when the binary carries no VCS information), the model profile, and
+the start time. Runs therefore sort by harness build first, then by model.
+Both values are also recorded in `run.json` and printed in the report.
+
 ```
 eval/results/<run>/
   run.json              model, ladder, task list

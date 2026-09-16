@@ -338,7 +338,14 @@ func (r Report) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# strap eval: %s\n\n", r.Dir)
 	if r.Run.Model.Model != "" {
-		fmt.Fprintf(&b, "Model %s at %s (backend %s, preset %s). Started %s, parallel %d.\n\n", r.Run.Model.Model, r.Run.Model.BaseURL, r.Run.Model.Backend, r.Run.Model.Preset, r.Run.StartedAt.Format(time.RFC3339), r.Run.Parallel)
+		fmt.Fprintf(&b, "Model %s at %s (backend %s, preset %s). Started %s, parallel %d.", r.Run.Model.Model, r.Run.Model.BaseURL, r.Run.Model.Backend, r.Run.Model.Preset, r.Run.StartedAt.Format(time.RFC3339), r.Run.Parallel)
+		if r.Run.Commit != "" {
+			fmt.Fprintf(&b, " Harness commit %s.", r.Run.Commit)
+		}
+		if r.Run.Profile != "" {
+			fmt.Fprintf(&b, " Profile %s.", r.Run.Profile)
+		}
+		b.WriteString("\n\n")
 	}
 	b.WriteString("## Tiers\n\n| tier | tasks | passed | rate | failed | build failed | error | timed out | no reply | mean time | calls | tools | tool errs | agents | tokens in | tokens out |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	total := TierSummary{Tier: "all"}
