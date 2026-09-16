@@ -22,6 +22,13 @@ func (s *Session) publish(e conversation.Event) error {
 		s.mu.Lock()
 		s.executionError = errors.Join(s.executionError, exit.Err)
 		s.mu.Unlock()
+		if exit.Agent == s.Root() {
+			// Nothing can deliver a worker's result once the root is gone;
+			// letting workers run only burns budget and fails their sends
+			// with "agent stopped". Publish runs on the controller's event
+			// path, so the stops go through a goroutine rather than reenter it.
+			go s.stopWorkers(exit.Agent)
+		}
 	}
 	if err := s.encoder.Publish(context.Background(), e); err != nil {
 		s.log.Fail(err)
@@ -32,6 +39,17 @@ func (s *Session) publish(e conversation.Event) error {
 	}
 	return nil
 }
+
+// stopWorkers requests a stop for every live agent other than the root.
+func (s *Session) stopWorkers(root message.ActorID) {
+	for _, a := range s.Agents() {
+		if a.ID == root || a.State.Terminal() {
+			continue
+		}
+		_, _ = s.StopAgent(a.ID)
+	}
+}
+
 func (s *Session) Events(ctx context.Context, q eventlog.Query) (eventlog.Page, error) {
 	return s.log.Read(ctx, q)
 }
