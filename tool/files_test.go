@@ -98,7 +98,6 @@ func TestFilesInvalidCallsDoNotModify(t *testing.T) {
 		{"write_file", `[]`},
 		{"write_file", `{"path":"test.txt","content":"\u0000"}`},
 		{"read_file", `{"path":"test.txt","offset":0}`},
-		{"read_file", `{"path":"test.txt","offset":null}`},
 		{"read_file", `{"path":"test.txt","limit":2001}`},
 		{"read_file", `{"path":"test.txt","limit":1.5}`},
 		{"edit_file", `{"path":"test.txt","old":"same","new":"bad"}`},

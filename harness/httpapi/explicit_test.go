@@ -25,7 +25,7 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 		t.Fatal(legacy.Code)
 	}
 	impl := createHTTPWorker(t, s)
-	for _, raw := range []string{`{"kind":"implementation","task":"task"}`, `{"kind":"implementation","assignee":null,"task":"task"}`, fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task","work_id":""}`, impl), fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task","audit_id":null}`, impl), fmt.Sprintf(`{"kind":"audit","assignee":%q,"work_id":"w","expected_revision":1,"submission_id":"s","task":""}`, impl)} {
+	for _, raw := range []string{`{"kind":"implementation","task":"task"}`, `{"kind":"implementation","assignee":null,"task":"task"}`, fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task","work_id":""}`, impl), fmt.Sprintf(`{"kind":"audit","assignee":%q,"work_id":"w","expected_revision":1,"submission_id":"s","task":""}`, impl)} {
 		response := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(raw)})
 		if response.Code != 400 {
 			t.Fatal(raw, response.Code, response.Body.String())

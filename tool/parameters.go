@@ -18,7 +18,9 @@ import (
 // Parameters is an immutable, compiled input contract. Its zero value is invalid.
 // Schema and Decode use the same contract; callers cannot replace either half.
 // Supported inputs are structs, pointers, slices, strings, booleans and integers.
-// JSON fields without omitempty are required. Explicit null is never accepted.
+// JSON fields without omitempty are required. A null value means the field is
+// omitted: models send null for fields they mean to leave out, so a required
+// field set to null is reported as missing and an optional one is dropped.
 // Custom JSON/text codecs, maps, interfaces, recursive types and ambiguous fields
 // are rejected at construction instead of silently weakening the schema.
 type Parameters[A any] struct {
@@ -409,7 +411,10 @@ func (p Parameters[A]) Decode(raw json.RawMessage) (A, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return args, err
 	}
-	normalized, err := p.root.validate(value, "arguments")
+	if value == nil {
+		return args, fmt.Errorf("arguments must be a JSON object, not null")
+	}
+	normalized, err := p.root.validate(withoutNulls(value), "arguments")
 	if err != nil {
 		return args, err
 	}
@@ -596,4 +601,29 @@ func validParameterName(name string) bool {
 		return false
 	}
 	return true
+}
+
+// withoutNulls returns the value with every null object member and array
+// element removed, recursively, so null reads as "omitted" everywhere.
+func withoutNulls(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		for k, x := range v {
+			if x == nil {
+				delete(v, k)
+				continue
+			}
+			v[k] = withoutNulls(x)
+		}
+		return v
+	case []any:
+		kept := v[:0]
+		for _, x := range v {
+			if x != nil {
+				kept = append(kept, withoutNulls(x))
+			}
+		}
+		return kept
+	}
+	return v
 }

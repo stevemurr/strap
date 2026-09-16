@@ -126,7 +126,7 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 		{"pass omitted", "pass", "", true},
 		{"pass empty", "pass", "[]", true},
 		{"pass nonempty", "pass", finding, false},
-		{"pass null", "pass", "null", false},
+		{"pass null", "pass", "null", true}, // null means omitted
 		{"pass string", "pass", `"[]"`, false},
 		{"fail omitted", "fail", "", false},
 		{"fail empty", "fail", "[]", false},

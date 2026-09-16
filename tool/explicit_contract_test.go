@@ -23,11 +23,11 @@ func TestAssignmentWireAndToolDecodersAgree(t *testing.T) {
 		{`{"kind":"implementation","assignee":" ","task":"do it"}`, false},
 		{`{"kind":"implementation","assignee":"impl","task":" "}`, false},
 		{`{"kind":"implementation","assignee":"impl","task":"do it","work_id":""}`, false},
-		{`{"kind":"implementation","assignee":"impl","task":"do it","audit_id":null}`, false},
+		{`{"kind":"implementation","assignee":"impl","task":"do it","audit_id":null}`, true}, // null means omitted
 		{`{"kind":"audit","assignee":"auditor","work_id":"work","expected_revision":2,"submission_id":"sub","task":""}`, false},
 		{`{"kind":"repair","assignee":"impl","work_id":"work","expected_revision":2,"audit_id":"audit","submission_id":""}`, false},
 		{`{"kind":"repair","assignee":"impl","work_id":"work","expected_revision":0,"audit_id":"audit"}`, false},
-		{`{"kind":"repair","assignee":"impl","work_id":"work","expected_revision":2,"audit_id":"audit","scope":null}`, false},
+		{`{"kind":"repair","assignee":"impl","work_id":"work","expected_revision":2,"audit_id":"audit","scope":null}`, true}, // null means omitted
 	}
 	for _, tc := range cases {
 		t.Run(tc.raw, func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestAssignmentWireAndToolDecodersAgree(t *testing.T) {
 }
 func TestListWorkContinuationRejectsReplacementFilters(t *testing.T) {
 	op := ListWork(func(context.Context, Call, work.ListQuery) (Result, error) { return Text("ok"), nil })
-	for _, raw := range []string{`{"cursor":"token","state":""}`, `{"cursor":"token","assignee":null}`, `{"limit":0}`, `{"limit":101}`, `{"cursor":""}`} {
+	for _, raw := range []string{`{"cursor":"token","state":""}`, `{"cursor":"token","assignee":"x"}`, `{"limit":0}`, `{"limit":101}`, `{"cursor":""}`} {
 		if _, e := op.Call(context.Background(), Call{Arguments: []byte(raw)}); e == nil {
 			t.Fatal("accepted", raw)
 		}

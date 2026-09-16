@@ -133,7 +133,7 @@ func TestManagementCallbacks(t *testing.T) {
 		if err != nil || result.Content.Text() != "acknowledged" {
 			t.Fatalf("management call: %+v %v", result, err)
 		}
-		for _, raw := range []string{`{}`, `{"agent_id":null}`, `{"agent_id":" "}`, `{"agent_id":"agent-2","actor":"forged"}`, `{"agent_id":"a","agent_id":"b"}`} {
+		for _, raw := range []string{`{}`, `{"agent_id":" "}`, `{"agent_id":"agent-2","actor":"forged"}`, `{"agent_id":"a","agent_id":"b"}`} {
 			if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 				t.Fatalf("accepted %s", raw)
 			}
@@ -169,7 +169,7 @@ func TestInspectAgentContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, raw := range []string{`{}`, `{"agent_id":" "}`, `{"agent_id":"agent-2","limit":0}`, `{"agent_id":"agent-2","limit":101}`, `{"agent_id":"agent-2","limit":null}`, `{"agent_id":"agent-2","before":0}`, `{"agent_id":"agent-2","before":-1}`, `{"agent_id":"agent-2","before":null}`, `{"agent_id":"agent-2","actor":"forged"}`} {
+	for _, raw := range []string{`{}`, `{"agent_id":" "}`, `{"agent_id":"agent-2","limit":0}`, `{"agent_id":"agent-2","limit":101}`, `{"agent_id":"agent-2","before":0}`, `{"agent_id":"agent-2","before":-1}`, `{"agent_id":"agent-2","actor":"forged"}`} {
 		if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}

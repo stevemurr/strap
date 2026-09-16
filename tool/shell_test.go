@@ -134,7 +134,7 @@ func TestShellEnvironmentAndArgumentValidation(t *testing.T) {
 		`{}`, `{"command":""}`, `{"command":"  "}`, `{"command":null}`,
 		`{"command":"true","timeout_ms":0}`, `{"command":"true","timeout_ms":-1}`,
 		`{"command":"true","timeout_ms":300001}`, `{"command":"true","timeout_ms":9223372036854775807}`,
-		`{"command":"true","timeout_ms":null}`, `{"command":"true","background":true}`,
+		`{"command":"true","background":true}`,
 	} {
 		if _, err := s.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Errorf("accepted invalid arguments: %s", raw)

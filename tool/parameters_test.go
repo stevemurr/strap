@@ -39,7 +39,7 @@ func TestParametersValidateAndDecodeOneContract(t *testing.T) {
 			t.Fatal("omission changed")
 		}
 	}
-	for _, raw := range []string{`{}`, `{"title":null}`, `{"title":"p","Title":"bypass"}`, `{"title":"p","title":"duplicate"}`, `{"title":"p","count":0}`, `{"title":"p","count":11}`, `{"title":"p","count":128}`, `{"title":"p","count":1.5}`, `{"title":"p","steps":"[]"}`, `{"title":"p","steps":[]}`, `{"title":"p","steps":[{}]}`, `{"title":"p","steps":[{"step_id":"s","note":"escape"}]}`, `{"title":"p","steps":[{"step_id":"s","status":"completed"}]}`, `{"title":"p","steps":[{"step_id":"s","status":null}]}`, `{"title":"p","pages":[1,1.0]}`, `{"title":"p","pages":[1,2,3]}`, `{"title":"p","pages":[]}`, `{"title":"p"} {}`} {
+	for _, raw := range []string{`{}`, `{"title":null}`, `{"title":"p","Title":"bypass"}`, `{"title":"p","title":"duplicate"}`, `{"title":"p","count":0}`, `{"title":"p","count":11}`, `{"title":"p","count":128}`, `{"title":"p","count":1.5}`, `{"title":"p","steps":"[]"}`, `{"title":"p","steps":[]}`, `{"title":"p","steps":[{}]}`, `{"title":"p","steps":[{"step_id":"s","note":"escape"}]}`, `{"title":"p","steps":[{"step_id":"s","status":"completed"}]}`, `{"title":"p","steps":[{"step_id":"s","status":"done"}]}`, `{"title":"p","pages":[1,1.0]}`, `{"title":"p","pages":[1,2,3]}`, `{"title":"p","pages":[]}`, `{"title":"p"} {}`} {
 		if _, err := params.Decode(json.RawMessage(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}

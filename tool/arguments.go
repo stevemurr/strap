@@ -16,9 +16,8 @@ func validateValues(raw json.RawMessage) error {
 		if err != nil {
 			return err
 		}
-		if token == nil {
-			return fmt.Errorf("null is not a valid argument value")
-		}
+		// null inside the arguments means the field is omitted; Decode drops
+		// it before validation. A top-level null is rejected there.
 		delimiter, ok := token.(json.Delim)
 		if !ok {
 			return nil

@@ -58,7 +58,7 @@ func TestPDFRenderingPageOrderAndLimits(t *testing.T) {
 			}
 		}
 	}
-	for _, raw := range []string{`{"path":"pages.pdf","pages":[]}`, `{"path":"pages.pdf","pages":[0]}`, `{"path":"pages.pdf","pages":[4]}`, `{"path":"pages.pdf","pages":[1,1]}`, `{"path":"pages.pdf","pages":[1,2,3]}`, `{"path":"pages.pdf","pages":null}`} {
+	for _, raw := range []string{`{"path":"pages.pdf","pages":[]}`, `{"path":"pages.pdf","pages":[0]}`, `{"path":"pages.pdf","pages":[4]}`, `{"path":"pages.pdf","pages":[1,1]}`, `{"path":"pages.pdf","pages":[1,2,3]}`} {
 		if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
