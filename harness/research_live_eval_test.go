@@ -68,7 +68,7 @@ func TestResearchLivePlanComparison(t *testing.T) {
 			cfg.Dir = dir
 			cfg.Web = nil
 			cfg.Telemetry.ContextTokens = false
-			cfg.Model = harness.ModelConfig{Backend: "vllm", Preset: "none", BaseURL: url, Model: model, Timeout: 2 * time.Minute, Generation: vllm.Generation{MaxTokens: &maxTokens, EnableThinking: &thinking, Temperature: &temperature, TopP: &topP}}
+			cfg.Model = harness.ModelConfig{Backend: "vllm", BaseURL: url, Model: model, Timeout: 2 * time.Minute, Generation: vllm.Generation{MaxTokens: &maxTokens, EnableThinking: &thinking, Temperature: &temperature, TopP: &topP}}
 			base, err := cfg.Model.NewProvider(nil)
 			if err != nil {
 				t.Fatal(err)

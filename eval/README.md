@@ -22,7 +22,7 @@ go build -o strap-eval ./cmd/strap-eval
 ```
 
 `run` accepts the same model flags as `strap` (`-config`, `-profile`,
-`-base-url`, `-model`, `-preset`, generation overrides). `-task id,id` and
+`-base-url`, `-model`, generation overrides). `-task id,id` and
 `-tier` select tasks. `-parallel N` runs N sessions at once against the model
 server. `-quiet` sets how long the session must stay silent after the root's
 final reply before the attempt is considered finished (default 3s).

@@ -31,7 +31,6 @@ type profile struct {
 	Backend    string          `json:"backend"`
 	BaseURL    string          `json:"base_url"`
 	Model      string          `json:"model"`
-	Preset     string          `json:"preset"`
 	Timeout    string          `json:"timeout"`
 	Generation vllm.Generation `json:"generation"`
 }
@@ -94,20 +93,20 @@ func Resolve(path, profile string, timeout time.Duration) (harness.ModelConfig, 
 	if p.Backend == "" {
 		p.Backend = "vllm"
 	}
-	if p.Preset == "" {
-		p.Preset = "none"
-	}
-	return harness.ModelConfig{Backend: p.Backend, BaseURL: p.BaseURL, Model: p.Model, Preset: p.Preset, Timeout: timeout, Generation: p.Generation}, profile, nil
+	return harness.ModelConfig{Backend: p.Backend, BaseURL: p.BaseURL, Model: p.Model, Timeout: timeout, Generation: p.Generation}, profile, nil
 }
 
-// Flags registers the model override flags. Model aliases never select a
-// preset; profiles select policy explicitly.
+// Flags registers the model override flags. Each overrides one setting of the
+// selected profile; the profile itself carries the complete generation policy.
 func Flags(flags *flag.FlagSet, model *harness.ModelConfig) {
 	flags.StringVar(&model.BaseURL, "base-url", model.BaseURL, "Local server root or API prefix")
 	flags.StringVar(&model.Model, "model", model.Model, "Model served by the endpoint (does not select a profile)")
 	flags.DurationVar(&model.Timeout, "timeout", model.Timeout, "Timeout for each model HTTP request")
 	flags.StringVar(&model.Backend, "backend", model.Backend, "Model backend: vllm or chatcompletions")
-	flags.StringVar(&model.Preset, "preset", model.Preset, "Replace saved generation settings with qwen3.6-coding or none")
+	flags.Func("reasoning-effort", "Override Qwen template reasoning effort: low, medium, or xhigh", func(raw string) error {
+		model.Generation.ReasoningEffort = &raw
+		return nil
+	})
 	floatFlag := func(name, help string, target **float64) {
 		flags.Func(name, help, func(raw string) error {
 			v, err := strconv.ParseFloat(raw, 64)

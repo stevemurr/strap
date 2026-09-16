@@ -18,6 +18,7 @@ type Generation struct {
 	MaxTokens            *int     `json:"max_tokens,omitempty"`             // > 0; output budget, not context length.
 	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
 	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
+	ReasoningEffort      *string  `json:"reasoning_effort,omitempty"`       // Qwen template: low, medium, or xhigh.
 	// StrictTools marks every advertised tool strict, so vLLM constrains
 	// tool-call generation to each tool's schema (structural tags) instead of
 	// extracting calls from free text. It is not a sampling field; it is
@@ -37,8 +38,9 @@ type generationFields struct {
 }
 
 type templateFields struct {
-	EnableThinking       *bool `json:"enable_thinking,omitempty"`
-	ForceNonemptyContent *bool `json:"force_nonempty_content,omitempty"`
+	EnableThinking       *bool   `json:"enable_thinking,omitempty"`
+	ForceNonemptyContent *bool   `json:"force_nonempty_content,omitempty"`
+	ReasoningEffort      *string `json:"reasoning_effort,omitempty"`
 }
 
 func (g Generation) freeze() (generationFields, error) {
@@ -75,13 +77,20 @@ func (g Generation) freeze() (generationFields, error) {
 	if g.MaxTokens != nil && *g.MaxTokens < 1 {
 		return generationFields{}, fmt.Errorf("max_tokens must be a positive integer")
 	}
+	if g.ReasoningEffort != nil {
+		switch *g.ReasoningEffort {
+		case "low", "medium", "xhigh":
+		default:
+			return generationFields{}, fmt.Errorf("reasoning_effort must be low, medium, or xhigh")
+		}
+	}
 	fields := generationFields{
 		Temperature: copyValue(g.Temperature), TopP: copyValue(g.TopP), TopK: copyValue(g.TopK),
 		MinP: copyValue(g.MinP), PresencePenalty: copyValue(g.PresencePenalty),
 		RepetitionPenalty: copyValue(g.RepetitionPenalty), MaxTokens: copyValue(g.MaxTokens),
 	}
-	if g.EnableThinking != nil || g.ForceNonemptyContent != nil {
-		fields.ChatTemplate = &templateFields{EnableThinking: copyValue(g.EnableThinking), ForceNonemptyContent: copyValue(g.ForceNonemptyContent)}
+	if g.EnableThinking != nil || g.ForceNonemptyContent != nil || g.ReasoningEffort != nil {
+		fields.ChatTemplate = &templateFields{EnableThinking: copyValue(g.EnableThinking), ForceNonemptyContent: copyValue(g.ForceNonemptyContent), ReasoningEffort: copyValue(g.ReasoningEffort)}
 	}
 	return fields, nil
 }

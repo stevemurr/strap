@@ -505,6 +505,7 @@ func cloneModel(m ModelConfig) ModelConfig {
 	g.RepetitionPenalty = copyPtr(g.RepetitionPenalty)
 	g.MaxTokens = copyPtr(g.MaxTokens)
 	g.EnableThinking = copyPtr(g.EnableThinking)
+	g.ReasoningEffort = copyPtr(g.ReasoningEffort)
 	g.ForceNonemptyContent = copyPtr(g.ForceNonemptyContent)
 	return m
 }

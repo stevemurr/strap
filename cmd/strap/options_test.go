@@ -24,22 +24,22 @@ func writeCatalog(t *testing.T, body string) string {
 func TestSavedProfileAndFlagPrecedence(t *testing.T) {
 	path := writeCatalog(t, `{"default":"custom","models":{"custom":{
 		"base_url":"http://localhost:1234", "model":"saved-alias", "timeout":"2m",
-		"generation":{"temperature":0.7,"top_p":0.8,"enable_thinking":true,"force_nonempty_content":true}
+		"generation":{"temperature":0.7,"top_p":0.8,"enable_thinking":true,"force_nonempty_content":true,"reasoning_effort":"low"}
 	}}}`)
 	for _, args := range [][]string{
-		{"-config", path, "-temperature", "0", "-thinking=false", "-force-nonempty-content=false", "-timeout", "3m"},
-		{"-temperature", "0", "-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-config", path},
+		{"-config", path, "-temperature", "0", "-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-reasoning-effort", "medium"},
+		{"-reasoning-effort", "medium", "-temperature", "0", "-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-config", path},
 	} {
 		o, err := parseOptions(args, io.Discard)
 		if err != nil {
 			t.Fatal(err)
 		}
 		m := o.config.Model
-		if m.Model != "saved-alias" || m.BaseURL != "http://localhost:1234" || m.Timeout != 3*time.Minute || m.Preset != "none" {
+		if m.Model != "saved-alias" || m.BaseURL != "http://localhost:1234" || m.Timeout != 3*time.Minute {
 			t.Fatalf("unexpected model: %+v", m)
 		}
 		g := m.Generation
-		if *g.Temperature != 0 || *g.TopP != 0.8 || *g.EnableThinking || *g.ForceNonemptyContent {
+		if *g.Temperature != 0 || *g.TopP != 0.8 || *g.EnableThinking || *g.ForceNonemptyContent || *g.ReasoningEffort != "medium" {
 			t.Fatalf("flags failed to override saved values: %+v", g)
 		}
 	}

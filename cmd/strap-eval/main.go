@@ -126,7 +126,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	configPath := fs.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
 	profile := fs.String("profile", "", "Saved model profile (default selected by the catalog)")
 	cfg := harness.DefaultConfig()
-	cfg.Model = harness.ModelConfig{Backend: "vllm", Preset: "none", Timeout: cfg.Model.Timeout}
+	cfg.Model = harness.ModelConfig{Backend: "vllm", Timeout: cfg.Model.Timeout}
 	modelcatalog.Flags(fs, &cfg.Model)
 	fs.IntVar(&cfg.ReasoningLimit, "reasoning-limit", cfg.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	if err := fs.Parse(args); err != nil {
@@ -136,8 +136,8 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if err != nil {
 		return err
 	}
-	if modelcatalog.WasSet(fs, "preset") || (modelcatalog.WasSet(fs, "backend") && cfg.Model.Backend == "chatcompletions") {
-		model.Preset = "none"
+	if modelcatalog.WasSet(fs, "backend") && cfg.Model.Backend == "chatcompletions" {
+		// The generic backend uses server defaults unless flags explicitly override.
 		model.Generation = harness.ModelConfig{}.Generation
 	}
 	cfg.Model = model

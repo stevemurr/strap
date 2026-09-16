@@ -19,7 +19,7 @@ type options struct {
 func parseOptions(args []string, stderr io.Writer) (options, error) {
 	o := options{config: harness.DefaultConfig()}
 	// The CLI's model defaults live in models.json, independently of library defaults.
-	o.config.Model = harness.ModelConfig{Backend: "vllm", Preset: "none", Timeout: o.config.Model.Timeout}
+	o.config.Model = harness.ModelConfig{Backend: "vllm", Timeout: o.config.Model.Timeout}
 	flags := flag.NewFlagSet("strap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
@@ -45,10 +45,9 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if err != nil {
 		return options{}, err
 	}
-	if flagWasSet(flags, "preset") || (flagWasSet(flags, "backend") && o.config.Model.Backend == "chatcompletions") {
-		// Explicit preset selection replaces the profile's generation settings.
+	if flagWasSet(flags, "backend") && o.config.Model.Backend == "chatcompletions" {
 		// The generic backend uses server defaults unless flags explicitly override.
-		model.Preset, model.Generation = "none", vllm.Generation{}
+		model.Generation = vllm.Generation{}
 	}
 	o.config.Model = model
 	if err := flags.Parse(args); err != nil {

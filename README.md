@@ -34,7 +34,9 @@ Flags override the selected profile, regardless of argument order. `-model` chan
 only the server alias; `-profile` selects the saved settings. `-base-url` and
 `-timeout` override the endpoint and per-request timeout. Profile `timeout` values
 use Go durations such as `60m`; omitted timeouts use the harness default (one hour).
-Missing profile `backend` and `preset` fields mean `vllm` and `none` respectively.
+A missing profile `backend` means `vllm`; a missing `generation` block leaves every
+sampling setting to the server. A profile states its complete generation policy;
+there are no named presets in code.
 Unknown JSON fields and invalid selected model settings fail before startup.
 See `go run ./cmd/strap -help` for all options.
 
@@ -59,24 +61,25 @@ inherit Qwen's 128K output cap. For vLLM tool calling, the card specifies
 The evaluation recipes also replay reasoning history; Strap currently does not,
 so these sampling settings alone do not reproduce NVIDIA's benchmark setup.
 
-The Qwen profile explicitly selects `qwen3.6-coding`: temperature `0.6`, top-p
-`0.95`, top-k `20`, min-p `0`, presence penalty `0`, repetition penalty `1`,
-`131072` maximum output tokens, and thinking enabled. Library callers retain
-`harness.DefaultConfig()`'s existing Qwen defaults; only the CLI loads catalogs.
+The Qwen profiles spell out the model card's coding settings: temperature `0.6`,
+top-p `0.95`, top-k `20`, min-p `0`, presence penalty `0`, repetition penalty `1`,
+`131072` maximum output tokens, and thinking enabled (`qwen3.6`) or disabled
+(`qwen3.6-nothink`). Library callers of `harness.DefaultConfig()` get server
+defaults unless they set `Generation`; only the CLI loads catalogs.
 
-`-preset none` discards saved generation settings and leaves unspecified values to
-the server. `-preset qwen3.6-coding` replaces them with the Qwen preset. Generation
-flags then override that choice, including explicit `0` and `false`. For example:
+Generation flags override the selected profile's values, including explicit `0`
+and `false`; a profile without a `generation` block starts from server defaults.
+For example:
 
 ```sh
-go run ./cmd/strap -model another-model -preset none -top-p 0.9
+go run ./cmd/strap -model another-model -top-p 0.9
 ```
 
 Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
 `-presence-penalty`, `-repetition-penalty`, `-max-tokens`, `-thinking=false`, and
 `-force-nonempty-content=false`. They require the vLLM backend. Explicitly selecting
 `-backend chatcompletions` clears saved generation settings and uses server defaults;
-explicit generation flags or a nonempty preset other than `none` are then rejected.
+explicit generation flags are then rejected.
 `-strict-tools` marks every advertised tool `strict`, so vLLM constrains tool-call
 generation to each tool's schema with structural tags instead of extracting calls
 from free text. It is opt-in: the served grammar must accept every schema, so test

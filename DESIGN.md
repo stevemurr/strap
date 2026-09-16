@@ -166,8 +166,8 @@ Agent → provider.Provider.Submit → provider/vllm or provider/chatcompletions
 
 The CLI selects a named model profile from a JSON catalog, then applies explicit
 flag overrides. Profiles pair endpoint aliases with generation policy; personal
-catalogs replace the bundled catalog without changing library defaults. An explicit
-`-preset` replaces saved generation settings before generation flags are applied.
+catalogs replace the bundled catalog without changing library defaults. A profile
+carries its complete generation policy; there are no named presets in code.
 Model configuration is validated before either terminal or HTTP startup. Model
 aliases and agent roles never select presets inside an adapter. `provider.Request`, the agent loop, and the
 workflow/controller carry no sampling or vLLM fields.

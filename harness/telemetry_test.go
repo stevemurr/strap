@@ -97,11 +97,13 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 		}
 	}
 }
-func TestEffectiveModelConfigResolvesPresetWithoutAliasing(t *testing.T) {
+func TestEffectiveModelConfigCopiesGenerationWithoutAliasing(t *testing.T) {
 	cfg := harness.DefaultConfig()
 	cfg.Web = nil
 	cfg.LocalTools = false
 	cfg.Model.BaseURL = "http://localhost:9999/v1"
+	limit := 131072
+	cfg.Model.Generation.MaxTokens = &limit
 	s, err := harness.New(context.Background(), cfg, harness.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +111,7 @@ func TestEffectiveModelConfigResolvesPresetWithoutAliasing(t *testing.T) {
 	defer s.Dispose(context.Background())
 	info := s.Configuration()
 	m := info.Root.Model
-	if m == nil || m.Preset != "qwen3.6-coding" || m.Generation.MaxTokens == nil || *m.Generation.MaxTokens != 131072 || m.BaseURL != "http://localhost:9999/v1" {
+	if m == nil || m.Generation.MaxTokens == nil || *m.Generation.MaxTokens != 131072 || m.BaseURL != "http://localhost:9999/v1" {
 		t.Fatal(m)
 	}
 	*m.Generation.MaxTokens = 1
