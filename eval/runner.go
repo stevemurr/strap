@@ -30,7 +30,8 @@ type Options struct {
 	Parallel int
 	Filter   func(Task) bool
 	Log      io.Writer
-	Quiet    time.Duration // Silence required after the root's final reply; default 3s.
+	Observe  func(Progress) // Optional live observer; see Progress for concurrency contract.
+	Quiet    time.Duration  // Silence required after the root's final reply; default 3s.
 	// Idle finishes a task whose agents are all idle with nothing queued and no
 	// root reply after this much silence, flagged NoReply; default 3m. Without
 	// it a root that ends on wait_for_input costs the whole session budget.
@@ -146,48 +147,68 @@ func Run(ctx context.Context, opts Options) ([]Result, error) {
 	defer lines.Close()
 	var mu sync.Mutex
 	results := make([]Result, len(tasks))
+	for _, task := range tasks {
+		opts.notify(Progress{Task: task, Phase: Queued})
+	}
 	queue := make(chan int)
 	var wg sync.WaitGroup
+	var tier sync.WaitGroup
+	var saveErr error
 	for range opts.Parallel {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range queue {
-				task := tasks[i]
-				resultPath := filepath.Join(opts.Output, task.ID, "result.json")
-				if data, err := os.ReadFile(resultPath); err == nil {
-					var prev Result
-					if json.Unmarshal(data, &prev) == nil && prev.TaskID == task.ID {
-						fmt.Fprintf(opts.Log, "[%s] reusing %s\n", task.ID, resultPath)
-						results[i] = prev
-						continue
+				func() {
+					defer tier.Done()
+					task := tasks[i]
+					resultPath := filepath.Join(opts.Output, task.ID, "result.json")
+					if data, err := os.ReadFile(resultPath); err == nil {
+						var prev Result
+						if json.Unmarshal(data, &prev) == nil && prev.TaskID == task.ID {
+							fmt.Fprintf(opts.Log, "[%s] reusing %s\n", task.ID, resultPath)
+							results[i] = prev
+							opts.notify(Progress{Task: task, Phase: Finished, Result: &prev, Reused: true})
+							return
+						}
 					}
-				}
-				if ctx.Err() != nil {
-					results[i] = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, Outcome: Errored, Error: ctx.Err().Error()}
-					continue
-				}
-				r := RunTask(ctx, opts, task)
-				results[i] = r
-				if ctx.Err() != nil {
-					continue // Interrupted attempts are not durable results.
-				}
-				if err := writeJSON(resultPath, r); err != nil {
-					fmt.Fprintf(opts.Log, "[%s] write result: %v\n", task.ID, err)
-				}
-				line, _ := json.Marshal(r)
-				mu.Lock()
-				_, _ = lines.Write(append(line, '\n'))
-				mu.Unlock()
+					if ctx.Err() != nil {
+						results[i] = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, Outcome: Errored, Error: ctx.Err().Error()}
+						return
+					}
+					r := RunTask(ctx, opts, task)
+					results[i] = r
+					if ctx.Err() != nil {
+						return // Interrupted attempts are not durable results.
+					}
+					if err := writeJSON(resultPath, r); err != nil {
+						fmt.Fprintf(opts.Log, "[%s] write result: %v\n", task.ID, err)
+						mu.Lock()
+						saveErr = errors.Join(saveErr, err)
+						mu.Unlock()
+						return
+					}
+					line, _ := json.Marshal(r)
+					mu.Lock()
+					_, err := lines.Write(append(line, '\n'))
+					saveErr = errors.Join(saveErr, err)
+					mu.Unlock()
+				}()
 			}
 		}()
 	}
 	for i := range tasks {
+		// Preserve the wrapper's tier barriers while allowing parallel problems
+		// within a tier. LoadLadder already orders easy, medium, hard.
+		if i > 0 && tasks[i].Tier != tasks[i-1].Tier {
+			tier.Wait()
+		}
+		tier.Add(1)
 		queue <- i
 	}
 	close(queue)
 	wg.Wait()
-	return results, ctx.Err()
+	return results, errors.Join(ctx.Err(), saveErr)
 }
 
 // RunTask runs one task. The agent works in a temporary directory under
@@ -205,11 +226,13 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	}
 	taskDir := filepath.Join(opts.Output, task.ID)
 	r = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, StartedAt: time.Now(), Trace: filepath.Join(taskDir, "trace.jsonl"), Workspace: filepath.Join(taskDir, "workspace")}
+	opts.notify(Progress{Task: task, Phase: Starting})
 	defer func() {
 		r.FinishedAt = time.Now()
 		r.Duration = r.FinishedAt.Sub(r.StartedAt)
 		r.Passed = r.Outcome == Passed
 		fmt.Fprintf(opts.Log, "[%s] %s after %s\n", task.ID, r.Outcome, r.Duration.Round(time.Second))
+		opts.notify(Progress{Task: task, Phase: Finished, Result: &r})
 	}()
 	fail := func(err error) Result {
 		r.Outcome, r.Error = Errored, err.Error()
@@ -260,12 +283,14 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 		return fail(err)
 	}
 	r.Session = session.ID()
+	drain := opts.observeSession(session, task)
 	cleanup := func() {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
 		if err := session.Close(closeCtx); err != nil {
 			fmt.Fprintf(opts.Log, "[%s] close: %v\n", task.ID, err)
 		}
+		drain(closeCtx)
 		insp := session.Inspect()
 		capture := insp.Capture
 		r.Capture = &capture
@@ -304,6 +329,7 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 		// endpoint, not something the workspace can be graded on.
 		return fail(fmt.Errorf("no model call completed: %s", r.ExecutionError))
 	}
+	opts.notify(Progress{Task: task, Phase: Grading})
 	if err := ApplyHidden(task, workspace); err != nil {
 		return fail(err)
 	}
