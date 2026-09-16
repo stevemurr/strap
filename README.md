@@ -12,8 +12,8 @@ With your local model server running:
 go run ./cmd/strap
 ```
 
-Model endpoints and defaults live in [`cmd/strap/models.json`](cmd/strap/models.json).
-The bundled default is `nemotron-lightning`; select the saved Qwen endpoint with
+Model endpoints and defaults live in [`internal/modelcatalog/models.json`](internal/modelcatalog/models.json).
+The bundled default is `qwen3.6`; select the saved Qwen endpoint with
 `-profile qwen3.6`. A profile pairs a server's model alias with its endpoint,
 request timeout, and generation settings.
 
@@ -26,7 +26,7 @@ Changes to a personal file take effect on the next invocation without rebuilding
 
 ```sh
 go run ./cmd/strap -profile qwen3.6
-go run ./cmd/strap -config cmd/strap/models.json -profile nemotron-lightning
+go run ./cmd/strap -config internal/modelcatalog/models.json -profile nemotron-lightning
 go run ./cmd/strap -temperature 0.8 -max-tokens 16384
 ```
 
@@ -67,6 +67,28 @@ top-p `0.95`, top-k `20`, min-p `0`, presence penalty `0`, repetition penalty `1
 (`qwen3.6-nothink`). Library callers of `harness.DefaultConfig()` get server
 defaults unless they set `Generation`; only the CLI loads catalogs.
 
+Three Qwen3.8 Flash Next profiles target `qwen3.8-flash-next-mtp3`, each with its
+generation policy stated in the catalog:
+
+| Profile | Thinking | Temperature / top-p | Max tokens |
+|---|---|---|---|
+| `qwen3.8-flash-next-nothink` | Off | `0.7` / `0.80` | `32000` |
+| `qwen3.8-flash-next-thinking` | On, `xhigh` effort | `1.0` / `0.95` | `32000` |
+| `qwen3.8-flash-next-stream` | Off | Server defaults | `400` |
+
+All Strap requests already stream, including the first two profiles. The stream
+profile keeps the short output budget and unspecified sampling from the example.
+Use `-reasoning-effort low`, `medium`, or `xhigh` to override the profile's effort;
+the value is sent inside `chat_template_kwargs`. Configure the server with
+`--reasoning-parser qwen3` to return reasoning separately from answer content.
+Both `strap` and `strap-eval` accept these profiles and generation overrides:
+
+```sh
+go run ./cmd/strap -profile qwen3.8-flash-next-nothink
+go run ./cmd/strap -profile qwen3.8-flash-next-thinking -reasoning-effort medium
+go run ./cmd/strap -profile qwen3.8-flash-next-stream
+```
+
 Generation flags override the selected profile's values, including explicit `0`
 and `false`; a profile without a `generation` block starts from server defaults.
 For example:
@@ -76,7 +98,7 @@ go run ./cmd/strap -model another-model -top-p 0.9
 ```
 
 Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
-`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, `-thinking=false`, and
+`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, `-thinking=false`, `-reasoning-effort`, and
 `-force-nonempty-content=false`. They require the vLLM backend. Explicitly selecting
 `-backend chatcompletions` clears saved generation settings and uses server defaults;
 explicit generation flags are then rejected.
@@ -87,8 +109,8 @@ it against each tool before enabling it in a profile, and expect added latency.
 The same immutable provider settings apply to the root, implementors, and auditors.
 
 The vLLM adapter targets the generation fields exposed by vLLM 0.25.0, including
-`chat_template_kwargs.enable_thinking`, plus Nemotron's
-`chat_template_kwargs.force_nonempty_content`. Both require support in the served
+`chat_template_kwargs.enable_thinking`, Qwen's `chat_template_kwargs.reasoning_effort`,
+and Nemotron's `chat_template_kwargs.force_nonempty_content`. These require support in the served
 model's template. Settings are sent on every request; unsupported settings and
 output/context limits remain visible server errors, with no automatic retry or
 parameter substitution. Reasoning-history preservation is not implemented.
