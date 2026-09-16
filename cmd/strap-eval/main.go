@@ -20,17 +20,19 @@ import (
 	"github.com/stevemurr/strap/eval"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/modelcatalog"
+	"github.com/stevemurr/strap/internal/tui"
+	"golang.org/x/term"
 )
 
 const usage = `usage:
-  strap-eval run       [-ladder DIR] [-out DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N] [model flags]
+  strap-eval run       [-ladder DIR] [-out DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N] [-ui auto|tui|plain] [model flags]
   strap-eval selfcheck [-ladder DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N]
   strap-eval list      [-ladder DIR] [-tier easy,medium,hard] [-task ID,...]
   strap-eval report    RUN_DIR
 
 run records each task under RUN_DIR/<task>/ (trace.jsonl, workspace/, result.json)
 and appends RUN_DIR/results.jsonl; rerun with the same -out to resume.
-run writes reports on completion (-report=false disables).
+run shows live progress in a terminal and writes reports on completion (-report=false disables).
 selfcheck proves every hidden test fails on the stub and passes on the reference.
 report reads a run directory and writes report.md and report.json beside it.
 `
@@ -144,6 +146,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	sel.flags(fs)
 	out := fs.String("out", "", "Run directory (default eval/results/<commit>_<profile>_<timestamp>)")
 	parallel := fs.Int("parallel", 1, "Concurrent sessions")
+	ui := fs.String("ui", "auto", "Progress display: auto, tui, or plain")
 	report := fs.Bool("report", true, "Write report.md and report.json on completion")
 	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
@@ -162,6 +165,10 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	}
 	if *parallel < 1 {
 		return errors.New("parallel must be at least 1")
+	}
+	interactive, err := useTUI(*ui, os.Stdin, stdout)
+	if err != nil {
+		return err
 	}
 	model, profileName, err := modelcatalog.Resolve(*configPath, *profile, cfg.Model.Timeout)
 	if err != nil {
@@ -184,7 +191,12 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	}
 	fmt.Fprintf(stderr, "model %s at %s; results in %s\n", cfg.Model.Model, cfg.Model.BaseURL, *out)
 	opts := eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch, Commit: commit, Profile: profileName}
-	results, err := eval.Run(ctx, opts)
+	var results []eval.Result
+	if interactive {
+		results, err = tui.RunEval(ctx, opts, os.Stdin, stdout)
+	} else {
+		results, err = eval.Run(ctx, opts)
+	}
 	if len(results) > 0 {
 		passed := 0
 		for _, r := range results {
@@ -210,6 +222,24 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 		fmt.Fprintf(stdout, "reports: %s, %s\n", filepath.Join(*out, "report.md"), filepath.Join(*out, "report.json"))
 	}
 	return err
+}
+
+func useTUI(mode string, input io.Reader, output io.Writer) (bool, error) {
+	isTerminal := func(v any) bool { f, ok := v.(*os.File); return ok && term.IsTerminal(int(f.Fd())) }
+	switch mode {
+	case "auto":
+		ci := os.Getenv("CI")
+		return isTerminal(input) && isTerminal(output) && os.Getenv("TERM") != "dumb" && (ci == "" || ci == "false" || ci == "0"), nil
+	case "plain":
+		return false, nil
+	case "tui":
+		if !isTerminal(input) || !isTerminal(output) {
+			return false, errors.New("-ui tui requires terminal input and output; use -ui plain for redirected output")
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid ui %q: use auto, tui, or plain", mode)
+	}
 }
 
 func selfcheckCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {

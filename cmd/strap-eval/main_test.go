@@ -42,6 +42,20 @@ func TestTierSelection(t *testing.T) {
 	}
 }
 
+func TestNonTerminalDisplay(t *testing.T) {
+	for _, mode := range []string{"auto", "plain"} {
+		enabled, err := useTUI(mode, strings.NewReader(""), new(bytes.Buffer))
+		if enabled || err != nil {
+			t.Fatal(mode, enabled, err)
+		}
+	}
+	for _, mode := range []string{"tui", "invalid"} {
+		if _, err := useTUI(mode, strings.NewReader(""), io.Discard); err == nil {
+			t.Fatal("accepted", mode)
+		}
+	}
+}
+
 func TestRunAutomaticallyReportsReusedResults(t *testing.T) {
 	for _, report := range []bool{true, false} {
 		t.Run(map[bool]string{true: "report", false: "disabled"}[report], func(t *testing.T) {
@@ -61,7 +75,7 @@ func TestRunAutomaticallyReportsReusedResults(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "results.jsonl"), append(data, '\n'), 0600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"run", "-config", cfg, "-ladder", "../../eval/ladder", "-tier", "easy,medium", "-task", r.TaskID, "-out", dir}
+			args := []string{"run", "-config", cfg, "-ladder", "../../eval/ladder", "-tier", "easy,medium", "-task", r.TaskID, "-out", dir, "-ui", "plain"}
 			if !report {
 				args = append(args, "-report=false")
 			}

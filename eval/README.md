@@ -36,6 +36,36 @@ final reply before the attempt is considered finished (default 3s).
 the former `run-eval.sh` script, which is removed. From another directory, also
 pass `-ladder /path/to/strap/eval/ladder`.
 
+### Live progress
+
+When input and output are terminals, `run` opens a read-only TUI using Strap's
+existing activity renderer. It shows overall and per-tier completion, active
+problem spinners, elapsed time and session budgets, model/tool calls, tool
+errors, context measurements, token usage, and expandable tool activity.
+Grading and long gaps between events are shown separately from agent work.
+The display exits automatically when the run finishes; it never requires a reply.
+
+- **↑/↓** or **j/k** selects a problem; **f** resumes following active problems.
+- **Enter** or **F7** focuses activity folds; **↑/↓** selects a fold and **Enter**
+  expands it. **Esc** returns to problem navigation.
+- **Tab** cycles between all activity and individual agent streams.
+- **PgUp/PgDn** or the mouse wheel scrolls; **Ctrl+End** returns to latest output.
+- **Ctrl+T** shows or hides reasoning; **Ctrl+C** stops the run and cleans up.
+
+The view has no composer or agent-control commands. It reads an independent
+event subscription, so browsing does not consume the runner's events or change
+model inputs. Context is the latest measured size for the selected agent (the
+root in the all-agent view), not cumulative input tokens. Unknown counts are
+marked unavailable and incomplete token totals are marked partial. Context-window
+percentages are omitted because the runner does not have a reliable window limit.
+Reused results show saved grading output and replies; live metrics are unavailable.
+The activity pane retains a bounded tail; full history remains in `trace.jsonl`.
+
+Use `-ui plain` for the original line-oriented output. `-ui auto` is the default
+and selects plain output for pipes, CI, or `TERM=dumb`. `-ui tui` explicitly
+requires terminal input and output. Interrupted runs retain completed results;
+reports can be generated explicitly with `strap-eval report RUN_DIR`.
+
 ## Run layout
 
 A run directory defaults to `<commit>_<profile>_<timestamp>`: the harness

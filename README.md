@@ -305,6 +305,19 @@ go run ./examples/local       # Real local-model audited delegation.
 go test -race ./...
 ```
 
+## Evaluation
+
+Run the coding ladder with live progress, context and tool-call counts, and
+read-only activity inspection. Tiers run in order and reports are written automatically:
+
+```sh
+go run ./cmd/strap-eval run -tier easy,medium,hard -parallel 2 -profile PROFILE -out eval/results/RUN
+```
+
+Replace `PROFILE` with a saved model profile. Use `-ui plain` for line-oriented
+output, or rerun with the same `-out` to resume. See the [eval guide](eval/README.md)
+for keyboard controls, task selection, grading, and reports.
+
 ## Package map
 
 ```text
