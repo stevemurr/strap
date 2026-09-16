@@ -291,7 +291,10 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 			if errors.As(err, &rejected) && ctx.Err() == nil && malformed < maxMalformedCalls {
 				malformed++
 				notice := fmt.Sprintf("Your previous %s call was discarded and nothing ran: %v. Emit the call again with every parameter closed, one tool call per block.", rejected.Name, err)
-				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, &output); err != nil {
+				// The notice is a synthetic user message about a finished output.
+				// Linking it to that output breaks projection replay, which only
+				// accepts assistant messages on an output that is still active.
+				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
 					return err
 				}
 				continue
@@ -299,7 +302,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 			if errors.Is(err, ErrReasoningLimit) && ctx.Err() == nil && overrun < maxReasoningRetries {
 				overrun++
 				notice := fmt.Sprintf("Your previous response was cut off after %d KB of reasoning without a tool call or reply, and nothing ran. Act now: emit the next tool call or the final reply directly, without further deliberation.", a.config.Spec.ReasoningLimit>>10)
-				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, &output); err != nil {
+				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
 					return err
 				}
 				continue

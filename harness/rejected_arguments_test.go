@@ -21,6 +21,7 @@ import (
 	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/provider/vllm"
+	"github.com/stevemurr/strap/work"
 )
 
 type rejectedArgumentsTransport struct{ body string }
@@ -123,4 +124,37 @@ func TestRejectedArgumentsSurviveFramedJSONLArchive(t *testing.T) {
 		return
 	}
 	t.Fatal("no failed output recorded")
+}
+
+// A rejected call's retry notice must not poison projection replay: every
+// later read of the session, and the wake context of every agent, depends on
+// it. Before the fix the notice carried the failed output's id, the projector
+// rejected it with "history output mismatch", and the root died on its next
+// workflow call.
+func TestRejectedCallNoticeKeepsProjectionReadable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	body := `{"choices":[{"finish_reason":"length","message":{"role":"assistant","tool_calls":[{"id":"cut","type":"function","function":{"name":"create_plan","arguments":"{\"steps\":[{\"title\":\"Imp"}}]}}]}`
+	p, err := vllm.New(vllm.Config{BaseURL: "http://model.test", Model: "test", HTTPClient: &http.Client{Transport: rejectedArgumentsTransport{body}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := harness.DefaultConfig()
+	cfg.Dir, cfg.LocalTools, cfg.Web = t.TempDir(), false, nil
+	cfg.Telemetry.ContextTokens = false
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Dispose(context.Background())
+	if _, err := s.Send(s.Root(), "plan it"); err != nil {
+		t.Fatal(err)
+	}
+	awaitAgentState(t, s, s.Root(), agent.Failed) // Two retries, then the agent gives up.
+	if _, err := s.ListWork(ctx, s.Root(), work.ListQuery{Limit: 10}); err != nil {
+		t.Fatalf("projection unreadable after a rejected call: %v", err)
+	}
+	if _, err := s.InspectAgentContext(ctx, s.Root(), conversation.InspectOptions{}); err != nil {
+		t.Fatalf("agent context unreadable after a rejected call: %v", err)
+	}
 }
