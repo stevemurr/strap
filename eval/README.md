@@ -17,15 +17,24 @@ go build -o strap-eval ./cmd/strap-eval
 ./strap-eval list                                   # every task with its insight
 ./strap-eval selfcheck                              # hidden tests fail on the stub, pass on the reference
 ./strap-eval run -tier easy -parallel 2             # record eval/results/<timestamp>/
+./strap-eval run -tier easy,medium,hard -parallel 2 -profile PROFILE -out eval/results/RUN
 ./strap-eval run -out eval/results/<dir>            # rerun the same directory to resume
 ./strap-eval report eval/results/<dir>              # write report.md and report.json
 ```
 
 `run` accepts the same model flags as `strap` (`-config`, `-profile`,
 `-base-url`, `-model`, generation overrides). `-task id,id` and
-`-tier` select tasks. `-parallel N` runs N sessions at once against the model
-server. `-quiet` sets how long the session must stay silent after the root's
+`-tier easy,medium,hard` select tasks. Omit `-tier` for all tiers. Whitespace
+and duplicate tiers are accepted; unknown or empty tier names are errors.
+`-parallel N` runs N sessions at once within a tier. Tiers always run in
+easy → medium → hard order, with each tier finishing before the next starts.
+`-quiet` sets how long the session must stay silent after the root's
 final reply before the attempt is considered finished (default 3s).
+
+`run` writes `report.md` and `report.json` after successful completion; use
+`-report=false` to skip report generation. The multi-tier command above replaces
+the former `run-eval.sh` script, which is removed. From another directory, also
+pass `-ladder /path/to/strap/eval/ladder`.
 
 ## Run layout
 

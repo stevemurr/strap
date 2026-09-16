@@ -23,13 +23,14 @@ import (
 )
 
 const usage = `usage:
-  strap-eval run       [-ladder DIR] [-out DIR] [-tier T] [-task ID,...] [-parallel N] [model flags]
-  strap-eval selfcheck [-ladder DIR] [-tier T] [-task ID,...] [-parallel N]
-  strap-eval list      [-ladder DIR] [-tier T] [-task ID,...]
+  strap-eval run       [-ladder DIR] [-out DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N] [model flags]
+  strap-eval selfcheck [-ladder DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N]
+  strap-eval list      [-ladder DIR] [-tier easy,medium,hard] [-task ID,...]
   strap-eval report    RUN_DIR
 
 run records each task under RUN_DIR/<task>/ (trace.jsonl, workspace/, result.json)
 and appends RUN_DIR/results.jsonl; rerun with the same -out to resume.
+run writes reports on completion (-report=false disables).
 selfcheck proves every hidden test fails on the stub and passes on the reference.
 report reads a run directory and writes report.md and report.json beside it.
 `
@@ -76,11 +77,17 @@ type selection struct {
 
 func (s *selection) flags(fs *flag.FlagSet) {
 	fs.StringVar(&s.ladder, "ladder", "eval/ladder", "Task ladder directory")
-	fs.StringVar(&s.tier, "tier", "", "Only run this tier (easy, medium or hard)")
+	fs.StringVar(&s.tier, "tier", "", "Comma-separated tiers: easy,medium,hard (default all)")
 	fs.StringVar(&s.tasks, "task", "", "Only run these comma-separated task ids")
 }
 
 func (s *selection) filter() func(eval.Task) bool {
+	tiers := map[string]bool{}
+	for _, tier := range strings.Split(s.tier, ",") {
+		if tier = strings.TrimSpace(tier); tier != "" {
+			tiers[tier] = true
+		}
+	}
 	ids := map[string]bool{}
 	for _, id := range strings.Split(s.tasks, ",") {
 		if id = strings.TrimSpace(id); id != "" {
@@ -88,14 +95,31 @@ func (s *selection) filter() func(eval.Task) bool {
 		}
 	}
 	return func(t eval.Task) bool {
-		if s.tier != "" && t.Tier != s.tier {
+		if len(tiers) != 0 && !tiers[t.Tier] {
 			return false
 		}
 		return len(ids) == 0 || ids[t.ID]
 	}
 }
 
+func (s *selection) validate() error {
+	if s.tier == "" {
+		return nil
+	}
+	for _, tier := range strings.Split(s.tier, ",") {
+		switch strings.TrimSpace(tier) {
+		case "easy", "medium", "hard":
+		default:
+			return fmt.Errorf("invalid tier %q: use easy, medium, or hard", strings.TrimSpace(tier))
+		}
+	}
+	return nil
+}
+
 func (s *selection) load() ([]eval.Task, error) {
+	if err := s.validate(); err != nil {
+		return nil, err
+	}
 	tasks, err := eval.LoadLadder(s.ladder)
 	if err != nil {
 		return nil, err
@@ -120,6 +144,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	sel.flags(fs)
 	out := fs.String("out", "", "Run directory (default eval/results/<commit>_<profile>_<timestamp>)")
 	parallel := fs.Int("parallel", 1, "Concurrent sessions")
+	report := fs.Bool("report", true, "Write report.md and report.json on completion")
 	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
 	scratch := fs.String("scratch", "", "Parent directory for live workspaces while sessions run (default the system temp directory)")
@@ -131,6 +156,12 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	fs.IntVar(&cfg.ReasoningLimit, "reasoning-limit", cfg.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if err := sel.validate(); err != nil {
+		return err
+	}
+	if *parallel < 1 {
+		return errors.New("parallel must be at least 1")
 	}
 	model, profileName, err := modelcatalog.Resolve(*configPath, *profile, cfg.Model.Timeout)
 	if err != nil {
@@ -152,7 +183,8 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 		*out = filepath.Join("eval", "results", eval.RunName(commit, profileName, time.Now()))
 	}
 	fmt.Fprintf(stderr, "model %s at %s; results in %s\n", cfg.Model.Model, cfg.Model.BaseURL, *out)
-	results, err := eval.Run(ctx, eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch, Commit: commit, Profile: profileName})
+	opts := eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch, Commit: commit, Profile: profileName}
+	results, err := eval.Run(ctx, opts)
 	if len(results) > 0 {
 		passed := 0
 		for _, r := range results {
@@ -160,7 +192,22 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 				passed++
 			}
 		}
-		fmt.Fprintf(stdout, "%d/%d passed; run: strap-eval report %s\n", passed, len(results), *out)
+		if err != nil {
+			fmt.Fprintf(stdout, "run stopped; completed results in %s (rerun with the same -out to resume)\n", *out)
+		} else {
+			fmt.Fprintf(stdout, "%d/%d passed; results in %s\n", passed, len(results), *out)
+		}
+	}
+	if err == nil && *report {
+		fmt.Fprintln(stderr, "writing reports…")
+		rep, reportErr := eval.Analyze(ctx, *out)
+		if reportErr == nil {
+			reportErr = eval.WriteReport(rep)
+		}
+		if reportErr != nil {
+			return fmt.Errorf("write report: %w", reportErr)
+		}
+		fmt.Fprintf(stdout, "reports: %s, %s\n", filepath.Join(*out, "report.md"), filepath.Join(*out, "report.json"))
 	}
 	return err
 }
