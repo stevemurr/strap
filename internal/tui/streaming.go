@@ -29,7 +29,6 @@ func (m *model) observeOutput(fact agent.Event) {
 		id := e.Output
 		row := &m.entries[len(m.entries)-1]
 		row.output = &id
-		row.reasoningExpanded = m.reasoningExpanded
 	case agent.OutputDelta:
 		row := m.outputEntry(e.Output)
 		if row == nil {
@@ -40,6 +39,8 @@ func (m *model) observeOutput(fact agent.Event) {
 			if !row.contentStarted {
 				row.meta = fmt.Sprintf("%s · thinking", e.Output.Agent)
 			}
+			m.noteStreamEntry(row)
+			return // Recorded reasoning changes status, never the live transcript.
 		} else {
 			row.contentStarted = true
 			row.body += safeText(e.Text)
@@ -60,18 +61,10 @@ func (m *model) observeOutput(fact agent.Event) {
 		if e.Err != nil {
 			row.meta += " · " + safeText(e.Err.Error())
 		}
+	default:
+		return // Non-output agent facts do not change transcript rows.
 	}
 	if !m.selecting {
 		m.renderTranscript(false)
 	}
-}
-
-// Ctrl+T is the terminal input for Cmd+T mappings. It changes only view state.
-func (m *model) toggleReasoning() {
-	m.reasoningExpanded = !m.reasoningExpanded
-	for i := range m.entries {
-		m.entries[i].reasoningExpanded = m.reasoningExpanded
-		m.entries[i].renderWidth = 0
-	}
-	m.renderTranscript(false)
 }

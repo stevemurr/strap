@@ -12,7 +12,7 @@ import (
 
 func TestReadProtocolAndContentFailures(t *testing.T) {
 	for _, tc := range []struct{ mode, want string }{
-		{"version", "version failed"}, {"invalid envelope", "invalid JSON"},
+		{"invalid envelope", "invalid JSON"},
 		{"rejected", "site failed"}, {"bad data", "data:"},
 		{"readiness error", "did not become readable"},
 		{"missing content", "rendered page content"}, {"missing URL", "rendered page content"},
@@ -23,12 +23,6 @@ func TestReadProtocolAndContentFailures(t *testing.T) {
 			closed := 0
 			c := &Client{ExecutablePath: "/host/browser", MaxChars: 1000, MaxBytes: 100000}
 			c.run = func(_ context.Context, _ string, args []string, _ string, _ int, _ ...string) ([]byte, error) {
-				if args[0] == "--version" {
-					if tc.mode == "version" {
-						return nil, errors.New("version failed")
-					}
-					return []byte("agent-browser " + Version), nil
-				}
 				if i := slices.Index(args, "--executable-path"); i < 0 || args[i+1] != "/host/browser" {
 					t.Error("executable override lost", args)
 				}
@@ -77,12 +71,8 @@ func TestReadProtocolAndContentFailures(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
-			wantClosed := 1
-			if tc.mode == "version" {
-				wantClosed = 0
-			}
-			if closed != wantClosed {
-				t.Fatalf("closed %d times; want %d", closed, wantClosed)
+			if closed != 1 {
+				t.Fatalf("closed %d times; want 1", closed)
 			}
 		})
 	}
@@ -98,9 +88,6 @@ func TestReadDefaultRunnerReportsMissingProgram(t *testing.T) {
 func TestReadCleanupIncludesPIDInspectionFailure(t *testing.T) {
 	c := &Client{}
 	c.run = func(_ context.Context, _ string, args []string, dir string, _ int, _ ...string) ([]byte, error) {
-		if args[0] == "--version" {
-			return []byte("agent-browser " + Version), nil
-		}
 		if args[slices.Index(args, "--json")+1] == "close" {
 			id := args[slices.Index(args, "--namespace")+1]
 			pidDir := filepath.Join(dir, "namespaces", id, "run")
@@ -125,10 +112,8 @@ func TestReadTemporaryConfigurationFailures(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			want := errors.New(stage + " failed")
 			c := &Client{run: func(_ context.Context, _ string, args []string, _ string, _ int, _ ...string) ([]byte, error) {
-				if !slices.Equal(args, []string{"--version"}) {
-					t.Fatal("launched without isolated config", args)
-				}
-				return []byte("agent-browser " + Version), nil
+				t.Fatal("launched without isolated config", args)
+				return nil, want
 			}}
 			var dir string
 			c.mkdirTemp = func(base, pattern string) (string, error) {
@@ -167,9 +152,6 @@ func TestReadCleanupFallbackPreservesNavigationError(t *testing.T) {
 			c := &Client{}
 			var directory, namespace string
 			c.run = func(ctx context.Context, _ string, args []string, dir string, _ int, _ ...string) ([]byte, error) {
-				if args[0] == "--version" {
-					return []byte("agent-browser " + Version), nil
-				}
 				directory, namespace = dir, args[slices.Index(args, "--namespace")+1]
 				if args[slices.Index(args, "--json")+1] == "close" {
 					return nil, closeErr

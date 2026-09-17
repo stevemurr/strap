@@ -17,39 +17,47 @@ func (m *model) composerInset() int {
 	return 5 // One cell left padding, a gap, and the send action.
 }
 
-func (m *model) transcriptTop() int {
-	if m.streamChrome() != 0 {
-		return 4 + m.stackBarHeight()
-	}
-	return 2 + m.stackBarHeight()
-}
+func (m *model) transcriptTop() int { return m.stackBarHeight() }
 
 func (m *model) composerTop() int {
-	return 2 + m.stackBarHeight() + m.viewport.Height + m.streamChrome() + m.completionHeight()
+	return 1 + m.stackBarHeight() + m.viewport.Height + m.streamChrome() + m.completionHeight()
+}
+
+func (m *model) composerActivity() string {
+	if !m.busy() && !m.interrupting {
+		return ""
+	}
+	label := "Working"
+	hint := " · Esc to stop"
+	if m.interrupting {
+		label, hint = "Stopping", ""
+	}
+	// Reuse the existing spinner clock; only this row changes on a tick.
+	style := stackIdentity(m.session.Root())
+	if m.interrupting {
+		style = stateStyle
+	}
+	icon := style.Render(ansi.Strip(m.spinner.View()))
+	return ansi.Truncate(" "+icon+" "+style.Bold(true).Render(label)+dimStyle.Render(hint), m.viewport.Width, "…")
 }
 
 func (m *model) composerView() []string {
 	width := m.viewport.Width
-	surface := lipgloss.NewStyle().Background(composerBackground)
+	surface := lipgloss.NewStyle().Foreground(surfaceTextColor).Background(composerBackground)
 	blank := surface.Render(strings.Repeat(" ", width))
 	lines := []string{blank}
 	for _, row := range strings.Split(m.input.View(), "\n") {
 		if m.composerInset() > 0 {
 			row = " " + row
 		}
-		row = surface.Render(fitStreamCell(row, width))
-		// Textarea's nested text/cursor styles reset their background. Restore
-		// the field surface after resets so its trailing spaces stay shaded.
-		if background := sgrPattern.FindString(surface.Render(" ")); background != "" {
-			row = strings.ReplaceAll(row, "\x1b[0m", "\x1b[0m"+background) + "\x1b[0m"
-		}
+		row = renderSurface(surface, fitStreamCell(row, width))
 		lines = append(lines, row)
 	}
 	last := blank
 	if width >= 10 {
 		style := dimStyle.Background(composerBackground)
 		if strings.TrimSpace(m.input.Value()) != "" && !m.selecting {
-			style = userStyle.Foreground(lipgloss.AdaptiveColor{Light: "255", Dark: "235"}).Background(lipgloss.AdaptiveColor{Light: "235", Dark: "252"})
+			style = selectedTextStyle.Bold(true)
 		}
 		last = surface.Render(strings.Repeat(" ", width-3)) + style.Render(" ↑ ")
 	}
@@ -101,6 +109,9 @@ func (m *model) composerHint() string {
 }
 
 func (m *model) renderComposer() []string {
-	lines := m.composerView()
+	// Activity has its own reserved row above the field's shaded top padding.
+	// Keep it even when idle so starting work never moves the draft.
+	lines := []string{fitStreamCell(m.composerActivity(), m.viewport.Width)}
+	lines = append(lines, m.composerView()...)
 	return append(lines, dimStyle.Render(ansi.Truncate(m.composerHint(), m.viewport.Width, "…")))
 }

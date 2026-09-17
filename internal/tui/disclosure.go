@@ -28,37 +28,22 @@ func (m *model) toggleActivity(selector string) error {
 	if m.folds.expanded == nil {
 		m.folds.expanded = map[foldKey]bool{}
 	}
-	var groups [][]*entry
-	// Include offscreen streams too. A response can belong to a fold spanning
-	// several model calls, or several folds separated by another agent.
-	for i := 0; i < len(m.entries); i++ {
+	var tools []*entry
+	for i := range m.entries {
 		e := &m.entries[i]
-		actor := activityActor(e)
-		if actor == "" {
-			continue
-		}
-		group := []*entry{e}
-		for i+1 < len(m.entries) && activityActor(&m.entries[i+1]) == actor {
-			i++
-			group = append(group, &m.entries[i])
-		}
-		for _, row := range group {
-			if (row.output != nil && *row.output == id) || (row.activityOutput != nil && *row.activityOutput == id) {
-				groups = append(groups, group)
-				break
-			}
+		if e.toolInfo != nil && e.activityOutput != nil && *e.activityOutput == id {
+			tools = append(tools, e)
 		}
 	}
 	expand := true
-	if len(groups) > 0 {
-		expand = !m.foldExpanded(groups[0])
-	} else if collapsed, ok := m.activityCollapsed[id]; ok {
-		expand = collapsed
+	if len(tools) > 0 {
+		expand = !m.toolExpanded(tools[0])
 	}
 	m.activityCollapsed[id] = !expand
-	for _, group := range groups {
-		m.folds.expanded[foldKey{serial: group[0].serial}] = expand
+	for _, e := range tools {
+		m.folds.expanded[foldKey{serial: e.serial, tool: true}] = expand
 	}
+
 	m.renderTranscript(false)
 	return nil
 }

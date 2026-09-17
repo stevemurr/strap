@@ -26,7 +26,7 @@ func RunEval(ctx context.Context, opts eval.Options, input io.Reader, output io.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := newEvalModel(ctx, cancel, opts)
-	p := tea.NewProgram(m, tea.WithInput(input), tea.WithOutput(output), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx), tea.WithoutSignalHandler())
+	p := tea.NewProgram(m, tea.WithInput(input), tea.WithOutput(terminalOutput(output)), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx), tea.WithoutSignalHandler())
 	previous := opts.Observe
 	opts.Observe = func(event eval.Progress) {
 		if previous != nil {
@@ -202,7 +202,7 @@ func (m *evalModel) observe(e eval.Progress) {
 			p.status = "Waiting for model"
 		case agent.OutputDelta:
 			if fact.Channel == provider.ChannelReasoning {
-				p.status = "Thinking"
+				p.status = "Working"
 			} else {
 				p.status = "Responding"
 			}
@@ -262,9 +262,6 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(v)
 		if p := m.current(); p != nil && p.activity != nil {
 			p.activity.spinner = m.spinner
-			if p.active() {
-				p.activity.renderTranscript(false)
-			}
 		}
 		return m, cmd
 	case tea.KeyMsg:
@@ -279,6 +276,13 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		a := p.activity
+		if a != nil && key == "esc" && a.badges.peek != nil {
+			a.badges.peek = nil
+			return m, nil
+		}
+		if a != nil {
+			a.badges.peek = nil
+		}
 		if a != nil && a.foldKey(key) {
 			m.followActive = false
 			return m, nil
@@ -306,7 +310,7 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "ctrl+t":
 			if a != nil {
-				a.toggleReasoning()
+				a.toggleToolOutput()
 			}
 		case "tab":
 			m.followActive = false
@@ -341,6 +345,15 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		left := m.listWidth()
+		if p.activity != nil {
+			x := 1
+			if left > 0 {
+				x += left + 3
+			}
+			if p.activity.badgeMouse(v, x, 15, m.width, m.height-2) {
+				return m, nil
+			}
+		}
 		if v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft && left > 0 && v.X < left && v.Y >= 7 {
 			index := m.listOffset + (v.Y-7)/2
 			if index < len(m.problems) && v.Y < m.height-2 {
@@ -361,7 +374,7 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a := p.activity
 			y := v.Y - top + a.viewport.YOffset
 			if v.Y >= top && v.Y < top+a.viewport.Height {
-				for _, target := range a.folds.targets {
+				for _, target := range append(append([]foldTarget{}, a.folds.targets...), a.folds.hints...) {
 					if y == target.row && x >= target.column && x < target.column+2 {
 						m.followActive = false
 						a.toggleFold(target.key)
@@ -382,6 +395,9 @@ func (m *evalModel) listWidth() int {
 }
 func (m *evalModel) detailWidth() int { return max(1, m.width-m.listWidth()-4) }
 func (m *evalModel) resizeActivity(p *evalProblem) {
+	if p.activity != nil {
+		p.activity.badges.peek = nil
+	}
 	if p.activity == nil {
 		return
 	}
@@ -462,12 +478,12 @@ func (m *evalModel) View() string {
 	} else {
 		lines = append(lines, detail...)
 	}
-	footer := "↑↓ problems · f follow · Enter folds · Tab agents · PgUp/Dn scroll · ^C stop"
+	footer := "↑↓ problems · f follow · ^T output · Tab agents · PgUp/Dn scroll · ^C stop"
 	if m.width < 80 {
-		footer = "↑↓ problems · Enter folds · PgUp/Dn scroll · ^C stop"
+		footer = "↑↓ problems · ^T output · PgUp/Dn scroll · ^C stop"
 	}
 	if m.width < 55 {
-		footer = "↑↓ select · Enter folds · ^C stop"
+		footer = "↑↓ select · ^T output · ^C stop"
 	}
 	if p := m.current(); p != nil && p.activity != nil && p.activity.folds.focused {
 		footer = "↑/↓ activity · Enter expand · Esc problems · PgUp/Dn scroll · Ctrl+C stop run"
@@ -483,7 +499,11 @@ func (m *evalModel) View() string {
 	for i := range lines {
 		lines[i] = " " + clip(lines[i])
 	}
-	return strings.Join(lines, "\n")
+	view := strings.Join(lines, "\n")
+	if p := m.current(); p != nil && p.activity != nil {
+		return p.activity.overlayBadgePeek(view, m.width, m.height)
+	}
+	return view
 }
 
 func (m *evalModel) problemLines(height int) []string {
@@ -628,7 +648,7 @@ func trimEvalActivity(a *model) {
 		}
 		bytes += len(e.body) + len(e.reasoning)
 		if e.toolInfo != nil {
-			bytes += len(e.toolInfo.arguments) + len(e.toolInfo.result) + len(e.toolInfo.failure)
+			bytes += len(e.toolInfo.name) + len(e.toolInfo.preview) + len(e.toolInfo.arguments) + len(e.toolInfo.result) + len(e.toolInfo.failure) + len(e.toolInfo.notice)
 		}
 		if bytes > 1<<20 || len(a.entries)-i > 200 {
 			keep = len(a.entries) - i - 1

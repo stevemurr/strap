@@ -16,9 +16,9 @@ import (
 
 var (
 	toolStyle    = dimStyle
-	routeStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "30", Dark: "116"})
-	stateStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "136", Dark: "179"})
-	successStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "114"})
+	routeStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#006F87", Dark: "#22D3EE"})
+	stateStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FBBF24"})
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#16803C", Dark: "#4ADE80"})
 )
 
 type toolKey struct {
@@ -179,14 +179,12 @@ func (m *model) toggleSelection() {
 		m.streamUI.frozenRoster = nil
 		m.streamUI.frozenStacks = nil
 		m.streamUI.frozenPeek = nil
-		m.streamUI.frozenTitle, m.streamUI.frozenDetails, m.streamUI.frozenFollow = "", "", ""
+		m.streamUI.frozenFollow = ""
 		m.renderTranscript(false)
 	} else {
 		m.streamUI.frozenStacks = m.stackBar()
 		m.streamUI.frozenPeek = m.stackPeek()
 		m.streamUI.frozenRoster = m.rosterLines(m.rosterHeight(), rosterColumns)
-		m.streamUI.frozenTitle = m.streamTitle()
-		m.streamUI.frozenDetails = m.streamDetails()
 		m.streamUI.frozenFollow = m.streamFollowLabel()
 		m.selecting = true
 		m.frozenEntries = append([]entry(nil), m.entries...)

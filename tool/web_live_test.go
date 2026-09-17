@@ -16,7 +16,7 @@ import (
 	"github.com/stevemurr/strap/message"
 )
 
-// Explicit opt-in: requires macOS/wkrender, agent-browser 0.37.1, Chrome, and
+// Explicit opt-in: requires macOS/wkrender, agent-browser, Chrome, and
 // network access. Ordinary tests never launch a browser or query a search engine.
 // STRAP_LIVE_WEB=1 go test -race ./tool -run TestLiveWeb -count=1 -v
 func TestLiveWeb(t *testing.T) {

@@ -31,7 +31,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.StringVar(&o.listen, "listen", "", "Serve the harness HTTP API at a loopback address (requires STRAP_API_TOKEN)")
 	webEnabled := flags.Bool("web", o.config.Web != nil, "Enable web_search and open_url (backends start lazily)")
 	flags.StringVar(&o.config.Web.WKRenderPath, "wkrender", "", "Path to wkrender (default PATH or ~/.harness/bin/wkrender)")
-	flags.StringVar(&o.config.Web.AgentBrowserPath, "agent-browser", "", "Path to agent-browser 0.37.1 (default PATH or Strap's isolated installation)")
+	flags.StringVar(&o.config.Web.AgentBrowserPath, "agent-browser", "", "Path to agent-browser (default PATH or Strap's isolated installation)")
 	flags.StringVar(&o.config.Web.BrowserExecutablePath, "browser-executable", "", "Chrome executable for open_url (default installed Chrome on macOS or agent-browser discovery)")
 	// Discover the catalog/profile with the real parser so help and syntax errors
 	// work before reading files. Reparse after loading to give every flag precedence.

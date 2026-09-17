@@ -21,9 +21,10 @@ func TestMouseHistoryPreservesPositionAndResumesFollowing(t *testing.T) {
 		m.add("Strap", fmt.Sprintf("message %d", i), true)
 	}
 	m.input.SetValue("unfinished draft")
+	before := m.viewport.YOffset
 	m.Update(wheel(tea.MouseButtonWheelUp))
-	if m.viewport.AtBottom() || !strings.Contains(m.footer(), "History") {
-		t.Fatal("wheel did not scroll into history")
+	if m.viewport.YOffset != before-1 || !strings.Contains(m.footer(), "History") {
+		t.Fatal("wheel did not scroll one row into history")
 	}
 	offset, view := m.viewport.YOffset, m.viewport.View()
 	m.Update(received{event: conversation.MessageEvent{Message: message.Message{
@@ -33,8 +34,8 @@ func TestMouseHistoryPreservesPositionAndResumesFollowing(t *testing.T) {
 		t.Fatal("incoming output disturbed history or draft")
 	}
 	m.Update(wheel(tea.MouseButtonWheelDown))
-	if m.viewport.YOffset <= offset {
-		t.Fatal("wheel down did not advance history")
+	if m.viewport.YOffset != offset+1 {
+		t.Fatal("wheel down did not advance history by one row")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
 	m.add("Strap", "latest reply", false)
@@ -65,7 +66,7 @@ func TestMouseScrollsAgentTranscriptAndLoadsOlderMessages(t *testing.T) {
 	enter(m, "/transcript agent-7")
 	mainOffset, offset := m.viewport.YOffset, m.transcript.viewport.YOffset
 	m.Update(wheel(tea.MouseButtonWheelUp))
-	if m.transcript.viewport.YOffset >= offset || m.viewport.YOffset != mainOffset {
+	if m.transcript.viewport.YOffset != offset-1 || m.viewport.YOffset != mainOffset {
 		t.Fatal("mouse did not scroll only the selected transcript")
 	}
 	m.transcript.viewport.GotoTop()

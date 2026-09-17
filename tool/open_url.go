@@ -75,7 +75,7 @@ func (w *Web) open(ctx context.Context, call Call, args openArgs) (Result, error
 		return JSON(page)
 	}
 	if w.browserErr != nil {
-		return Result{}, fmt.Errorf("open_url requires agent-browser %s: %w", agentbrowser.Version, w.browserErr)
+		return Result{}, fmt.Errorf("open_url requires agent-browser: %w", w.browserErr)
 	}
 	select {
 	case w.openSlots <- struct{}{}:

@@ -219,7 +219,7 @@ func TestRosterMouseWheelMovesSelection(t *testing.T) {
 	if m.stackBarHeight() == 0 {
 		t.Fatal("the roster is not visible at this size")
 	}
-	m.Update(tea.MouseMsg{X: 1, Y: 3, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m.Update(tea.MouseMsg{X: 1, Y: 0, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
 	if !m.streamUI.rosterFocused {
 		t.Fatal("scrolling the roster did not focus it")
 	}
@@ -227,7 +227,7 @@ func TestRosterMouseWheelMovesSelection(t *testing.T) {
 	if advanced == "" {
 		t.Fatal("the wheel did not advance the selection")
 	}
-	m.Update(tea.MouseMsg{X: 1, Y: 3, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	m.Update(tea.MouseMsg{X: 1, Y: 0, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 	if m.streamUI.focusID == advanced {
 		t.Fatal("the wheel did not move the selection back", m.streamUI.selected)
 	}

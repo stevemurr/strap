@@ -215,12 +215,12 @@ func TestToolTimelineShowsPreviewsButHidesRawDetails(t *testing.T) {
 		m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	}
 	got := m.View()
-	for _, want := range []string{"Create agent", "Read PDF", "3 calls", "private.pdf"} {
+	for _, want := range []string{"Create agent", "Read private.pdf", "Some custom tool", "raw-result"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %s", want, got)
 		}
 	}
-	for _, raw := range []string{"raw-call-id", "raw-result", "create_agent", "read_pdf"} {
+	for _, raw := range []string{"raw-call-id", "create_agent", "read_pdf"} {
 		if strings.Contains(got, raw) {
 			t.Errorf("raw tool information shown: %s", raw)
 		}

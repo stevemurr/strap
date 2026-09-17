@@ -28,7 +28,7 @@ func TestToolRowsRemainSeparateWithAgentAttribution(t *testing.T) {
 	addTool(m, "agent-2", "write_file")
 	addTool(m, "agent-3", "shell")
 	view := ansi.Strip(m.viewport.View())
-	if !strings.Contains(view, "4 calls · agent-2") || !strings.Contains(view, "1 call · agent-3") {
+	if strings.Count(view, agentGlyph("agent-2")) != 4 || strings.Count(view, agentGlyph("agent-3")) != 1 {
 		t.Fatal(view)
 	}
 	expandActivityForTest(m, false)
@@ -72,11 +72,11 @@ func TestToolCallsDoNotChangeFrozenView(t *testing.T) {
 		t.Fatal("new call changed frozen display")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
-	if !strings.Contains(ansi.Strip(m.viewport.View()), "1 call · agent-2") {
+	if strings.Count(ansi.Strip(m.viewport.View()), agentGlyph("agent-2")) != 1 {
 		t.Fatal("resize revealed a new call")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
-	if !strings.Contains(ansi.Strip(m.viewport.View()), "2 calls · agent-2") {
+	if strings.Count(ansi.Strip(m.viewport.View()), agentGlyph("agent-2")) != 2 {
 		t.Fatal("resume lost call")
 	}
 }

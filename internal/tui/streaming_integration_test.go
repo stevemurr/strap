@@ -23,7 +23,7 @@ import (
 func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	reasonVisible := make(chan struct{})
+	reasonRecorded := make(chan struct{})
 	next := make(chan struct{})
 	finish := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +39,7 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 		fmt.Fprint(w, "data: "+`{"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"Early reasoning"}}]}`+"\n\n")
 		w.(http.Flusher).Flush()
 		select {
-		case <-reasonVisible:
+		case <-reasonRecorded:
 		case <-ctx.Done():
 			return
 		}
@@ -75,11 +75,11 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	defer detach()
 	m := newModel(ctx, cancel, observed, Options{})
 	m.input.SetValue("unfinished draft")
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Opt in before testing dynamic thinking rendering.
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Expanding tools must not reveal reasoning.
 	if _, err := session.Send(session.Root(), "respond"); err != nil {
 		t.Fatal(err)
 	}
-	reasoningVisible, firstVisible, secondVisible := false, false, false
+	reasoningRecorded, firstVisible, secondVisible := false, false, false
 	for {
 		msg := m.listen()().(received)
 		if msg.err != nil {
@@ -87,9 +87,16 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 		}
 		m.Update(msg)
 		view := ansi.Strip(m.View())
-		if !reasoningVisible && strings.Contains(view, "Early reasoning") {
-			reasoningVisible = true
-			close(reasonVisible)
+		if strings.Contains(view, "Early reasoning") {
+			t.Fatal("live view exposed reasoning")
+		}
+		storedReasoning := false
+		for _, row := range m.entries {
+			storedReasoning = storedReasoning || strings.Contains(row.reasoning, "Early reasoning")
+		}
+		if !reasoningRecorded && storedReasoning {
+			reasoningRecorded = true
+			close(reasonRecorded)
 		}
 		if !firstVisible && strings.Contains(view, "Early text") {
 			firstVisible = true
@@ -103,19 +110,13 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 			t.Fatal("streaming overwrote draft input")
 		}
 		if e, ok := msg.event.(conversation.MessageEvent); ok && e.Message.Kind == message.Reply && e.Message.To == message.User {
-			if !reasoningVisible || !firstVisible || !secondVisible || strings.Count(view, "Early text arrives") != 1 {
+			if !reasoningRecorded || !firstVisible || !secondVisible || strings.Count(view, "Early text arrives") != 1 {
 				t.Fatalf("expected one incrementally rendered reply:\n%s", view)
 			}
-			if !strings.Contains(view, "Early reasoning") {
-				t.Fatal("explicit thinking preference was changed")
-			}
+			m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 			m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 			if strings.Contains(ansi.Strip(m.View()), "Early reasoning") {
-				t.Fatal("cannot hide thinking")
-			}
-			m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-			if !strings.Contains(ansi.Strip(m.View()), "Early reasoning") {
-				t.Fatal("cannot expand reasoning")
+				t.Fatal("output toggle exposed reasoning")
 			}
 			// Clearing display rows must not destroy reasoning inspection.
 			enter(m, "/clear")

@@ -11,7 +11,10 @@ import (
 // renderBody caches immutable message bodies at the current viewport width.
 // Spinner ticks and later events do not repeatedly parse earlier Markdown.
 func (m *model) renderBody(e *entry) string {
-	width := max(1, m.viewport.Width-1)
+	return m.renderBodyWidth(e, max(1, m.viewport.Width-1))
+}
+
+func (m *model) renderBodyWidth(e *entry, width int) string {
 	if e.renderWidth == width {
 		return e.rendered
 	}
@@ -32,16 +35,7 @@ func (m *model) renderBody(e *entry) string {
 			}
 		}
 	}
-	if e.reasoning != "" && e.reasoningExpanded {
-		heading := "▾ Thinking · Ctrl+T hide\n" + e.reasoning
-		// Keep the separator outside the styled block: Lip Gloss pads trailing
-		// blank lines to the heading width, which would indent the answer.
-		thinking := dimStyle.Render(heading)
-		if body != "" {
-			thinking += "\n\n"
-		}
-		body = thinking + body
-	}
+
 	// Wide tables and code lines must also fit after a terminal resize.
 	wrapped := ansi.Hardwrap(lipgloss.NewStyle().AlignHorizontal(lipgloss.Left).Width(width).Render(body), width, true)
 	var lines []string

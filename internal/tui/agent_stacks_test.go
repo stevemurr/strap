@@ -10,7 +10,7 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-// Find an exposed cell, not the covered center of an overlapped chip.
+// Find an exposed cell of the requested chip.
 func stackLocation(t *testing.T, m *model, choice rosterChoice) (int, int) {
 	t.Helper()
 	l := m.stackLayout()
@@ -19,7 +19,7 @@ func stackLocation(t *testing.T, m *model, choice rosterChoice) (int, int) {
 		for x := 0; x < s.width; x++ {
 			i := s.hit(x, y)
 			if i >= 0 && l.targets[i].choice == choice {
-				return x + 2, y + 2
+				return x + 2, y
 			}
 		}
 	}
@@ -29,15 +29,24 @@ func stackLocation(t *testing.T, m *model, choice rosterChoice) (int, int) {
 
 func TestAgentStacksKeepTranscriptAndComposerFullWidth(t *testing.T) {
 	m, _ := focusedSetup(t)
-	if m.viewport.Width != m.width-2 || m.stackBarHeight() != 5 {
+	if m.viewport.Width != m.width-2 || m.stackBarHeight() != 2 {
 		t.Fatal("stacks did not replace the sidebar")
 	}
-	if m.transcriptTop() != 9 {
+	if m.transcriptTop() != 2 {
 		t.Fatal("transcript does not account for stack rows")
 	}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "All activity") || !strings.Contains(view, "Idle  2") {
+	if !strings.Contains(view, "All activity") || !strings.Contains(view, agentGlyph("agent-2")) {
 		t.Fatal(view)
+	}
+	rows := strings.Split(view, "\n")
+	if !strings.Contains(rows[0], "root") || strings.TrimSpace(rows[1]) != strings.Repeat("─", m.width-2) {
+		t.Fatal("agent chips and separator must be the entire header", view)
+	}
+	for _, removed := range []string{"Conversation & coordination", "local-model", "localhost", "parent user"} {
+		if strings.Contains(view, removed) {
+			t.Fatalf("persistent header still contains %q", removed)
+		}
 	}
 	if m.composerTop()+m.input.Height()+3 != m.height {
 		t.Fatal("composer no longer ends at the terminal bottom")
@@ -55,7 +64,7 @@ func TestAgentStacksRootHasLiveChipAndPreview(t *testing.T) {
 			root = target
 		}
 	}
-	if root.height != 3 || !strings.Contains(ansi.Strip(m.stackTargetView(root, false)), "● root") {
+	if root.height != 1 || !strings.Contains(ansi.Strip(m.stackTargetView(root, false)), agentGlyph(m.session.Root())+" root ●") {
 		t.Fatal("root is missing its live agent chip")
 	}
 	x, y := stackLocation(t, m, rosterChoice{id: m.session.Root()})
@@ -63,6 +72,9 @@ func TestAgentStacksRootHasLiveChipAndPreview(t *testing.T) {
 	p := m.stackPeek()
 	if p == nil || !strings.Contains(ansi.Strip(p.text), "Coordinating the team") {
 		t.Fatal("root hover is missing its latest update")
+	}
+	if !strings.Contains(ansi.Strip(p.text), "local-model · localhost") {
+		t.Fatal("root preview lost connection details")
 	}
 	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, x, y))
 	if m.streamUI.selected != m.session.Root() || !m.input.Focused() {
@@ -75,7 +87,7 @@ func TestAgentStacksWrapToExposeEveryAgent(t *testing.T) {
 	for _, width := range []int{124, 80} {
 		m.resize(width, 38)
 		l := m.stackLayout()
-		if l.offset != 0 || l.width > width-4 || m.stackBarHeight() <= 5 {
+		if l.offset != 0 || l.width > width-4 || m.stackBarHeight() <= 2 {
 			t.Fatalf("team did not wrap at width %d: %+v", width, l)
 		}
 		for _, id := range m.streamUI.order {
@@ -169,7 +181,7 @@ func TestAgentStackPreviewInterceptsClicksAndClearsOnExit(t *testing.T) {
 
 func TestAgentStackOverflowKeepsEveryKeyboardTargetReachable(t *testing.T) {
 	m := manyAgents(t)
-	m.resize(40, 24)
+	m.resize(40, 18)
 	m.focusRoster(true)
 	m.Update(tea.KeyMsg{Type: tea.KeyHome})
 	for i, want := range m.rosterChoices() {
@@ -190,7 +202,7 @@ func TestAgentStackOverflowKeepsEveryKeyboardTargetReachable(t *testing.T) {
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyHome})
 	_ = m.View()
-	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, m.width-2, 4))
+	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, m.width-2, 0))
 	_ = m.View()
 	if m.streamUI.stackOffset == 0 {
 		t.Fatal("overflow arrow did not page the stacks")

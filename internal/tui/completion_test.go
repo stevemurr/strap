@@ -159,7 +159,7 @@ func TestCompletionPreservesScrollFreezeAndTerminalBounds(t *testing.T) {
 		}
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.viewport.Height != m.height-6-m.streamChrome()-m.stackBarHeight() {
+	if m.viewport.Height != m.height-5-m.streamChrome()-m.stackBarHeight() {
 		t.Fatal("dismiss did not restore transcript height")
 	}
 }

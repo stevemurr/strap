@@ -51,7 +51,7 @@ func Run(ctx context.Context, session Session, options Options) error {
 	listenCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := newModel(listenCtx, cancel, session, options)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, tea.WithOutput(terminalOutput(nil)), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	_, err := p.Run()
 	if ctx.Err() != nil {
 		return nil
@@ -71,7 +71,6 @@ type entry struct {
 	serial            uint64
 	actors            []message.ActorID // Empty for local UI notices visible in every stream.
 	reasoning         string
-	reasoningExpanded bool
 	contentStarted    bool
 	progress          bool
 	outputFailed      bool
@@ -84,6 +83,7 @@ type entry struct {
 	rendered          string
 	tool              toolKey
 	toolInfo          *toolDisplay
+	toolLayout        *toolOutputLayout
 	tokens            *contextTokens
 	agents            *agentsTable
 }
@@ -91,8 +91,8 @@ type entry struct {
 type model struct {
 	interrupting      bool
 	folds             foldState
+	badges            badgeState
 	activityCollapsed map[identity.OutputID]bool
-	reasoningExpanded bool // Thinking is hidden until explicitly shown.
 	transcript        *transcriptView
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -130,10 +130,12 @@ type model struct {
 }
 
 var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "111"})
-	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "242", Dark: "245"})
-	userStyle  = lipgloss.NewStyle().Bold(true).AlignHorizontal(lipgloss.Left)
-	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"})
+	accentColor = lipgloss.AdaptiveColor{Light: "#2563EB", Dark: "#60A5FA"}
+	accentStyle = lipgloss.NewStyle().Foreground(accentColor)
+	titleStyle  = accentStyle.Bold(true)
+	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "241", Dark: "247"})
+	userStyle   = lipgloss.NewStyle().Bold(true).AlignHorizontal(lipgloss.Left)
+	errorStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"})
 )
 
 func newModel(ctx context.Context, cancel context.CancelFunc, session Session, options Options) *model {
@@ -146,6 +148,8 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 		now:     time.Now, activeTools: make(map[toolKey]agent.ToolActivity),
 		copyText: clipboard.WriteAll,
 	}
+	// Trackpads can emit many wheel events; keep each step to one text row.
+	m.viewport.MouseWheelDelta = 1
 	m.initStreams()
 	m.resize(80, 24)
 	m.addAttributed("Welcome", "", "Send a message to get started. You can keep typing while agents work.\nF6 agents · F7 activity folds · /help for commands", true, session.Root())
@@ -180,9 +184,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if !m.selecting && m.mouseSelection == nil && m.busy() {
-			m.renderTranscript(false)
-		}
 		return m, cmd
 	case tea.WindowSizeMsg:
 		m.mouseSelection = nil
@@ -238,6 +239,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.transcript != nil && m.transcript.copying {
 			return m, nil
 		}
+		if m.transcript == nil && m.badgeMouse(msg, 1, m.transcriptTop(), m.width, m.composerTop()) {
+			return m, nil
+		}
 		if m.transcript == nil && m.streamMouse(msg) {
 			return m, nil
 		}
@@ -275,6 +279,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	case tea.KeyMsg:
+		if msg.String() == "esc" && m.badges.peek != nil {
+			m.badges.peek = nil
+			return m, nil
+		}
+		m.badges.peek = nil
 		if m.mouseSelection != nil {
 			if msg.String() == "ctrl+c" && m.mouseSelection.text() != "" {
 				return m, m.copySelection()
@@ -308,7 +317,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		case "ctrl+t":
 			if !m.selecting {
-				m.toggleReasoning()
+				m.toggleToolOutput()
 			}
 			return m, nil
 		case "f2":
@@ -394,7 +403,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool-only calls start folded with status, counts, and target previews. Click a triangle, or F7 then ↑/↓ and Enter, to inspect groups and tool results. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s segments; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -689,6 +698,7 @@ func (m *model) interruptWork() tea.Cmd {
 }
 
 func (m *model) resize(width, height int) {
+	m.badges.peek = nil
 	m.width, m.height = max(1, width), max(1, height)
 	// Keep two text columns internally so wide runes remain navigable even
 	// when the terminal is smaller; renderView clips each displayed row.
@@ -725,70 +735,26 @@ func (m *model) renderTranscript(follow bool) {
 		}
 	}
 	m.folds.targets = nil
-	m.folds.parents = make(map[uint64]uint64)
+	m.badges.targets = nil
+	m.folds.hints = nil
 	for i := 0; i < len(source); i++ {
 		e := &source[i]
 		if !e.inStream(m.streamUI.selected) {
 			continue
 		}
-		if actor := activityActor(e); actor != "" {
-			group := []*entry{e}
-			for i+1 < len(source) && activityActor(&source[i+1]) == actor {
-				i++
-				group = append(group, &source[i])
-			}
-			firstRow := len(rows)
-			if len(rows) > 0 {
-				firstRow++
-			}
-			block(e, m.renderActivity(group, firstRow))
+
+		firstRow := len(rows)
+		if firstRow > 0 {
+			firstRow++
+		}
+		if e.toolInfo != nil {
+			block(e, m.renderTool(e, firstRow))
+		} else if e.output != nil && strings.TrimSpace(e.body) == "" && !e.outputFailed && e.message == "" {
+			// Retain reasoning in the event history, without a live placeholder.
 			continue
+		} else {
+			block(e, m.renderMessage(e, firstRow))
 		}
-		if e.label == "Tool" {
-			block(e, toolStyle.Render(toolRow(e, max(1, m.viewport.Width-1))))
-			continue
-		}
-		style := dimStyle.Bold(true)
-		if e.label == "You" {
-			style = userStyle
-		}
-		if e.label == "Strap" {
-			style = titleStyle
-		}
-		if e.label == "Error" {
-			style = errorStyle
-		}
-		switch e.label {
-		case "Delegation", "Work", "Message":
-			style = routeStyle
-		case "State", "Agent", "Agents":
-			style = stateStyle
-		}
-		display := e
-		if e.reasoningExpanded && e.output != nil && m.activityCollapsed[*e.output] {
-			copy := *e
-			copy.reasoningExpanded = false
-			copy.renderWidth = 0
-			display = &copy
-		}
-		body := m.renderBody(display)
-		heading := style.Render(e.label) + "  " + dimStyle.Render(e.at.Format("15:04"))
-		if e.output != nil {
-			heading = style.Render(m.activityName(e.output.Agent)) + "  " + dimStyle.Render(e.at.Format("15:04"))
-		}
-		if e.meta != "" && (e.output == nil || e.outputFailed) {
-			heading += "  " + dimStyle.Render(e.meta)
-		}
-		if e.progress && !e.outputFailed {
-			heading = routeStyle.Render(m.activityName(e.actors[0]) + " · Progress")
-			stamp := e.at.Format("15:04")
-			room := m.viewport.Width - 1 - ansi.StringWidth(heading) - len(stamp)
-			if room >= 2 {
-				heading += strings.Repeat(" ", room) + dimStyle.Render(stamp)
-			}
-		}
-		heading = ansi.Truncate(heading, max(1, m.viewport.Width-1), "…")
-		block(e, heading+"\n"+body)
 	}
 	if len(rows) == 0 {
 		rows = []string{dimStyle.Render("No activity in this stream yet.")}
@@ -868,24 +834,14 @@ func (m *model) renderView() string {
 	for i, row := range lines {
 		lines[i] = ansi.Truncate(" "+fitStreamCell(row, m.viewport.Width), m.width, "")
 	}
-	view := line(m.header()) + "\n\n" + strings.Join(lines, "\n")
+	view := strings.Join(lines, "\n")
 	if p := m.stackPeek(); p != nil {
 		s := newChipSurface(m.width, m.height)
 		s.paint(0, 0, view, -1)
 		s.paint(p.x, p.y, p.text, -1)
 		return s.String()
 	}
-	return view
-}
-
-func (m *model) header() string {
-	left := titleStyle.Render("strap") + "  " + safeText(m.options.Model)
-	right := dimStyle.Render(safeText(m.options.Endpoint))
-	gap := m.width - 2 - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap >= 4 {
-		return left + strings.Repeat(" ", gap) + right
-	}
-	return left
+	return m.overlayBadgePeek(view, m.width, m.height)
 }
 
 // Remote text is content, not terminal control sequences.
@@ -912,5 +868,5 @@ func (m *model) footer() string {
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter → root · F6 agents · Ctrl+T thinking · /help"
+	return "Enter → root · F6 agents · Ctrl+T output · /help"
 }

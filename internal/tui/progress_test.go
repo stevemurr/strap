@@ -59,7 +59,7 @@ func TestActivityDisclosurePreservesTextChronologyAndExpansion(t *testing.T) {
 	add("third")
 	m.addAttributed("Error", "root", "Visible failure", false, "root")
 	view := ansi.Strip(m.viewport.View())
-	if len(m.folds.targets) != 2 || !strings.Contains(view, "Visible root commentary") || !strings.Contains(view, "Visible failure") {
+	if len(m.folds.targets) != 3 || !strings.Contains(view, "Visible root commentary") || !strings.Contains(view, "Visible failure") {
 		t.Fatal(view)
 	}
 	before := len(m.entries)
@@ -67,7 +67,7 @@ func TestActivityDisclosurePreservesTextChronologyAndExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 	view = ansi.Strip(m.viewport.View())
-	a, b, c := strings.Index(view, "  ▸ ● First"), strings.Index(view, "Interleaved reply"), strings.Index(view, "  ▸ ● Third")
+	a, b, c := strings.Index(view, agentGlyph("root")+" First"), strings.Index(view, "Interleaved reply"), strings.Index(view, agentGlyph("root")+" Third")
 	if a < 0 || b < a || c < b || len(m.entries) != before {
 		t.Fatal(view)
 	}

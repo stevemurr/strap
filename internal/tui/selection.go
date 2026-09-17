@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rivo/uniseg"
 )
@@ -96,7 +95,7 @@ func (s *mouseSelection) view(width int) string {
 	lines := append([]string(nil), s.lines...)
 	a, b := s.bounds()
 	if s.start != s.end {
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("12"))
+		style := selectedTextStyle
 		for row := a.y; row <= b.y; row++ {
 			left, right := s.columns(row)
 			line := lines[row]

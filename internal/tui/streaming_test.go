@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-func TestReasoningDisplayKeepsUserChoiceAndFailedPartialText(t *testing.T) {
+func TestReasoningOmissionKeepsRecordedDataAndFailedPartialText(t *testing.T) {
 	m, _ := setup(t)
 	m.entries = nil
 	id := identity.OutputID{Agent: "root", Call: 1}
@@ -23,17 +23,17 @@ func TestReasoningDisplayKeepsUserChoiceAndFailedPartialText(t *testing.T) {
 	if strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.entries[0].body != "" {
 		t.Fatal(m.View())
 	}
-	// Only explicit toggles change visibility, including after content arrives.
+	// Ctrl+T only changes tool output, including while reasoning is streaming.
 	m.input.SetValue("draft")
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if !strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.input.Value() != "draft" {
+	if strings.Contains(ansi.Strip(m.View()), "private reasoning") || m.input.Value() != "draft" {
 		t.Fatal(m.View())
 	}
 	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelContent, Text: "partial answer"})
 	observe(agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Offset: 17, Text: " continues"})
 	observe(agent.OutputFinished{Output: id, Status: agent.OutputFailed, Err: errors.New("length limit")})
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "private reasoning continues") || !strings.Contains(view, "partial answer") || !strings.Contains(view, "failed") || len(m.entries) != 1 {
+	if strings.Contains(view, "private reasoning") || m.entries[0].reasoning != "private reasoning continues" || !strings.Contains(view, "partial answer") || !strings.Contains(view, "failed") || len(m.entries) != 1 {
 		t.Fatal(view)
 	}
 	if m.entries[0].body != "partial answer" {

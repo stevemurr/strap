@@ -334,7 +334,8 @@ and the DuckDuckGo HTML endpoint. Parsing preserves rank, unwraps redirects and
 deduplicates destinations. A challenge or unfamiliar markup cannot masquerade
 as a successful empty search. The HTTP fallback from harness is not included.
 
-`internal/agentbrowser` targets native agent-browser 0.37.1. Each page operation
+`internal/agentbrowser` uses native agent-browser without an exact-version gate.
+Command responses are validated at runtime. Each page operation
 gets a unique namespace, explicit empty configuration, temporary profile and
 private socket directory. Fixed argv calls open the URL, check rendered readiness,
 read the active DOM, and collect bounded title/link metadata. Readable text can
@@ -345,8 +346,8 @@ restart the backend). New navigation during extraction is an error.
 
 The runtime admits two page reads concurrently. The operation deadline includes
 queueing and backend startup. Cleanup uses an independent five-second context.
-In the pinned release, close is serialized behind navigation; if it stalls, the
-Unix adapter locates the daemon via its private PID file, verifies its identity,
+If close is serialized behind navigation and stalls, the Unix adapter locates
+the daemon via its private PID file, verifies its identity,
 and stops only its descendant browser groups and the daemon. It never selects
 the user's browser or another operation. Profile and socket files belong to the
 operation's temporary directory. Failures to clean up remain visible errors.

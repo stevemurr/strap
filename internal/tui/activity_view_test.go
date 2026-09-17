@@ -23,7 +23,6 @@ func expandActivityForTest(m *model, results bool) {
 		m.folds.expanded = map[foldKey]bool{}
 	}
 	for _, e := range m.entries {
-		m.folds.expanded[foldKey{serial: e.serial}] = true
 		if results {
 			m.folds.expanded[foldKey{serial: e.serial, tool: true}] = true
 		}
@@ -59,10 +58,10 @@ func TestToolOnlyOutputsFoldAcrossCallsWithoutLosingHistory(t *testing.T) {
 		completedToolForTest(m, "root", fmt.Sprint(i), fmt.Sprintf("file-%d.go", i))
 	}
 	view := ansi.Strip(m.viewport.View())
-	if strings.Count(view, "▸") != 1 || !strings.Contains(view, "4 calls") || !strings.Contains(view, "Latest: Read file · file-4.go") {
+	if len(m.folds.targets) != 4 || strings.Count(view, "Read file-") != 4 {
 		t.Fatal(view)
 	}
-	if strings.Contains(view, "Activity root/") || strings.Contains(view, "Message  ") || strings.Contains(view, "contents of") {
+	if strings.Contains(view, "Activity root/") || strings.Contains(view, "Message  ") || strings.Contains(view, `"path":`) {
 		t.Fatal("raw activity leaked", view)
 	}
 	if len(m.entries) != 8 {
@@ -70,10 +69,9 @@ func TestToolOnlyOutputsFoldAcrossCallsWithoutLosingHistory(t *testing.T) {
 	}
 	key := m.folds.targets[0].key
 	m.toggleFold(key)
-	if len(m.folds.targets) != 5 {
+	if len(m.folds.targets) != 4 {
 		t.Fatal("expanded fold lost calls", m.folds.targets)
 	}
-	m.toggleFold(m.folds.targets[1].key)
 	view = ansi.Strip(m.viewport.View())
 	if !strings.Contains(view, `"path": "file-1.go"`) || !strings.Contains(view, "contents of file-1.go") {
 		t.Fatal(view)
@@ -101,12 +99,12 @@ func TestActivityBoundariesPreserveMessagesAgentsAndFailures(t *testing.T) {
 	a.Err = errors.New("tests failed")
 	m.observe(conversation.ToolEvent{Agent: "root", Activity: a})
 	view := ansi.Strip(m.viewport.View())
-	if len(m.folds.targets) != 4 || !strings.Contains(view, "A meaningful progress update") || !strings.Contains(view, "Shell failed: tests failed") {
+	if len(m.folds.targets) != 5 || !strings.Contains(view, "A meaningful progress update") || !strings.Contains(view, "Shell failed: tests failed") {
 		t.Fatal(view)
 	}
 	m.selectStream("root")
 	view = ansi.Strip(m.viewport.View())
-	if len(m.folds.targets) != 3 || strings.Contains(view, "worker.go") {
+	if len(m.folds.targets) != 4 || strings.Contains(view, "worker.go") {
 		t.Fatal("filter merged across another agent", view)
 	}
 	for _, want := range []string{"first.go", "second.go", "A meaningful progress update"} {
@@ -140,7 +138,7 @@ func TestFoldCompletionAndResultRemainFrozenUntilResume(t *testing.T) {
 		t.Fatal("resize revealed result")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
-	if !strings.Contains(m.View(), "NEW RESULT") || strings.Contains(m.View(), "Waiting for result") {
+	if !strings.Contains(m.View(), "NEW RESULT") || strings.Contains(m.View(), "Waiting for output") {
 		t.Fatal(m.View())
 	}
 }
@@ -225,9 +223,15 @@ func TestRootHeaderKeepsBackgroundWorkVisibleWithoutSidebar(t *testing.T) {
 	m.resize(80, 24)
 	m.selectStream("root")
 	m.observe(conversation.AgentStateChanged{Agent: "worker", State: agent.Running})
-	if !strings.Contains(ansi.Strip(m.streamTitle()), "1 agent(s) working") {
-		t.Fatal("background work disappeared", m.streamTitle())
+	if !strings.Contains(ansi.Strip(m.composerActivity()), "Working") {
+		t.Fatal("background work disappeared", m.View())
 	}
+	for _, target := range m.stackLayout().targets {
+		if target.choice.id == "worker" && strings.Contains(ansi.Strip(m.stackTargetView(target, false)), "●") {
+			return
+		}
+	}
+	t.Fatal("working agent is missing from the header", m.View())
 }
 
 func TestActivityCommandTogglesTheContainingFold(t *testing.T) {
@@ -240,13 +244,13 @@ func TestActivityCommandTogglesTheContainingFold(t *testing.T) {
 	if err := m.toggleActivity("root/1"); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.folds.targets) != 3 {
-		t.Fatal("first response did not expand group")
+	if !m.toolExpanded(&m.entries[1]) || m.toolExpanded(&m.entries[3]) {
+		t.Fatal("first response expansion affected another response")
 	}
 	if err := m.toggleActivity("root/2"); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.folds.targets) != 1 {
-		t.Fatal("second response did not collapse shared group")
+	if !m.toolExpanded(&m.entries[1]) || !m.toolExpanded(&m.entries[3]) {
+		t.Fatal("second response expansion lost first response state")
 	}
 }

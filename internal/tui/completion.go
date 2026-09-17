@@ -50,7 +50,7 @@ func (m *model) completionMatches() []slashCommand {
 }
 
 func (m *model) completionHeight() int {
-	return min(5, len(m.completionMatches()), max(0, m.height-7-m.input.Height()-m.streamChrome()-m.stackBarHeight()))
+	return min(5, len(m.completionMatches()), max(0, m.height-6-m.input.Height()-m.streamChrome()-m.stackBarHeight()))
 }
 
 func (m *model) syncCompletion() {
@@ -59,7 +59,7 @@ func (m *model) syncCompletion() {
 	}
 	m.completion.selected = min(m.completion.selected, max(0, len(m.completionMatches())-1))
 	m.syncInputHeight()
-	height := max(1, m.height-5-m.input.Height()-m.completionHeight()-m.streamChrome()-m.stackBarHeight())
+	height := max(1, m.height-4-m.input.Height()-m.completionHeight()-m.streamChrome()-m.stackBarHeight())
 	if m.viewport.Height != height {
 		position := m.streamPosition()
 		m.viewport.Height = height

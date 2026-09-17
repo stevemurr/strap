@@ -15,7 +15,7 @@ const rosterColumns = 34
 
 func (m *model) streamChrome() int {
 	if m.height >= 12 {
-		return 3 // Title, agent context, and space for history/error status.
+		return 1 // History/error status below the conversation.
 	}
 	return 0
 }
@@ -245,59 +245,22 @@ func (m *model) rosterLines(height, width int) []rosterLine {
 			addAgent(id)
 		}
 	}
+	// Keep the selected agent visible when a multiline draft leaves little room.
+	lines = lines[:min(len(lines), max(0, height-2))]
 	available := max(1, height-len(lines))
 	start := min(max(0, selectedEnd-available), selectedStart)
-	if start > 0 {
+	if start > 0 && len(lines) >= 3 {
 		lines[2].text = dimStyle.Render("↑ more agents")
 	}
 	end := min(len(rows), start+available)
 	lines = append(lines, rows[start:end]...)
-	if end < len(rows) {
+	if end < len(rows) && len(lines) > 0 {
 		lines[0].text += dimStyle.Render("  ↓")
 	}
 	for len(lines) < height {
 		lines = append(lines, rosterLine{})
 	}
 	return lines[:min(height, len(lines))]
-}
-
-func (m *model) streamDetails() string {
-	if m.selecting {
-		return m.streamUI.frozenDetails
-	}
-	id := m.streamUI.selected
-	if id == "" {
-		return "All agents"
-	}
-	parts := []string{inlineText(string(id)), m.streamRole(id)}
-	if parent := m.ensureStream(id).parent; parent != "" {
-		parts = append(parts, "parent "+inlineText(string(parent)))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func (m *model) streamTitle() string {
-	if m.selecting {
-		return m.streamUI.frozenTitle
-	}
-	id := m.streamUI.selected
-	if id == "" {
-		state := "idle"
-		if m.busy() {
-			state = "working"
-		}
-		return titleStyle.Render("All activity") + "  " + stateStyle.Render(state)
-	}
-	title := m.streamRole(id)
-	if _, ok := m.streamWork(id); ok || id == m.session.Root() {
-		title = m.streamTask(id)
-	}
-	state := m.rosterStatus(id)
-	if id == m.session.Root() && state == "idle" && len(m.working) > 0 {
-		state = fmt.Sprintf("%d agent(s) working", len(m.working))
-	}
-	width := max(1, m.viewport.Width-len(state)-3)
-	return titleStyle.Render(ansi.Truncate(title, width, "…")) + "  " + stateStyle.Render(state)
 }
 
 func (m *model) streamFollowLabel() string {
@@ -334,9 +297,6 @@ func (m *model) streamBody() string {
 		return strings.Join(rows, "\n")
 	}
 	var rows []string
-	if m.streamChrome() != 0 {
-		rows = append(rows, m.streamTitle(), dimStyle.Render(m.streamDetails()))
-	}
 	rows = append(rows, strings.Split(m.viewport.View(), "\n")...)
 	if m.streamChrome() != 0 {
 		rows = append(rows, dimStyle.Render(m.streamFollowLabel()))
@@ -356,7 +316,7 @@ func (m *model) streamMouse(event tea.MouseMsg) bool {
 		width = m.width
 	}
 	height := m.rosterHeight()
-	if width == 0 || event.X >= width || event.Y < 2 || event.Y >= 2+height {
+	if width == 0 || event.X >= width || event.Y < m.transcriptTop() || event.Y >= m.transcriptTop()+height {
 		return false
 	}
 	if event.Button == tea.MouseButtonWheelUp || event.Button == tea.MouseButtonWheelDown {
@@ -372,7 +332,7 @@ func (m *model) streamMouse(event tea.MouseMsg) bool {
 	if event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress {
 		columns := max(1, m.width-2)
 		rows := m.rosterLines(height, columns)
-		if line := rows[event.Y-2]; line.selectable {
+		if line := rows[event.Y-m.transcriptTop()]; line.selectable {
 			m.mouseSelection = nil
 			m.focusRoster(true)
 			if line.completed {

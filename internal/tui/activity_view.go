@@ -11,14 +11,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
-	"github.com/stevemurr/strap/identity"
-	"github.com/stevemurr/strap/message"
 )
 
 // Replaced on completion, never mutated: frozen entries retain their snapshot.
 type toolDisplay struct {
-	preview, arguments, result, failure string
-	started, finished                   time.Time
+	name, preview, arguments, result, failure, notice string
+	started, finished                                 time.Time
 }
 
 func boundedToolText(text string, limit int) string {
@@ -34,13 +32,17 @@ func boundedToolText(text string, limit int) string {
 }
 
 func displayTool(a agent.ToolActivity) *toolDisplay {
-	d := &toolDisplay{started: a.StartedAt, finished: a.FinishedAt}
+	d := &toolDisplay{name: a.Call.Name, started: a.StartedAt, finished: a.FinishedAt}
 	var args map[string]json.RawMessage
 	if json.Unmarshal(a.Call.Arguments, &args) == nil {
 		for _, key := range []string{"path", "url", "command", "query", "pattern", "task", "agent_id"} {
 			var value string
 			if json.Unmarshal(args[key], &value) == nil && strings.TrimSpace(value) != "" {
-				d.preview = ansi.Truncate(inlineText(value), 160, "…")
+				if d.name == "shell" && key == "command" {
+					d.preview = boundedToolText(value, 8192)
+				} else {
+					d.preview = boundedToolText(inlineText(value), 8192)
+				}
 				break
 			}
 		}
@@ -52,6 +54,7 @@ func displayTool(a agent.ToolActivity) *toolDisplay {
 		d.arguments = boundedToolText(string(a.Call.Arguments), 8192)
 	}
 	d.result = boundedToolText(a.Result.Content.Text(), 32768)
+	d.nativeOutput(a.Result.Content.Text())
 	images := 0
 	for _, part := range a.Result.Content {
 		if part.Image != nil {
@@ -62,7 +65,7 @@ func displayTool(a agent.ToolActivity) *toolDisplay {
 		d.result += fmt.Sprintf("\n[%d image(s); binary data omitted]", images)
 	}
 	if a.Err != nil {
-		d.failure = boundedToolText(a.Err.Error(), 2048)
+		d.failure = boundedToolText(strings.TrimPrefix(d.failure+" · "+a.Err.Error(), " · "), 2048)
 	}
 	return d
 }
@@ -76,40 +79,12 @@ type foldTarget struct {
 	row, column int
 }
 type foldState struct {
-	expanded map[foldKey]bool
-	parents  map[uint64]uint64
-	targets  []foldTarget
-	focused  bool
-	selected foldKey
-}
-
-func activityActor(e *entry) message.ActorID {
-	if e.label == "Tool" && e.toolInfo != nil {
-		return e.tool.agent
-	}
-	if e.output != nil && strings.TrimSpace(e.body) == "" && !e.progress && !e.outputFailed && e.message == "" {
-		return e.output.Agent
-	}
-	return ""
-}
-
-func (m *model) foldExpanded(group []*entry) bool {
-	key := foldKey{serial: group[0].serial}
-	if value, ok := m.folds.expanded[key]; ok {
-		return value
-	}
-	for _, e := range group {
-		id := e.output
-		if id == nil {
-			id = e.activityOutput
-		}
-		if id != nil {
-			if collapsed, ok := m.activityCollapsed[*id]; ok {
-				return !collapsed
-			}
-		}
-	}
-	return false
+	allExpanded bool
+	expanded    map[foldKey]bool
+	targets     []foldTarget
+	hints       []foldTarget
+	focused     bool
+	selected    foldKey
 }
 
 func (m *model) foldMarker(key foldKey, expanded bool) string {
@@ -123,173 +98,105 @@ func (m *model) foldMarker(key foldKey, expanded bool) string {
 	return dimStyle.Render(marker)
 }
 
-func (m *model) activityName(actor message.ActorID) string {
-	if actor == m.session.Root() {
-		return "Strap"
-	}
-	return inlineText(string(actor))
-}
-
-func (m *model) renderActivity(group []*entry, firstRow int) string {
-	head := group[0]
-	actor := activityActor(head)
-	key := foldKey{serial: head.serial}
-	expanded := m.foldExpanded(group)
-	width := max(1, m.viewport.Width-1)
-	m.folds.targets = append(m.folds.targets, foldTarget{key: key, row: firstRow})
-	var tools []*entry
-	counts := map[string]int{}
-	var names []string
-	active, failed := false, false
-	var first, last time.Time
-	for _, e := range group {
-		m.folds.parents[e.serial] = head.serial
-		if e.toolInfo != nil {
-			tools = append(tools, e)
-			if counts[e.body] == 0 {
-				names = append(names, e.body)
-			}
-			counts[e.body]++
-			d := e.toolInfo
-			active = active || d.finished.IsZero()
-			failed = failed || d.failure != ""
-			if first.IsZero() || d.started.Before(first) {
-				first = d.started
-			}
-			if d.finished.After(last) {
-				last = d.finished
-			}
-		} else if !e.outputFinished {
-			active = true
-		}
-	}
-	var labels []string
-	for _, name := range names {
-		label := name
-		if counts[name] > 1 {
-			label += fmt.Sprintf(" ×%d", counts[name])
-		}
-		labels = append(labels, label)
-	}
-	title := strings.Join(labels, " · ")
-	if title == "" {
-		title = "Thinking"
-	}
-	mark, style := "✓", successStyle
-	if active {
-		mark, style = "●", stateStyle
-	}
-	if failed {
-		mark, style = "!", errorStyle
-	}
-	meta := ""
-	if len(tools) > 0 {
-		meta = fmt.Sprintf(" · %d call", len(tools))
-		if len(tools) != 1 {
-			meta += "s"
-		}
-	}
-	if m.streamUI.selected != actor {
-		meta += " · " + m.activityName(actor)
-	}
-	if active {
-		last = m.now()
-	}
-	if !first.IsZero() {
-		meta += " · " + elapsed(last.Sub(first))
-	}
+func (m *model) renderTool(e *entry, firstRow int) string {
 	var lines []string
+	width := max(1, m.viewport.Width-1)
 	add := func(text string) {
 		for _, row := range strings.Split(ansi.Hardwrap(text, width, true), "\n") {
 			lines = append(lines, ansi.Truncate(row, width, ""))
 		}
 	}
-	// Keep the fold one line even when many different tools were called.
-	meta = ansi.Truncate(meta, max(0, width-12), "…")
-	title = ansi.Truncate(title, max(1, width-4-ansi.StringWidth(meta)), "…")
-	nameStyle := routeStyle
-	if active {
-		nameStyle = stateStyle
+	d := e.toolInfo
+	key := foldKey{serial: e.serial, tool: true}
+	open := m.toolExpanded(e)
+	row := firstRow + len(lines)
+	m.folds.targets = append(m.folds.targets, foldTarget{key: key, row: row})
+	m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.tool.agent, row: row, column: 2})
+	mark, style := "•", stackIdentity(e.tool.agent)
+	if d.finished.IsZero() {
+		mark = "◦"
 	}
-	heading := m.foldMarker(key, expanded) + " " + style.Render(mark) + " " + nameStyle.Render(title) + dimStyle.Render(meta)
-	add(ansi.Truncate(heading, width, "…"))
-	if !expanded && len(tools) > 0 {
-		latest := tools[len(tools)-1]
-		for _, e := range tools {
-			if e.toolInfo.finished.IsZero() {
-				latest = e
-				break
-			}
-		}
-		prefix := "Latest: "
-		if latest.toolInfo.finished.IsZero() {
-			prefix = "Running: "
-		}
-		preview := latest.body
-		if latest.toolInfo.preview != "" {
-			preview += " · " + latest.toolInfo.preview
-		}
-		add(dimStyle.Render(ansi.Truncate("  "+prefix+preview, width, "…")))
+	if d.failure != "" {
+		mark, style = "!", errorStyle
 	}
-	// Thinking is opt-in, including while a still-empty response is generating.
-	for _, e := range group {
-		if e.output != nil && e.reasoning != "" && e.reasoningExpanded && !m.activityCollapsed[*e.output] {
-			add(dimStyle.Render("  Thinking\n" + indentActivity(e.reasoning, "  │ ")))
+	if m.folds.focused && m.folds.selected == key {
+		mark = m.foldMarker(key, open)
+	}
+	verb := toolName(d.name)
+	switch d.name {
+	case "shell":
+		verb = "Ran"
+		if d.finished.IsZero() {
+			verb = "Running"
 		}
-		if expanded && e.output != nil && e.reasoning != "" && !e.reasoningExpanded {
-			add(dimStyle.Render("  Thinking · Ctrl+T show"))
+	case "read_file", "read_pdf":
+		verb = "Read"
+	case "write_file", "edit_file", "apply_patch":
+		verb = "Edited"
+	case "list_directory", "list_files":
+		verb = "Listed"
+	case "search", "search_files", "web_search":
+		verb = "Searched"
+	}
+	add(style.Render(mark) + " " + agentIcon(e.tool.agent) + " " + verb + " " + routeStyle.Render(d.preview))
+	resultRows := e.toolResultRows(max(1, width-4))
+	if open {
+		if d.name != "shell" && d.arguments != "" && d.arguments != "{}" {
+			add(dimStyle.Render("  Arguments\n" + indentActivity(d.arguments, "  │ ")))
+		}
+		add(dimStyle.Render(indentActivity(strings.Join(resultRows, "\n"), "  │ ")))
+		if e.tokens != nil {
+			add(dimStyle.Render("  " + e.tokens.label()))
+		}
+	} else {
+		visible := resultRows
+		if len(visible) > 2 {
+			visible = visible[:2]
+		}
+		for i, line := range visible {
+			prefix := "    "
+			if i == 0 {
+				prefix = "  └ "
+			}
+			add(dimStyle.Render(prefix + line))
 		}
 	}
-	if expanded {
-		var previous *identity.OutputID
-		for _, e := range tools {
-			if e.activityOutput != nil && (previous == nil || *previous != *e.activityOutput) {
-				previous = e.activityOutput
-				add(dimStyle.Render(fmt.Sprintf("  │ Call %d", previous.Call)))
-			}
-			toolKey := foldKey{serial: e.serial, tool: true}
-			open := m.folds.expanded[toolKey]
-			m.folds.targets = append(m.folds.targets, foldTarget{key: toolKey, row: firstRow + len(lines), column: 2})
-			d := e.toolInfo
-			marker, statusStyle := "✓", successStyle
-			if d.finished.IsZero() {
-				marker, statusStyle = "●", stateStyle
-			}
-			if d.failure != "" {
-				marker, statusStyle = "!", errorStyle
-			}
-			label := "  " + m.foldMarker(toolKey, open) + " " + statusStyle.Render(marker) + " " + routeStyle.Render(e.body)
-			if d.preview != "" {
-				label += " · " + d.preview
-			}
-			end := d.finished
-			if end.IsZero() {
-				end = m.now()
-			}
-			if !d.started.IsZero() {
-				label += dimStyle.Render(" · " + elapsed(end.Sub(d.started)))
-			}
-			add(label)
-			if open {
-				add(dimStyle.Render("    Arguments\n" + indentActivity(d.arguments, "    │ ")))
-				result := d.result
-				if result == "" {
-					result = "No text output."
-					if d.finished.IsZero() {
-						result = "Waiting for result…"
-					}
-				}
-				add(dimStyle.Render("    Result\n" + indentActivity(result, "    │ ")))
-				if e.tokens != nil {
-					add(dimStyle.Render("    " + e.tokens.label()))
-				}
-			}
-			if d.failure != "" {
-				add(errorStyle.Render("    ! " + inlineText(d.failure)))
-			}
+	if len(resultRows) > 2 || open {
+		hint := fmt.Sprintf("… +%d lines (ctrl+t to expand)", len(resultRows)-2)
+		if open {
+			hint = "collapse output (ctrl+t)"
 		}
+		m.folds.hints = append(m.folds.hints, foldTarget{key: key, row: firstRow + len(lines), column: 2})
+		add(dimStyle.Render("  " + hint))
+	}
+	if d.notice != "" {
+		add(dimStyle.Render("  " + d.notice))
+	}
+	if d.failure != "" {
+		add(errorStyle.Render("  ! " + inlineText(d.failure)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *model) toolExpanded(e *entry) bool {
+	if open, ok := m.folds.expanded[foldKey{serial: e.serial, tool: true}]; ok {
+		return open
+	}
+	if e.activityOutput != nil {
+		if collapsed, ok := m.activityCollapsed[*e.activityOutput]; ok {
+			return !collapsed
+		}
+	}
+	return m.folds.allExpanded
+}
+
+func (m *model) toggleToolOutput() {
+	m.folds.allExpanded = !m.folds.allExpanded
+	clear(m.folds.expanded)
+	clear(m.activityCollapsed)
+	position := m.streamPosition()
+	m.renderTranscript(false)
+	m.restoreStreamPosition(position)
 }
 
 func indentActivity(text, prefix string) string {
@@ -300,23 +207,14 @@ func (m *model) toggleFold(key foldKey) {
 	if m.folds.expanded == nil {
 		m.folds.expanded = make(map[foldKey]bool)
 	}
-	value := m.folds.expanded[key]
-	if !key.tool {
-		for i := range m.entries {
-			if m.entries[i].serial == key.serial {
-				end := i + 1
-				for end < len(m.entries) && activityActor(&m.entries[end]) == activityActor(&m.entries[i]) {
-					end++
-				}
-				var group []*entry
-				for j := i; j < end; j++ {
-					group = append(group, &m.entries[j])
-				}
-				value = m.foldExpanded(group)
-				break
-			}
+	value := m.folds.allExpanded
+	for i := range m.entries {
+		if m.entries[i].serial == key.serial {
+			value = m.toolExpanded(&m.entries[i])
+			break
 		}
 	}
+
 	p := m.streamPosition()
 	p.follow = false
 	m.folds.expanded[key] = !value
@@ -332,7 +230,7 @@ func (m *model) foldMouse(event tea.MouseMsg) bool {
 	if event.Y < m.transcriptTop() || event.Y >= m.transcriptTop()+m.viewport.Height {
 		return false
 	}
-	for _, target := range m.folds.targets {
+	for _, target := range append(append([]foldTarget{}, m.folds.targets...), m.folds.hints...) {
 		if y == target.row && x >= target.column && x < target.column+2 {
 			m.toggleFold(target.key)
 			return true

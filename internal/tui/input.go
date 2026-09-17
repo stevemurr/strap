@@ -17,13 +17,18 @@ func newInput() textarea.Model {
 	input.ShowLineNumbers = false
 	input.FocusedStyle.Prompt = titleStyle
 	input.FocusedStyle.Placeholder = dimStyle
-	input.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	input.FocusedStyle.Text = lipgloss.NewStyle().Foreground(surfaceTextColor)
+	input.FocusedStyle.CursorLine = input.FocusedStyle.Text
+	input.BlurredStyle.Text = input.FocusedStyle.Text
+	input.BlurredStyle.CursorLine = input.FocusedStyle.CursorLine
+	input.BlurredStyle.Placeholder = dimStyle
+	input.BlurredStyle.Prompt = titleStyle
 	input.Placeholder = "Message Strap…"
 	input.CharLimit = 0
 	input.MaxWidth = 0
 	input.SetHeight(1)
-	input.FocusedStyle.Base = lipgloss.NewStyle().Background(composerBackground)
-	input.BlurredStyle.Base = lipgloss.NewStyle().Background(composerBackground)
+	input.FocusedStyle.Base = lipgloss.NewStyle().Foreground(surfaceTextColor).Background(composerBackground)
+	input.BlurredStyle.Base = lipgloss.NewStyle().Foreground(surfaceTextColor).Background(composerBackground)
 	input.KeyMap.InsertNewline = bindings.NewBinding(bindings.WithKeys("alt+enter", "ctrl+j"))
 	input.Focus()
 	return input
@@ -32,7 +37,7 @@ func newInput() textarea.Model {
 // Grow with the draft, reserving space for conversation output. Textarea owns
 // wrapping and cursor scrolling when the draft exceeds the visible rows.
 func (m *model) syncInputHeight() {
-	limit := min(6, max(1, m.height-7-m.streamChrome()-m.stackBarHeight()))
+	limit := min(6, max(1, m.height-6-m.streamChrome()-m.stackBarHeight()))
 	if m.height < 8 {
 		limit = min(6, m.height)
 	}

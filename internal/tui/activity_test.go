@@ -38,7 +38,7 @@ func TestActivityKeepsEveryUpdateAndToolCall(t *testing.T) {
 			t.Fatalf("missing %q: %s", text, view)
 		}
 	}
-	if strings.Count(view, "root · Read file") != 3 {
+	if strings.Count(view, agentGlyph("root")+" Read file") != 3 {
 		t.Fatalf("repeated tool calls were combined: %s", view)
 	}
 	m.selectStream("")
@@ -88,7 +88,7 @@ func TestIndividualToolCallsPreserveOrderAndWrap(t *testing.T) {
 		m.addAttributed("Tool", string(call.actor), call.body, false, call.actor)
 	}
 	view := ansi.Strip(m.viewport.View())
-	first, middle, last := strings.Index(view, "worker · Read file"), strings.Index(view, "root · Shell"), strings.LastIndex(view, "worker · Read file")
+	first, middle, last := strings.Index(view, agentGlyph("worker")+" Read file"), strings.Index(view, agentGlyph("root")+" Shell"), strings.LastIndex(view, agentGlyph("worker")+" Read file")
 	if first < 0 || middle <= first || last <= middle || !strings.Contains(view, "visible ending") {
 		t.Fatalf("tool calls merged, reordered or truncated: %s", view)
 	}

@@ -47,7 +47,7 @@ func TestTaskFirstRosterWithManyAgents(t *testing.T) {
 	m := manyAgents(t)
 	m.resize(200, 38)
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Needs attention  2", "Working  3", "Idle  2", "Completed  4"} {
+	for _, want := range []string{"All activity", "root", "Completed 4"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q:\n%s", want, view)
 		}
@@ -121,10 +121,10 @@ func TestCompletedAgentsWithNewWorkOrErrorsRemainVisible(t *testing.T) {
 	w.State = work.Accepted
 	w.Revision++
 	m.rememberWork(w)
-	view := m.View()
-	if !m.streamUI.completedExpanded || !strings.Contains(view, "Agent list layout") {
+	if !m.streamUI.completedExpanded {
 		t.Fatal("finishing work hid the selected agent")
 	}
+	stackLocation(t, m, rosterChoice{id: "agent-1"})
 }
 
 func TestGroupedRosterMouseAndNarrowNavigation(t *testing.T) {

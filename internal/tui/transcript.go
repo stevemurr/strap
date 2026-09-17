@@ -47,6 +47,7 @@ func (m *model) openTranscript(id message.ActorID) {
 		mainPosition = m.transcript.mainPosition
 	}
 	m.transcript = &transcriptView{inspection: in, viewport: viewport.New(max(1, m.width), max(1, m.height-4)), raw: raw, copying: copying, mainPosition: mainPosition}
+	m.transcript.viewport.MouseWheelDelta = 1
 	m.resizeAgentTranscript()
 	m.transcript.viewport.GotoBottom()
 }

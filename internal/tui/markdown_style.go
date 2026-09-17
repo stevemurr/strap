@@ -21,11 +21,11 @@ func newMarkdownRenderer(width int, dark bool, profile termenv.Profile) (*glamou
 // the heading hierarchy, including when color is disabled.
 func markdownStyle(width int, dark bool, profile termenv.Profile) glamouransi.StyleConfig {
 	style := styles.LightStyleConfig
-	text, muted, accent, secondary, code, background := "235", "242", "25", "30", "89", "254"
+	text, muted, accent, secondary, code, background := "235", "241", "#2563EB", "#006F87", "89", "254"
 	theme := "github"
 	if dark {
 		style = styles.DarkStyleConfig
-		text, muted, accent, secondary, code, background = "252", "245", "111", "116", "223", "236"
+		text, muted, accent, secondary, code, background = "252", "247", "#60A5FA", "#22D3EE", "223", "236"
 		theme = "monokai"
 	}
 	zero, one, two := uint(0), uint(1), uint(2)

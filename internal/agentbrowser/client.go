@@ -19,8 +19,6 @@ import (
 	"github.com/stevemurr/strap/internal/webprocess"
 )
 
-const Version = "0.37.1"
-
 type Link struct {
 	Text string `json:"text"`
 	URL  string `json:"url"`
@@ -80,13 +78,6 @@ func (c *Client) Read(ctx context.Context, url string) (page Page, err error) {
 	run := c.run
 	if run == nil {
 		run = webprocess.Run
-	}
-	version, err := run(ctx, c.Program, []string{"--version"}, "", 1024)
-	if err != nil {
-		return page, err
-	}
-	if strings.TrimSpace(string(version)) != "agent-browser "+Version {
-		return page, fmt.Errorf("open_url requires tested agent-browser %s; found %q", Version, strings.TrimSpace(string(version)))
 	}
 	// Darwin's per-user TMPDIR is too long for the daemon's Unix socket path.
 	tempBase := ""
@@ -151,7 +142,7 @@ func (c *Client) Read(ctx context.Context, url string) (page Page, err error) {
 		closeErr := invoke(first, nil, "close")
 		stop()
 		if closeErr != nil {
-			// close is serialized behind navigation in 0.37.1. The fallback
+			// If close is serialized behind navigation, the fallback
 			// terminates the owned session; its profile and sockets are all in dir.
 			killed, stopErr := interrupt(cleanup, dir, id)
 			if killed && stopErr == nil {

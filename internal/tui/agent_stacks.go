@@ -12,7 +12,7 @@ import (
 	"github.com/stevemurr/strap/message"
 )
 
-const stackChipWidth, stackChipStride = 16, 10
+const stackChipWidth = 16
 
 // The strip wraps when there is room to keep the whole team visible. Small
 // terminals retain the F6 list rather than losing their remaining text rows.
@@ -33,13 +33,7 @@ type stackTarget struct {
 
 type stackLayout struct {
 	targets               []stackTarget
-	headings              []stackHeading
 	width, height, offset int
-}
-
-type stackHeading struct {
-	x, y int
-	text string
 }
 
 type stackPreview struct {
@@ -57,22 +51,21 @@ func (m *model) rosterCursor() rosterChoice {
 	return rosterChoice{id: m.streamUI.selected}
 }
 
-// Reserve room for the transcript, stream heading, and composer. Each band
-// has one heading row and three chip rows, followed by one shared separator.
+// Keep at least eight conversation rows plus the composer below the header.
 func (m *model) stackHeightBudget() int {
-	return max(5, ((m.height-14)/4)*4+1)
+	return max(2, m.height-13)
 }
 
 func (m *model) stackLayout() stackLayout {
 	m.syncRosterFocus()
 	available := max(1, m.width-4)
-	l := m.layoutStackBands(available)
+	l := m.layoutStackChips(available)
 	if l.height+1 <= m.stackHeightBudget() {
 		return l
 	}
 	// On short terminals, retain horizontal navigation instead of consuming
 	// the conversation. Every agent remains reachable by keyboard or wheel.
-	l = m.layoutStackBands(0)
+	l = m.layoutStackChips(0)
 	l.offset = min(m.streamUI.stackOffset, max(0, l.width-available))
 	cursor := m.rosterCursor()
 	for _, target := range l.targets {
@@ -91,54 +84,24 @@ func (m *model) stackLayout() stackLayout {
 	return l
 }
 
-func (m *model) layoutStackBands(available int) stackLayout {
-	l := stackLayout{height: 4, width: stackChipWidth, targets: []stackTarget{
-		{choice: rosterChoice{id: ""}, x: 0, y: 0, width: stackChipWidth, height: 1},
-		{choice: rosterChoice{id: m.session.Root()}, x: 0, y: 1, width: stackChipWidth, height: 3},
-	}}
-	x, y := stackChipWidth+2, 0
-	for _, group := range rosterGroups {
-		ids := m.groupedAgents(group)
-		if len(ids) == 0 {
-			continue
+func (m *model) layoutStackChips(available int) stackLayout {
+	l := stackLayout{height: 1}
+	x, y := 0, 0
+	for _, choice := range m.rosterChoices() {
+		width := stackChipWidth
+		if choice.id == "" && !choice.completed {
+			width = 14
 		}
-		heading := fmt.Sprintf("%s  %d", group, len(ids))
-		if group == "Completed" {
-			marker := "▸ "
-			if m.streamUI.completedExpanded {
-				marker = "▾ "
-			}
-			heading = marker + heading
+		if choice.completed {
+			width = ansi.StringWidth(fmt.Sprintf("▾ Completed %d", len(m.groupedAgents("Completed"))))
 		}
-		if group == "Completed" && !m.streamUI.completedExpanded {
-			ids = nil
+		if available > 0 && x > 0 && x+width > available {
+			x, y = 0, y+1
 		}
-		for first := true; first || len(ids) > 0; first = false {
-			width := ansi.StringWidth(heading)
-			if len(ids) > 0 {
-				width = max(width, stackChipWidth+(len(ids)-1)*stackChipStride)
-			}
-			if available > 0 && x > 0 && x+width > available {
-				x, y = 0, y+4
-			}
-			count := len(ids)
-			if available > 0 && count > 0 {
-				count = min(count, max(1, 1+(available-x-stackChipWidth)/stackChipStride))
-				width = max(ansi.StringWidth(heading), stackChipWidth+(count-1)*stackChipStride)
-			}
-			if group == "Completed" && first {
-				l.targets = append(l.targets, stackTarget{choice: rosterChoice{completed: true}, x: x, y: y, width: ansi.StringWidth(heading), height: 1})
-			} else {
-				l.headings = append(l.headings, stackHeading{x: x, y: y, text: heading})
-			}
-			for i, id := range ids[:count] {
-				l.targets = append(l.targets, stackTarget{choice: rosterChoice{id: id}, x: x + i*stackChipStride, y: y + 1, width: stackChipWidth, height: 3})
-			}
-			l.width = max(l.width, x+width)
-			l.height = y + 4
-			x += width + 2
-			ids = ids[count:]
-		}
+		l.targets = append(l.targets, stackTarget{choice: choice, x: x, y: y, width: width, height: 1})
+		l.width = max(l.width, x+width)
+		l.height = y + 1
+		x += width + 2
 	}
 	return l
 }
@@ -146,7 +109,15 @@ func (m *model) layoutStackBands(available int) stackLayout {
 func stackIdentity(id message.ActorID) lipgloss.Style {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(id))
-	colors := []lipgloss.AdaptiveColor{{Light: "25", Dark: "111"}, {Light: "30", Dark: "116"}, {Light: "90", Dark: "183"}, {Light: "28", Dark: "114"}, {Light: "130", Dark: "215"}, {Light: "91", Dark: "177"}}
+	// Saturated identity accents stay legible on both terminal backgrounds.
+	colors := []lipgloss.AdaptiveColor{
+		{Light: "#2563EB", Dark: "#60A5FA"},
+		{Light: "#007568", Dark: "#2DD4BF"},
+		{Light: "#9333EA", Dark: "#C084FC"},
+		{Light: "#16803C", Dark: "#4ADE80"},
+		{Light: "#B45309", Dark: "#FBBF24"},
+		{Light: "#DB2777", Dark: "#F472B6"},
+	}
 	return lipgloss.NewStyle().Foreground(colors[int(h.Sum32())%len(colors)])
 }
 
@@ -160,31 +131,29 @@ func (m *model) stackTargetView(t stackTarget, highlight bool) string {
 		if highlight {
 			style = routeStyle.Bold(true)
 		}
-		return style.Render(fmt.Sprintf("%sCompleted  %d", marker, len(m.groupedAgents("Completed"))))
+		return style.Render(fmt.Sprintf("%sCompleted %d", marker, len(m.groupedAgents("Completed"))))
 	}
 	id := t.choice.id
-	if t.height == 1 {
+	if id == "" {
 		name := "All activity"
-		if id != "" {
-			name = "root"
-		}
 		marker := "  "
 		if id == m.streamUI.selected {
 			marker = "› "
 		}
 		if highlight || id == m.streamUI.selected {
-			style = routeStyle.Background(composerBackground)
+			style = accentStyle.Bold(true)
 		}
 		return style.Render(fitStreamCell(marker+name, t.width))
 	}
-	style = stackIdentity(id)
+	style = dimStyle
 	if highlight || id == m.streamUI.selected {
-		style = style.Background(composerBackground).Bold(true)
+		style = stackIdentity(id).Bold(true).Underline(id == m.streamUI.selected)
 	}
 	mark := "○"
+	markStyle := stackIdentity(id)
 	switch m.rosterGroup(id) {
 	case "Needs attention":
-		mark = "!"
+		mark, markStyle = "!", errorStyle
 	case "Working":
 		mark = "●"
 	case "Completed":
@@ -194,21 +163,14 @@ func (m *model) stackTargetView(t stackTarget, highlight bool) string {
 	if id == m.session.Root() {
 		name = "root"
 	}
-	label := mark + " " + name
-	return style.Border(lipgloss.RoundedBorder()).Render(fitStreamCell(label, stackChipWidth-2))
+	label := agentIcon(id) + " " + style.Render(ansi.Truncate(name, max(1, t.width-5), "…")) + " " + markStyle.Render(mark)
+	return fitStreamCell(label, t.width)
 }
 
 // The hit surface always uses base paint order. A visually lifted chip must
 // never steal its neighbour's hit target or flicker as the pointer moves.
 func (m *model) stackSurface(l stackLayout, lift bool) *chipSurface {
 	s := newChipSurface(max(1, m.width-4), l.height)
-	for _, h := range l.headings {
-		style := dimStyle
-		if strings.HasPrefix(h.text, "Needs attention") || h.x == 0 {
-			style = stateStyle
-		}
-		s.paint(h.x-l.offset, h.y, style.Render(h.text), -1)
-	}
 	cursor := m.rosterCursor()
 	for i, t := range l.targets {
 		s.paint(t.x-l.offset, t.y, m.stackTargetView(t, m.streamUI.rosterFocused && cursor == t.choice), i)
@@ -242,7 +204,7 @@ func (m *model) stackBar() []string {
 	rows := make([]string, l.height+1)
 	for y, row := range s.rows {
 		left, right := " ", " "
-		if y == 2 {
+		if y == 0 {
 			if l.offset > 0 {
 				left = routeStyle.Render("‹")
 			}
@@ -312,14 +274,19 @@ func (m *model) stackPeek() *stackPreview {
 	}
 	width := min(62, m.width-4)
 	inner := width - 4
-	available := m.composerTop() - (2 + m.stackBarHeight())
+	available := m.composerTop() - m.stackBarHeight()
 	// Reserve two border rows and the footer. Never obscure the composer.
 	if available < 5 {
 		return nil
 	}
 	lines := []string{titleStyle.Render(ansi.Truncate(title, inner, "…")), dimStyle.Render(ansi.Truncate(details, inner, "…")), stateStyle.Render(ansi.Truncate(status, inner, "…"))}
 	if available >= 9 {
-		lines = append(lines, "")
+		if c := m.ensureStream(id).context; c != nil {
+			lines = append(lines, dimStyle.Render(ansi.Truncate(c.label(), inner, "…")))
+		}
+		if id == m.session.Root() && m.options.Model != "" {
+			lines = append(lines, dimStyle.Render(ansi.Truncate(m.options.Model+" · "+m.options.Endpoint, inner, "…")))
+		}
 	}
 	lines = append(lines, strings.Split(ansi.Hardwrap(ansi.Truncate(m.stackLatest(id), inner*4, "…"), inner, true), "\n")...)
 	if len(lines) > available-3 {
@@ -330,7 +297,8 @@ func (m *model) stackPeek() *stackPreview {
 		hint = "Enter / click to open"
 	}
 	lines = append(lines, dimStyle.Render(ansi.Truncate(fmt.Sprintf("%d unread · %s", len(m.ensureStream(id).unread), hint), inner, "…")))
-	panel := lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "255", Dark: "234"}).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.AdaptiveColor{Light: "30", Dark: "116"}).Padding(0, 1).Render(strings.Join(lines, "\n"))
+	panelStyle := lipgloss.NewStyle().Foreground(surfaceTextColor).Background(lipgloss.AdaptiveColor{Light: "255", Dark: "234"}).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.AdaptiveColor{Light: "30", Dark: "116"}).Padding(0, 1)
+	panel := renderSurface(panelStyle, strings.Join(lines, "\n"))
 	x := 2
 	l := m.stackLayout()
 	for _, t := range l.targets {
@@ -340,7 +308,7 @@ func (m *model) stackPeek() *stackPreview {
 		}
 	}
 	x = max(1, min(x, m.width-lipgloss.Width(panel)-1))
-	return &stackPreview{x: x, y: 2 + m.stackBarHeight(), text: panel}
+	return &stackPreview{x: x, y: m.stackBarHeight(), text: panel}
 }
 
 func (m *model) stackMouse(event tea.MouseMsg) bool {
@@ -361,7 +329,7 @@ func (m *model) stackMouse(event tea.MouseMsg) bool {
 		}
 		return true
 	}
-	if event.Y < 2 || event.Y >= 2+m.stackBarHeight() || event.X < 1 || event.X >= m.width-1 {
+	if event.Y < 0 || event.Y >= m.stackBarHeight() || event.X < 1 || event.X >= m.width-1 {
 		m.streamUI.hovering = false
 		if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft {
 			m.focusRoster(false)
@@ -381,14 +349,14 @@ func (m *model) stackMouse(event tea.MouseMsg) bool {
 	}
 	l := m.stackLayout()
 	base := m.stackSurface(l, false)
-	index := base.hit(event.X-2, event.Y-2)
+	index := base.hit(event.X-2, event.Y)
 	if event.Action == tea.MouseActionMotion && event.Button == tea.MouseButtonNone {
 		// Keep the preview reachable across the separator row between its
 		// trigger and panel; the gap itself is not a new interactive target.
 		if index < 0 && m.streamUI.hovering {
 			for _, t := range l.targets {
 				x := t.x - l.offset + 2
-				if t.choice == m.streamUI.hover && event.X >= x && event.X < x+t.width && event.Y >= t.y+t.height+2 {
+				if t.choice == m.streamUI.hover && event.X >= x && event.X < x+t.width && event.Y >= t.y+t.height {
 					return true
 				}
 			}
@@ -401,7 +369,7 @@ func (m *model) stackMouse(event tea.MouseMsg) bool {
 	}
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft {
 		m.mouseSelection = nil
-		if event.Y == 4 && ((event.X == 1 && l.offset > 0) || (event.X == m.width-2 && l.offset+base.width < l.width)) {
+		if event.Y == 0 && ((event.X == 1 && l.offset > 0) || (event.X == m.width-2 && l.offset+base.width < l.width)) {
 			if !m.streamUI.rosterFocused {
 				m.focusRoster(true)
 			}

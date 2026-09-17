@@ -45,7 +45,7 @@ func TestLiveReasoningTUI(t *testing.T) {
 	observed, detach := observeSession(session)
 	defer detach()
 	m := newModel(ctx, cancel, observed, Options{})
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Explicitly opt in to thinking display.
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Expanding output must not reveal thinking.
 	start := time.Now()
 	if _, err = session.Send(session.Root(), "For this smoke test, answer what 17 plus 25 equals. Keep reasoning brief, do not call tools, and reply in one sentence."); err != nil {
 		t.Fatal(err)
@@ -69,15 +69,15 @@ func TestLiveReasoningTUI(t *testing.T) {
 					chunks++
 					if chunks == 1 {
 						row := m.outputEntry(id)
-						if row == nil || !strings.Contains(ansi.Strip(m.View()), "Thinking") || !strings.Contains(ansi.Strip(m.View()), strings.TrimSpace(safeText(d.Text))) {
-							t.Fatal("first reasoning chunk did not render")
+						if row == nil || row.reasoning != safeText(d.Text) || strings.Contains(ansi.Strip(m.View()), "Thinking") {
+							t.Fatal("first reasoning chunk was not retained or leaked into view")
 						}
 						inspection, err := session.InspectOutput(ctx, id)
 						if err != nil {
 							t.Fatal(err)
 						}
 						activeObserved = inspection.Output.Status == agent.OutputActive
-						t.Logf("first rendered reasoning at %s; generation active=%v", time.Since(start), activeObserved)
+						t.Logf("first recorded reasoning at %s; generation active=%v", time.Since(start), activeObserved)
 					}
 				}
 			case agent.OutputFinished:

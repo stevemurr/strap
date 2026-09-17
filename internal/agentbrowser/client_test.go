@@ -25,7 +25,8 @@ func TestReadUsesIsolatedSessionsAndRenderedDOM(t *testing.T) {
 	c := &Client{Program: "fake", MaxChars: 1000, MaxBytes: 100000}
 	c.run = func(ctx context.Context, program string, args []string, dir string, limit int, env ...string) ([]byte, error) {
 		if slices.Equal(args, []string{"--version"}) {
-			return []byte("agent-browser " + Version), nil
+			t.Error("page reads must not probe or gate on browser version")
+			return nil, errors.New("unexpected version probe")
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -99,7 +100,8 @@ func TestReadFailuresAlwaysCloseSessionWithFreshContext(t *testing.T) {
 			c := &Client{Program: "fake", MaxChars: 1000, MaxBytes: 100000}
 			c.run = func(ctx context.Context, _ string, args []string, _ string, _ int, _ ...string) ([]byte, error) {
 				if args[0] == "--version" {
-					return []byte("agent-browser " + Version), nil
+					t.Error("page reads must not probe or gate on browser version")
+					return nil, errors.New("unexpected version probe")
 				}
 				cmd := args[slices.Index(args, "--json")+1]
 				if cmd == "eval" && args[len(args)-1] == readyScript {
@@ -145,17 +147,5 @@ func TestReadFailuresAlwaysCloseSessionWithFreshContext(t *testing.T) {
 				t.Fatalf("err=%v closed=%d", err, closed)
 			}
 		})
-	}
-}
-
-func TestIncompatibleVersionDoesNotLaunch(t *testing.T) {
-	c := &Client{run: func(_ context.Context, _ string, args []string, _ string, _ int, _ ...string) ([]byte, error) {
-		if !slices.Equal(args, []string{"--version"}) {
-			t.Fatal("launched incompatible backend")
-		}
-		return []byte("agent-browser 0.1.0"), nil
-	}}
-	if _, err := c.Read(context.Background(), "https://example.com"); err == nil {
-		t.Fatal("accepted unsupported version")
 	}
 }

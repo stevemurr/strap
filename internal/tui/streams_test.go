@@ -282,8 +282,8 @@ func TestThinkingStillStaysHiddenInFocusedStream(t *testing.T) {
 		t.Fatal("focused view exposed reasoning without opting in")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if !strings.Contains(m.View(), "hidden thought") {
-		t.Fatal("thinking toggle no longer works")
+	if strings.Contains(m.View(), "hidden thought") || m.outputEntry(id).reasoning != "hidden thought" {
+		t.Fatal("output toggle exposed or destroyed recorded reasoning")
 	}
 }
 

@@ -142,18 +142,23 @@ Commands run with host permissions, without a sandbox or approval prompt.
 
 Type a message and press Enter. Input stays available while agents work and always
 addresses Strap's root, regardless of which agent you are watching. The root's
-live stream opens by default. At 40 columns by 18 rows or larger, overlapping
-agent chips occupy a strip above the full-width conversation and composer.
-The strip starts at five rows and wraps when the terminal has room to show the team.
-Each chip shows a task label and a status symbol; its color stays tied to the agent.
+live stream opens by default. At 40 columns by 18 rows or larger, compact
+agent icons occupy a strip above the full-width conversation and composer.
+The chips form the entire header, followed by a separator and the conversation.
+The header starts at two rows and wraps when the terminal has room to show the team.
+Each agent has a static glider icon, a task label, and a status symbol.
+The icon configuration and accent color stay tied to the agent across chips,
+message dots, and tool calls; previews do not animate. The selected chip and
+working indicator use stronger accents, and the send button lights up for a draft.
 Agents are grouped by attention needed, working, idle, inactive, and completed,
-in discovery order within each group. Root has its own status chip at the start,
-with All activity above it. Completed work is
+in discovery order within each group, without separate group headings. Root has
+its own status chip beside All activity. Completed work is
 expanded by default; idle agents with unfinished work remain visible.
 Work awaiting review or blocked work remains distinct from an agent being idle;
-`!` also flags execution errors. The selected stream header shows role, execution
-state, parent, and the last context measurement; its live status line shows
-current activity or error/blocker details. Unknown counts remain explicit.
+`!` also flags execution errors. Agent previews show role, execution state,
+parent, and the last context measurement; the root preview includes the model
+and endpoint. Current activity and error/blocker details remain available there.
+Unknown counts remain explicit.
 
 Hover over a chip to preview its full task, agent ID, role, status, latest update,
 and unread count. Press F6 and use the arrows or Tab / Shift-Tab to preview agents
@@ -177,19 +182,22 @@ includes messages routed to or from root; a child's unaddressed live output and
 tools stay in that child's stream and All activity. `/transcript [id]` remains
 the separate model-history inspector.
 
-The colorized transcript groups consecutive tool-only responses from the same
-agent into a collapsed activity fold. Its summary shows tool counts, status,
-elapsed time, and the latest target. Commentary, replies, errors, and another
-agent's activity always separate groups; the underlying history stays intact.
-Click a disclosure triangle to expand it, or press F7 and use Up / Down and Enter.
-Escape returns to composing. Expand an individual tool to inspect its arguments,
-result, and context-token measurement. Large payloads are capped in this view;
-`/transcript [id]` provides the full model history. Repeated calls keep separate
-rows and their original order. Calls within an agent currently execute sequentially.
-`/activity agent-id/response-number` also toggles that response's activity segments.
-Blue identifies assistant messages, cyan tools and progress, amber running work,
-green completion, and red failures. Status symbols also work without color.
-Routine delivery receipts are tracked internally rather than printed as messages.
+Prompts appear in shaded blocks; assistant replies and progress appear as plain
+prose without repeated speaker headings. Commands show what actually ran, with a
+static agent icon and two rows of output. Hover or click the icon for identity
+and status. Ctrl+T expands or collapses tool output across the view. Click a tool's
+status marker or disclosure hint, or press F7 and use Up / Down and Enter, to
+expand an individual result. Escape returns to composing. Expanded details include
+arguments and context-token measurements. Shell and file results show readable
+output instead of JSON envelopes; failures and truncation remain visible even
+when folded. Large payloads are capped in this view; `/transcript [id]` provides
+the full model history. Each command stays in its original position between
+progress messages, including when agents interleave. `/activity agent-id/response-number`
+toggles only that response's tool results. Routine delivery receipts are tracked
+internally rather than printed as messages.
+
+The `strap-eval` activity pane uses this same renderer, output folding, static
+agent icons, and hover details. Its navigation remains read only.
 
 Conversation messages render Markdown with headings, emphasis, lists, links,
 tables, and code blocks using [Glamour](https://github.com/charmbracelet/glamour).
@@ -202,15 +210,15 @@ Source messages remain unchanged; rendering is cached until the width changes.
 After an exchange, `Idle` means the agent is waiting for another message.
 `queued` counts pending messages; it is a delivery status, not an agent state.
 
-Activity folds show elapsed time and update while tools run; the agent list shows
-which agents are working or need attention. Assistant text accompanying tool calls appears as an attributed
+Command status updates while tools run; the agent strip shows which agents are
+working or need attention. Assistant text accompanying tool calls appears as a
 progress paragraph before that batch's tool rows. Agents are prompted to explain
 their first action and meaningful findings between batches. These host-only
 updates do not enter agent inboxes or mark work complete; the original text stays
 in the generating agent's assistant history without an additional message.
 Replies and progress text stream into a single row as the model generates them.
-Thinking is hidden by default. Ctrl+T shows or hides it across the view and keeps
-your choice for later output. Cmd+T requires terminal-level forwarding as Ctrl+T
+Thinking is omitted from the live view, including when tool output is expanded.
+Ctrl+T controls tool output only. Cmd+T requires terminal-level forwarding as Ctrl+T
 (`0x14`), where supported. The terminal normally reserves Cmd+T for a new tab,
 and Strap's input library does not receive Command modifiers directly.
 Reasoning is recorded for inspection and recovery, but never enters subsequent
@@ -221,8 +229,8 @@ calls and remains available after `/clear`.
 Failed partial output remains visible. A reattached view can replay the entire
 session and recover active output; see [streaming and recovery](harness/RECOVERY.md).
 
-After a tool batch finishes, its tool line shows the agent's context size, for
-example `agent-1 · Read file · 12,345 context tokens`. The TUI counts that exact
+After a tool batch finishes, its expanded details show the agent's context size,
+for example `12,345 context tokens`. The TUI counts that exact
 history snapshot through the provider, including system instructions, tool
 definitions, messages, and the completed tool results. Each tool row keeps its own batch's count, not a sum or the size of tool output alone.
 Counting runs in the background with a ten-second timeout. Unsupported providers
@@ -648,7 +656,7 @@ does not stop its children; conversation close cancels and joins every agent.
 
 `web_search` searches DuckDuckGo through **wkrender**, the native macOS WebKit
 renderer. It returns ranked titles, destination URLs and snippets. `open_url`
-uses **agent-browser 0.37.1** to load a page in its own headless Chrome session
+uses **agent-browser** to load a page in its own headless Chrome session
 and read the rendered DOM. It returns readable text and a separate list of link
 destinations. Both use ordinary tool activity and agent commentary in the console.
 
@@ -664,15 +672,15 @@ cancels individual searches independently. Search challenges and unknown result
 markup are errors; only an explicit no-results page produces an empty list.
 There is no HTTP search fallback.
 
-Install the pinned agent-browser package in an isolated directory:
+Install agent-browser in an isolated directory:
 
 ```sh
-npm install --prefix "$HOME/.local/share/strap/agent-browser" --save-exact agent-browser@0.37.1
+npm install --prefix "$HOME/.local/share/strap/agent-browser" agent-browser
 ```
 
 Strap discovers the packaged native executable there if `agent-browser` is not
-on PATH. The package's installer declares Node 24+; the native browser runtime
-does not need Node. On macOS, Strap uses the installed Google Chrome executable
+on PATH. Strap does not require an exact agent-browser version; it validates
+command responses when reading pages. The native browser runtime does not need Node. On macOS, Strap uses the installed Google Chrome executable
 when present. Otherwise install Chrome through agent-browser (`agent-browser
 install` using your installed executable), or provide a path explicitly. See the
 [upstream installation instructions](https://agent-browser.dev/installation).

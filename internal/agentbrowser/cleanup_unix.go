@@ -20,7 +20,7 @@ type processRow struct {
 	command            string
 }
 
-// This is pinned to agent-browser 0.37.1: its daemon publishes page.pid inside
+// The daemon publishes page.pid inside
 // our private socket directory and launches Chrome in a separate process group.
 // Killing the CLI cannot cancel an in-flight daemon command, and close waits
 // for that command's lock. Force-stop only groups descended from our daemon,
@@ -80,7 +80,7 @@ func interruptBrowserWith(ctx context.Context, dir, namespace string, ops cleanu
 		return false, nil
 	}
 	for _, group := range groups {
-		// Match ChromeProcess::kill in the pinned backend: stop the leader
+		// Match ChromeProcess::kill in the backend: stop the leader
 		// first, then its helpers. macOS can refuse group-wide delivery even
 		// when stopping the owned browser leader is permitted.
 		if err := ops.kill(group, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {

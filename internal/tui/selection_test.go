@@ -174,8 +174,10 @@ func TestTranscriptMouseSelectionAndCopyFailure(t *testing.T) {
 func TestLateClipboardResultDoesNotRestoreDismissedSelection(t *testing.T) {
 	m, _ := setup(t)
 	m.copyText = func(string) error { return nil }
-	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, 1, 0))
-	_, cmd := m.Update(mouseAt(tea.MouseActionRelease, tea.MouseButtonLeft, 5, 0))
+	m.add("Strap", "clipboard text", false)
+	x, y := screenLocation(t, m.View(), "clipboard text")
+	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, x, y))
+	_, cmd := m.Update(mouseAt(tea.MouseActionRelease, tea.MouseButtonLeft, x+4, y))
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m.Update(cmd())
 	if m.mouseSelection != nil {
