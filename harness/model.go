@@ -41,7 +41,7 @@ func (o ModelConfig) NewProvider(httpClient *http.Client) (provider.Provider, er
 func (o ModelConfig) Resolve() (ModelConfig, error) {
 	switch o.Backend {
 	case "chatcompletions":
-		if o.Generation != (vllm.Generation{}) {
+		if !o.Generation.Empty() {
 			return ModelConfig{}, fmt.Errorf("generation settings require -backend vllm; chatcompletions uses server defaults")
 		}
 		return cloneModel(o), nil

@@ -533,6 +533,7 @@ func cloneModel(m ModelConfig) ModelConfig {
 	g.EnableThinking = copyPtr(g.EnableThinking)
 	g.ReasoningEffort = copyPtr(g.ReasoningEffort)
 	g.ForceNonemptyContent = copyPtr(g.ForceNonemptyContent)
+	g.StrictTools = slices.Clone(g.StrictTools)
 	return m
 }
 

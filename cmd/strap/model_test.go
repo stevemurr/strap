@@ -17,8 +17,8 @@ import (
 
 func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 	qwen := map[string]any{
-		"temperature": 0.6, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0,
-		"presence_penalty": 0.0, "repetition_penalty": 1.0, "max_tokens": 131072.0,
+		"temperature": 1.0, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0,
+		"presence_penalty": 0.0, "repetition_penalty": 1.1, "max_tokens": 81920.0,
 		"chat_template_kwargs": map[string]any{"enable_thinking": true},
 	}
 	qwenNoThink := map[string]any{
@@ -56,7 +56,7 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 		{"server defaults", []string{"-config", bare}, map[string]any{}, false},
 		{"zero and false overrides", []string{"-profile", "qwen3.6", "-temperature", "0", "-thinking=false", "-max-tokens", "4096"}, map[string]any{
 			"temperature": 0.0, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0, "presence_penalty": 0.0,
-			"repetition_penalty": 1.0, "max_tokens": 4096.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
+			"repetition_penalty": 1.1, "max_tokens": 4096.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
 		}, false},
 		{"overrides without saved settings", []string{"-config", bare, "-top-p", "0.8", "-top-k", "-1", "-min-p", "0", "-presence-penalty", "0", "-repetition-penalty", "1.1", "-thinking"}, map[string]any{
 			"top_p": 0.8, "top_k": -1.0, "min_p": 0.0, "presence_penalty": 0.0, "repetition_penalty": 1.1,
@@ -70,7 +70,7 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 			"chat_template_kwargs": map[string]any{"force_nonempty_content": false},
 		}, false},
 		// strict-tools marks tools, not the request body, so no sampling field appears.
-		{"strict tools", []string{"-config", bare, "-strict-tools"}, map[string]any{}, false},
+		{"strict tools", []string{"-config", bare, "-strict-tools", "create_plan, report_work_progress"}, map[string]any{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -3,6 +3,7 @@ package vllm
 import (
 	"fmt"
 	"math"
+	"reflect"
 )
 
 // Generation contains the supported subset of vLLM generation options. Nil
@@ -19,12 +20,22 @@ type Generation struct {
 	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
 	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
 	ReasoningEffort      *string  `json:"reasoning_effort,omitempty"`       // Qwen template: low, medium, or xhigh.
-	// StrictTools marks every advertised tool strict, so vLLM constrains
-	// tool-call generation to each tool's schema (structural tags) instead of
-	// extracting calls from free text. It is not a sampling field; it is
-	// applied to the tool definitions of each request.
-	StrictTools *bool `json:"strict_tools,omitempty"`
+	// StrictTools names the tools vLLM must constrain to their own schema
+	// (structural tags) instead of extracting calls from free text. It is not
+	// a sampling field; it is applied to the named tool definitions of each
+	// request, and a name no agent advertises is simply never applied.
+	//
+	// Constraining is per tool because it is a remedy, not an improvement:
+	// models emit trailing characters after a long nested array, and the
+	// server's parser then passes the raw text through as a string. Tools
+	// without that shape gain nothing and still pay the observed cost of
+	// occasional empty arguments under constrained decoding.
+	StrictTools []string `json:"strict_tools,omitempty"`
 }
+
+// Empty reports whether no generation setting was supplied, so a backend with
+// no generation policy of its own can reject settings meant for another one.
+func (g Generation) Empty() bool { return reflect.DeepEqual(g, Generation{}) }
 
 type generationFields struct {
 	Temperature       *float64        `json:"temperature,omitempty"`

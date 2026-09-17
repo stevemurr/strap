@@ -30,7 +30,7 @@ type Client struct {
 	model            string
 	wire             *chatwire.Client
 	generation       generationFields
-	strictTools      bool
+	strictTools      map[string]bool
 	tokenizeEndpoint string
 }
 
@@ -63,7 +63,13 @@ func New(config Config) (*Client, error) {
 	u, _ := url.Parse(config.BaseURL)
 	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1") + "/tokenize"
 	u.RawPath = ""
-	strict := config.Generation.StrictTools != nil && *config.Generation.StrictTools
+	strict := map[string]bool{}
+	for _, name := range config.Generation.StrictTools {
+		if strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("vllm: strict_tools names a blank tool")
+		}
+		strict[name] = true
+	}
 	return &Client{model: config.Model, wire: wire, generation: generation, strictTools: strict, tokenizeEndpoint: u.String()}, nil
 }
 
@@ -83,9 +89,11 @@ func (c *Client) Submit(ctx context.Context, input provider.Request, observer pr
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("vllm: encode content: %w", err)
 	}
-	if c.strictTools {
-		yes := true
-		for i := range base.Tools {
+	// Match by name: a request advertises the tools of one agent's role, and
+	// the configured names cover every role.
+	for i := range base.Tools {
+		if c.strictTools[base.Tools[i].Function.Name] {
+			yes := true
 			base.Tools[i].Function.Strict = &yes
 		}
 	}
