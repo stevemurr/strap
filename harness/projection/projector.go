@@ -316,7 +316,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			return errors.New("agent state revision gap")
 		}
 		switch v.State {
-		case agent.Idle, agent.Running, agent.PauseRequested, agent.Paused, agent.StopRequested, agent.Stopped, agent.Failed:
+		case agent.Idle, agent.Running, agent.PauseRequested, agent.Paused, agent.Interrupted, agent.StopRequested, agent.Stopped, agent.Failed:
 		default:
 			return errors.New("invalid agent state")
 		}

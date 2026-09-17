@@ -33,6 +33,8 @@ func (s evalSession) PauseAgent(message.ActorID) (conversation.AgentInfo, error)
 func (s evalSession) ResumeAgent(message.ActorID) (conversation.AgentInfo, error) {
 	return conversation.AgentInfo{}, errEvalReadOnly
 }
+func (s evalSession) Interrupt(context.Context) error { return errEvalReadOnly }
+
 func (s evalSession) StopAgent(message.ActorID) (conversation.AgentInfo, error) {
 	return conversation.AgentInfo{}, errEvalReadOnly
 }

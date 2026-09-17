@@ -14,6 +14,7 @@ const (
 	Running        State = "running"
 	PauseRequested State = "pause_requested"
 	Paused         State = "paused"
+	Interrupted    State = "interrupted"
 	StopRequested  State = "stop_requested"
 	Stopped        State = "stopped"
 	Failed         State = "failed"
@@ -22,12 +23,14 @@ const (
 func (s State) Terminal() bool { return s == Stopped || s == Failed }
 
 type lifecycle struct {
-	mu         sync.Mutex
-	pending    *StateSnapshot
-	state      State
-	revision   uint64
-	changed    chan struct{}
-	waitCancel context.CancelFunc
+	mu             sync.Mutex
+	pending        *StateSnapshot
+	state          State
+	revision       uint64
+	changed        chan struct{}
+	waitCancel     context.CancelFunc
+	exchangeCancel context.CancelFunc
+	interrupt      *interruption
 }
 
 type StateSnapshot struct {
@@ -81,6 +84,11 @@ func (a *Agent) PauseSnapshot() (StateSnapshot, error) {
 	a.emission.Lock()
 	defer a.emission.Unlock()
 	a.control.mu.Lock()
+	if a.control.interrupt != nil {
+		s := StateSnapshot{a.control.state, a.control.revision}
+		a.control.mu.Unlock()
+		return s, ErrInterrupted
+	}
 	if a.control.state.Terminal() || a.stopRequested.Load() {
 		s := StateSnapshot{a.control.state, a.control.revision}
 		a.control.mu.Unlock()
@@ -101,6 +109,11 @@ func (a *Agent) ResumeSnapshot() (StateSnapshot, error) {
 	a.emission.Lock()
 	defer a.emission.Unlock()
 	a.control.mu.Lock()
+	if a.control.interrupt != nil {
+		s := StateSnapshot{a.control.state, a.control.revision}
+		a.control.mu.Unlock()
+		return s, ErrInterrupted
+	}
 	if a.control.state.Terminal() || a.stopRequested.Load() {
 		s := StateSnapshot{a.control.state, a.control.revision}
 		a.control.mu.Unlock()

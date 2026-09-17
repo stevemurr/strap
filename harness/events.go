@@ -111,7 +111,7 @@ func (s *Session) Dispose(ctx context.Context) error {
 func (s *Session) Log(ctx context.Context, entry conversation.DiagnosticEvent) error {
 	_, done, err := s.admission.Begin(ctx)
 	if err != nil {
-		return err
+		return interruptionError(err)
 	}
 	defer done()
 	switch entry.Level {

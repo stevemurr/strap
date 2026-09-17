@@ -69,6 +69,12 @@ func (s *Session) startCloseReason(reason string) *closeAttempt {
 }
 func (s *Session) finalize(a *closeAttempt) {
 	err := s.admission.Wait(context.Background())
+	s.mu.Lock()
+	interruption := s.interruption
+	s.mu.Unlock()
+	if interruption != nil {
+		<-interruption.done
+	}
 	if err == nil && s.workflow != nil {
 		err = s.workflow.Close(context.Background())
 	} else if err == nil && s.controller != nil {

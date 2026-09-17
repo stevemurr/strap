@@ -59,6 +59,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func classify(err error) (int, Error) {
 	status, code := http.StatusInternalServerError, "internal"
 	switch {
+	case errors.Is(err, harness.ErrInterrupted):
+		status, code = 409, "interrupted"
 	case errors.Is(err, harness.ErrBusy):
 		status, code = 429, "busy"
 	case errors.Is(err, ErrUnauthorized), errors.Is(err, work.ErrForbidden):
@@ -262,6 +264,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				v, err := session.Events(r.Context(), q)
 				respond(w, v, err)
+				return
+			}
+		case "interrupt":
+			if r.Method == "POST" {
+				respond(w, nil, session.Interrupt(r.Context()))
 				return
 			}
 		case "close":

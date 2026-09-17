@@ -126,12 +126,14 @@ archives are finite failed input; they cannot silently start running again.
 
 ## API migration
 
-This implementation writes schema **4**. Readers also accept schemas 2 and 3, normalizing
+This implementation writes schema **5**. Readers also accept schemas 2, 3 and 4, normalizing
 schema-2 output deltas to content-only without rewriting stored records or hashes.
 Schema 2 does not establish whether the provider generated reasoning; it did not
 retain that channel. Schema-3 deltas require an explicit valid channel. Schema 4 adds immutable application `agent_registered` records. Older archives
 without these facts show `role: unknown`, `registered: false`, and no inferred
-eligible kinds. Schema-2/3 readers reject schema 4. Schema-1 archives have narrower coverage
+eligible kinds. Schema 5 adds the nonterminal `interrupted` agent state. Older
+readers reject schema 5 instead of misinterpreting interruption as termination.
+Schema-1 archives have narrower coverage
 and are rejected by the new archive reader/reducer rather than being presented as
 fully recoverable sessions. Provider implementations now implement
 `Submit(context.Context, provider.Request, provider.Observer)`. Nil observation

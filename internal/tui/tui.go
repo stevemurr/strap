@@ -29,6 +29,7 @@ import (
 // Session is the host control surface. The UI requests lifecycle changes; the
 // conversation and agent loop implement them.
 type Session interface {
+	Interrupt(context.Context) error
 	Root() message.ActorID
 	Send(message.ActorID, string) (message.Receipt, error)
 	Agents() []harness.AgentInfo
@@ -58,6 +59,8 @@ func Run(ctx context.Context, session Session, options Options) error {
 	return err
 }
 
+type interrupted struct{ err error }
+
 type received struct {
 	event conversation.Event
 	err   error
@@ -86,6 +89,7 @@ type entry struct {
 }
 
 type model struct {
+	interrupting      bool
 	folds             foldState
 	activityCollapsed map[identity.OutputID]bool
 	reasoningExpanded bool // Thinking is hidden until explicitly shown.
@@ -165,6 +169,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	defer m.syncCompletion()
 	defer m.markStreamRead()
 	switch msg := msg.(type) {
+	case interrupted:
+		m.interrupting = false
+		if msg.err != nil {
+			m.add("Error", msg.err.Error(), true)
+		} else {
+			m.add("System", "Stopped current work. Send a new instruction to continue.", true)
+		}
+		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -375,7 +387,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop [id]     Stop an agent permanently\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool-only calls start folded with status, counts, and target previews. Click a triangle, or F7 then ↑/↓ and Enter, to inspect groups and tool results. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s segments; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool-only calls start folded with status, counts, and target previews. Click a triangle, or F7 then ↑/↓ and Enter, to inspect groups and tool results. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s segments; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -398,7 +410,18 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 				id = message.ActorID(fields[1])
 			}
 			m.openTranscript(id)
-		case "/inspect", "/pause", "/resume", "/stop":
+		case "/stop":
+			if len(fields) != 1 {
+				m.add("Error", "Usage: /stop (all current work). Use /terminate [agent-id] for permanent termination.", true)
+				break
+			}
+			if m.interrupting {
+				break
+			}
+			m.interrupting = true
+			m.add("System", "Stopping current work…", true)
+			return m, func() tea.Msg { return interrupted{err: m.session.Interrupt(m.ctx)} }
+		case "/inspect", "/pause", "/resume", "/terminate":
 			if len(fields) > 2 {
 				m.add("Error", "Usage: "+fields[0]+" [agent-id]", true)
 				break
@@ -416,7 +439,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 				operation = m.session.PauseAgent
 			case "/resume":
 				operation = m.session.ResumeAgent
-			case "/stop":
+			case "/terminate":
 				operation = m.session.StopAgent
 			}
 			info, err := operation(id)
@@ -524,7 +547,7 @@ func (m *model) observe(event conversation.Event) {
 		default:
 			delete(m.working, e.Agent)
 		}
-		if e.State == agent.PauseRequested || e.State == agent.Paused || e.State == agent.StopRequested {
+		if e.State == agent.PauseRequested || e.State == agent.Paused || e.State == agent.Interrupted || e.State == agent.StopRequested {
 			m.addAttributed("State", string(e.Agent), string(e.State), false, e.Agent)
 		}
 	case conversation.AgentStarted:
@@ -770,8 +793,13 @@ func (m *model) status() string {
 	if m.rootStopped {
 		return "Root stopped · /quit and restart to begin again"
 	}
+	if m.interrupting {
+		return "Stopping current work…"
+	}
 	status := "Idle"
-	if m.states[m.session.Root()] == agent.Paused {
+	if m.states[m.session.Root()] == agent.Interrupted {
+		status = "Stopped · send a new instruction to continue"
+	} else if m.states[m.session.Root()] == agent.Paused {
 		status = "Root paused · /resume to continue"
 	} else if m.states[m.session.Root()] == agent.PauseRequested {
 		status = "Root pause requested…"

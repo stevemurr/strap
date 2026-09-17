@@ -8,6 +8,7 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 )
@@ -271,12 +272,27 @@ func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, r work
 
 func (s *Session) begin(ctx context.Context) (context.Context, func(), error) {
 	if s.admission != nil {
-		return s.admission.Begin(ctx)
+		run, done, err := s.admission.Begin(ctx)
+		if errors.Is(err, admission.ErrSuspended) {
+			err = conversation.ErrInterrupted
+		}
+		if err == nil && s.executionHeld() {
+			done()
+			return nil, nil, conversation.ErrInterrupted
+		}
+		return run, done, err
 	}
 	if s.closing.Load() {
 		return nil, nil, conversation.ErrClosed
 	}
+	if s.executionHeld() {
+		return nil, nil, conversation.ErrInterrupted
+	}
 	return ctx, func() {}, ctx.Err()
+}
+
+func (s *Session) executionHeld() bool {
+	return s.interrupted.Load() || (s.Controller != nil && s.Controller.Interrupted())
 }
 
 func (s *Session) SubmitResearch(ctx context.Context, actor identity.ActorID, r work.SubmitResearchRequest) (work.SubmitResearchResult, error) {

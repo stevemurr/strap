@@ -290,10 +290,17 @@ Type `/` to reveal commands; there is no permanent command toolbar.
 | `/transcript [id]` | Browse an agent’s actual conversation; defaults to root |
 | `/pause [id]` | Pause at an operation boundary; defaults to root |
 | `/resume [id]` | Resume a paused agent; defaults to root |
-| `/stop [id]` | Permanently stop an agent; defaults to root |
+| `/stop` | Interrupt current work across all agents; keep the conversation |
+| `/terminate [id]` | Permanently stop an agent; defaults to root |
 | `/clear` | Clear the display, keeping conversation context |
 | `/help` | Show commands |
 | `/quit`, Ctrl-C, Ctrl-D | Cancel the conversation and exit |
+
+`/stop` cancels active model/tool calls and outstanding delegated work. Completed
+actions and conversation history remain; queued messages are marked undelivered.
+Once interruption settles, send a new instruction to continue in the same session.
+It does not undo edits or retry interrupted tools. `/resume` only resumes a pause;
+use `/terminate [id]` when an agent should permanently exit.
 
 The transcript browser reads the same history used for model requests. It starts
 with the latest 20 messages, including system instructions, received messages,
@@ -522,6 +529,15 @@ Artifact references identify outputs to verify; resolving or isolating them belo
 to application tooling.
 
 ## Agent management
+
+Hosts use `session.Interrupt(ctx)` for the user-facing Stop action. It waits for
+execution, tool history, pending deliveries, and the work ledger to settle, then
+holds agents in the nonterminal `interrupted` state. A subsequent `Send` releases
+the hold. Reads remain available, but new work mutations are refused until fresh
+input. A wait timeout leaves interruption running; another call joins the same
+attempt. A dependency that ignores cancellation can delay completion. `StopAgent`
+still permanently terminates an individual agent, and `Close` shuts down the
+session. See [the interruption contract](docs/architecture/ADR-003-session-interruption.md).
 
 The application connects ordinary tools to controller operations; `tool` imports
 neither `conversation` nor `agent`. `StopAgent`, `PauseAgent`, and `ResumeAgent` accept a callback with this signature:

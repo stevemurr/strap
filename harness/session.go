@@ -101,6 +101,8 @@ type Dependencies struct {
 }
 
 type Session struct {
+	interactionMu    sync.Mutex
+	interruption     *interruptAttempt
 	progressReads    *inspection.ProgressReader
 	hostMessage      atomic.Uint64
 	encoder          *eventcodec.Publisher
@@ -377,12 +379,36 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 func (s *Session) Config() Config         { return cloneConfig(s.config) }
 func (s *Session) Root() identity.ActorID { return s.controller.Root() }
 func (s *Session) Send(to identity.ActorID, text string) (message.Receipt, error) {
-	_, done, err := s.admission.Begin(context.Background())
+	s.interactionMu.Lock()
+	defer s.interactionMu.Unlock()
+	run, done, err := s.admission.Begin(context.Background())
 	if err != nil {
-		return message.Receipt{}, err
+		return message.Receipt{}, interruptionError(err)
 	}
 	defer done()
-	return s.controller.Send(to, text)
+	s.mu.Lock()
+	if run.Err() != nil {
+		err := ErrInterrupted
+		if s.state != Open {
+			err = ErrClosed
+		}
+		s.mu.Unlock()
+		return message.Receipt{}, err
+	}
+	previous := s.interruption
+	if previous != nil {
+		s.interruption = nil
+		s.workflow.ResumeInterrupted()
+	}
+	s.mu.Unlock()
+	r, err := s.controller.SendContext(run, to, text)
+	s.mu.Lock()
+	if err != nil && previous != nil && s.interruption == nil {
+		s.interruption = previous
+		s.workflow.Suspend()
+	}
+	s.mu.Unlock()
+	return r, err
 }
 func (s *Session) Agents() []AgentInfo {
 	reader, v, err := s.traceView(context.Background(), eventlog.Cursor{})
@@ -405,7 +431,7 @@ func (s *Session) InspectAgent(id identity.ActorID, opts conversation.InspectOpt
 func (s *Session) PauseAgent(id identity.ActorID) (conversation.AgentInfo, error) {
 	_, done, err := s.admission.Begin(context.Background())
 	if err != nil {
-		return conversation.AgentInfo{}, err
+		return conversation.AgentInfo{}, interruptionError(err)
 	}
 	defer done()
 	return s.controller.PauseAgent(id)
@@ -413,7 +439,7 @@ func (s *Session) PauseAgent(id identity.ActorID) (conversation.AgentInfo, error
 func (s *Session) ResumeAgent(id identity.ActorID) (conversation.AgentInfo, error) {
 	_, done, err := s.admission.Begin(context.Background())
 	if err != nil {
-		return conversation.AgentInfo{}, err
+		return conversation.AgentInfo{}, interruptionError(err)
 	}
 	defer done()
 	return s.controller.ResumeAgent(id)
@@ -421,7 +447,7 @@ func (s *Session) ResumeAgent(id identity.ActorID) (conversation.AgentInfo, erro
 func (s *Session) StopAgent(id identity.ActorID) (conversation.AgentInfo, error) {
 	_, done, err := s.admission.Begin(context.Background())
 	if err != nil {
-		return conversation.AgentInfo{}, err
+		return conversation.AgentInfo{}, interruptionError(err)
 	}
 	defer done()
 	return s.controller.StopAgent(id)
@@ -433,7 +459,7 @@ func (s *Session) Receipt(id message.MessageID) (message.Receipt, bool) {
 func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, revision uint64) (int64, error) {
 	run, done, err := s.admission.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, interruptionError(err)
 	}
 	defer done()
 	return s.controller.CountAgentTokens(run, id, revision)

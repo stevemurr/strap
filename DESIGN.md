@@ -516,12 +516,20 @@ idle ↔ running
   └── pause_requested → paused → running (resume)
               └────────────────→ running (retract pending pause)
 any live state → stop_requested → stopped
+any live state → interrupted → idle (new user instruction)
 running → failed (provider/runtime error)
 ```
 
 The agent owns its pause gate and state. The controller routes control requests,
 returns state snapshots, and owns cancellation/joining. `AgentStateChanged` records
 ordered transitions. Pause acknowledgment is separate from pause acceptance.
+
+The host's `harness.Session.Interrupt(ctx)` implements user-facing Stop across
+all agents. It cancels the current exchange without canceling the persistent
+agent lifetime, settles tool history, cancels outstanding delegated work, and
+retires queued input and workflow notices. A new user instruction releases the
+interrupted agents. `StopAgent` remains terminal. See
+[ADR-003](docs/architecture/ADR-003-session-interruption.md) for the full contract.
 
 A checkpoint admits each operation. A pause accepted after that checkpoint waits
 for the admitted operation to finish. A model response or tool result is recorded

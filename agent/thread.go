@@ -73,6 +73,33 @@ func (t *thread) requestMessages() ([]provider.Message, uint64) {
 	return provider.CopyMessages(messages), revision
 }
 
+// pendingCalls reads only the final assistant batch and its results. Interrupting
+// a long conversation must not clone the entire transcript to settle that batch.
+func (t *thread) pendingCalls() []provider.ToolCall {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	completed := map[string]int{}
+	for i := len(t.messages) - 1; i >= 0; i-- {
+		m := t.messages[i]
+		if m.Role == "tool" {
+			completed[m.ToolCallID]++
+		}
+		if m.Role != "assistant" {
+			continue
+		}
+		var pending []provider.ToolCall
+		for _, call := range m.ToolCalls {
+			if completed[call.ID] > 0 {
+				completed[call.ID]--
+				continue
+			}
+			pending = append(pending, call)
+		}
+		return provider.CopyCalls(pending)
+	}
+	return nil
+}
+
 func (t *thread) snapshot(q TranscriptQuery) (TranscriptPage, error) {
 	q.Limit = cmp.Or(q.Limit, DefaultTranscriptLimit)
 	if q.Limit < 1 || q.Limit > MaxTranscriptLimit {

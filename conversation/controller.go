@@ -26,24 +26,26 @@ type ownedAgent struct {
 }
 
 type Controller struct {
-	admitInbox  func(message.ActorID) agent.InboxAdmission
-	wakeContext func(message.ActorID) agent.WakeContext
-	emission    sync.Mutex
-	reporter    Reporter
-	source      func(context.Context) (Event, error)
-	mu          sync.Mutex
-	closing     bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	done        chan struct{}
-	wg          sync.WaitGroup
-	root        message.ActorID
-	agents      map[message.ActorID]*ownedAgent
-	order       []message.ActorID
-	receipts    map[message.MessageID]message.Receipt
-	events      *inbox.Inbox[Event]
-	nextAgent   uint64
-	nextMessage uint64
+	interrupted  bool
+	interruption *interruptAttempt
+	admitInbox   func(message.ActorID) agent.InboxAdmission
+	wakeContext  func(message.ActorID) agent.WakeContext
+	emission     sync.Mutex
+	reporter     Reporter
+	source       func(context.Context) (Event, error)
+	mu           sync.Mutex
+	closing      bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	done         chan struct{}
+	wg           sync.WaitGroup
+	root         message.ActorID
+	agents       map[message.ActorID]*ownedAgent
+	order        []message.ActorID
+	receipts     map[message.MessageID]message.Receipt
+	events       *inbox.Inbox[Event]
+	nextAgent    uint64
+	nextMessage  uint64
 }
 
 // New creates an empty conversation. CreateAgent(message.User, spec) establishes
@@ -128,6 +130,9 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	if c.closing || c.ctx.Err() != nil {
 		return Creation{}, ErrClosed
 	}
+	if c.interrupted {
+		return Creation{}, ErrInterrupted
+	}
 	if parent == message.User {
 		if c.root != "" {
 			return Creation{}, errors.New("conversation already has a root agent")
@@ -196,11 +201,39 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 
 // Send delivers user input. Model-facing senders are bound to their own actor.
 func (c *Controller) Send(to message.ActorID, content string) (message.Receipt, error) {
+	return c.SendContext(context.Background(), to, content)
+}
+
+// SendContext checks caller cancellation before admitting a delivery. Publication
+// is not rollback: an already admitted delivery may finish after cancellation.
+func (c *Controller) SendContext(ctx context.Context, to message.ActorID, content string) (message.Receipt, error) {
 	c.emission.Lock()
 	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.sendLocked(message.User, message.Draft{To: to, Kind: message.Instruction, Content: content})
+	if err := ctx.Err(); err != nil {
+		return message.Receipt{}, err
+	}
+	if c.ctx.Err() != nil {
+		return message.Receipt{}, ErrClosed
+	}
+	if c.interruptionPendingLocked() {
+		return message.Receipt{}, ErrInterrupted
+	}
+	draft := message.Draft{To: to, Kind: message.Instruction, Content: content}
+	if err := draft.Validate(); err != nil {
+		return message.Receipt{}, err
+	}
+	if to != message.User {
+		if err := c.activeLocked(to); err != nil {
+			return message.Receipt{}, err
+		}
+	}
+	// Retire the previous completed interruption before publication releases mu.
+	// A Stop racing publication must create a fresh cancellation fence, and an
+	// admitted Send must never release that newer fence when it returns.
+	c.releaseInterruptionLocked()
+	return c.deliverLocked(message.User, draft)
 }
 
 // Deliver is a host operation for application-owned work dispatch. Model tools
@@ -210,6 +243,9 @@ func (c *Controller) Deliver(from message.ActorID, draft message.Draft) (message
 	defer c.emission.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.interrupted {
+		return message.Receipt{}, ErrInterrupted
+	}
 	if from != message.User {
 		if _, ok := c.agents[from]; !ok {
 			return message.Receipt{}, fmt.Errorf("unknown sender: %s", from)
@@ -471,6 +507,9 @@ func (s sender) Send(ctx context.Context, draft message.Draft) (message.Receipt,
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return message.Receipt{}, err
+	}
+	if c.interrupted {
+		return message.Receipt{}, ErrInterrupted
 	}
 	if err := c.activeLocked(s.actor); err != nil {
 		return message.Receipt{}, err

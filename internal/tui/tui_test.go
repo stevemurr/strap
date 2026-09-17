@@ -209,16 +209,22 @@ func (s *fakeSession) ResumeAgent(id message.ActorID) (conversation.AgentInfo, e
 	s.managed = "resume:" + string(id)
 	return conversation.AgentInfo{ID: id, State: agent.Running}, s.err
 }
+func (s *fakeSession) Interrupt(context.Context) error { s.managed = "interrupt"; return s.err }
+
 func (s *fakeSession) StopAgent(id message.ActorID) (conversation.AgentInfo, error) {
 	s.managed = "stop:" + string(id)
 	return conversation.AgentInfo{ID: id, State: agent.StopRequested}, s.err
 }
 func TestManagementCommandsAndPausedStatus(t *testing.T) {
 	m, s := setup(t)
-	for _, cmd := range []string{"pause", "resume", "inspect", "stop"} {
+	for _, cmd := range []string{"pause", "resume", "inspect", "terminate"} {
 		m.input.SetValue("/" + cmd + " agent-2")
 		m.submit()
-		if s.managed != cmd+":agent-2" {
+		expected := cmd
+		if cmd == "terminate" {
+			expected = "stop"
+		}
+		if s.managed != expected+":agent-2" {
 			t.Fatal(s.managed)
 		}
 	}

@@ -117,7 +117,7 @@ func (m *model) busy() bool {
 	}
 	for _, recipient := range m.pending {
 		state := m.states[recipient]
-		if state != agent.Paused && !state.Terminal() {
+		if state != agent.Paused && state != agent.Interrupted && !state.Terminal() {
 			return true
 		}
 	}

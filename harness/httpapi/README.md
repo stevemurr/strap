@@ -42,7 +42,7 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /agents` | Agent state, lifecycle revision, role, registration, eligible work kinds, and active work IDs |
 | `POST /agents` | `{ "actor": "agent-1", "request": {"role":"implementor"} }`; root only; `implementor` or `auditor`, returns idle registration |
 | `GET /agents/{agent}` | Inspect; `?transcript=true&before=N&limit=N` requests history |
-| `POST /agents/{agent}/pause`, `/resume`, `/stop` | Lifecycle controls |
+| `POST /agents/{agent}/pause`, `/resume`, `/stop` | Agent lifecycle controls; `/stop` permanently terminates the agent |
 | `POST /agents/{agent}/tokens` | `{ "revision": N }`; explicit provider I/O (`measure` capability) |
 | `POST /messages` | `{ "to": "agent-1", "content": "..." }` |
 | `GET /receipts/{message}` | Delivery receipt |
@@ -59,6 +59,7 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /events/stream?after=N` | Independent NDJSON subscription |
 | `POST /logs` | `{ "level": "info", "message": "...", "fields": {"key":"value"} }` |
 | `POST /flush` | Ordered publication barrier; does not sync disk |
+| `POST /interrupt` | Stop current work across all agents; retain the conversation for new input |
 | `POST /close` | Finalize execution and capture; retain inspection/history |
 | `POST /dispose` | Finalize and release event storage (`dispose` capability) |
 
@@ -75,6 +76,15 @@ retry them and does not implement idempotency-key deduplication; it rejects
 `Idempotency-Key` instead of implying protection it cannot provide. Work revision
 checks reject stale transitions. A timeout/disconnect may occur after mutation:
 inspect state or receipts before deciding whether to send another request.
+
+`POST /interrupt` takes no body and returns `null` after agents, tool results,
+queued deliveries, and outstanding delegated work settle. The session stays open.
+The next accepted `/messages` request starts a fresh exchange with retained
+history. Pending mutations return 409 `interrupted`; after settlement, work
+mutations and `/resume` remain unavailable until new input. A timeout or client
+disconnect stops only the wait; another `/interrupt` joins the same attempt.
+It never rolls back edits or automatically retries tools. Use `/close` to end the
+session, or the per-agent `/stop` route for permanent termination.
 
 Event cursors are exclusive and start at zero. Pages default to 100 entries, with
 a maximum of 1,000 and a default 4 MiB byte budget; transcript pages have a maximum

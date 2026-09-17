@@ -191,7 +191,7 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 	b.limit = a.config.Spec.ReasoningLimit
 	response, err := a.config.Spec.Provider.Submit(run, request, b)
 	bytes, reasoningBytes, flushErr := b.finish(response, err == nil)
-	err = errors.Join(err, flushErr, a.recordUsage(revision, response.Usage), a.reportError())
+	err = errors.Join(err, ctx.Err(), flushErr, a.recordUsage(revision, response.Usage), a.reportError())
 	var position *uint64
 	status := OutputFailed
 	if err == nil {

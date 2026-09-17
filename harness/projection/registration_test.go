@@ -12,7 +12,7 @@ import (
 )
 
 func TestRegistrationBoundaryAndLegacyUnknownRoles(t *testing.T) {
-	for _, schema := range []int{2, 3, 4} {
+	for _, schema := range []int{2, 3, 4, 5} {
 		t.Run(string(rune('0'+schema)), func(t *testing.T) {
 			p := projection.New("session")
 			if e := p.Apply(eventlog.Record{Session: "session", Sequence: 1, Schema: schema, Data: eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"session"}`)}}); e != nil {

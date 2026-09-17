@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,8 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
+	interrupted        atomic.Bool
+	interruptDrain     chan chan error
 	evidenceLookup     work.EvidenceLookup
 	researchShell      tool.Tool
 	researchMaxTimeout time.Duration
@@ -78,6 +81,7 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	owner := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]roster.Registration{}, progressConfig: DefaultWorkProgressReporting(), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	s.interruptDrain = make(chan chan error)
 	for _, option := range options {
 		option(s)
 	}
@@ -202,7 +206,7 @@ func (s *Session) current(b binding) bool {
 	return e == nil && w.Assignee == b.recipient && w.AssignedAtRevision == b.revision && w.State == work.Active
 }
 func (s *Session) failure(b binding, detail string) {
-	if !s.current(b) {
+	if s.interrupted.Load() || !s.current(b) {
 		return
 	}
 	_, err := s.Controller.Deliver(b.owner, message.Draft{To: b.owner, Kind: message.Notification, Content: fmt.Sprintf("Work %s delivery/execution needs attention for assignee %s: %s. Inspect work and reassign or cancel it; this is not an audit verdict.", b.work, b.recipient, detail)})
@@ -292,7 +296,9 @@ func (s *Session) run() {
 			}
 			receipt, err := s.Controller.Deliver(owner, message.Draft{To: owner, Kind: message.Notification, Progress: &part, Event: outcome})
 			if err != nil {
-				s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Progress notice delivery failed: %v", err)}})
+				if !errors.Is(err, conversation.ErrInterrupted) {
+					s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Progress notice delivery failed: %v", err)}})
+				}
 				return false
 			}
 			notifications[receipt.MessageID] = append([]work.EventID(nil), ids...)
@@ -314,7 +320,7 @@ func (s *Session) run() {
 				}
 				published[e.ID] = true
 			}
-			if s.closing.Load() {
+			if s.closing.Load() || s.interrupted.Load() {
 				continue
 			}
 			w := e.Work
@@ -354,7 +360,7 @@ func (s *Session) run() {
 				for recipient := range recipients {
 					info, err := s.Controller.InspectAgent(recipient, conversation.InspectOptions{})
 					if err == nil && !info.State.Terminal() {
-						if _, err = s.Controller.Deliver(e.Actor, message.Draft{To: recipient, Kind: message.Notification, Event: &e}); err != nil {
+						if _, err = s.Controller.Deliver(e.Actor, message.Draft{To: recipient, Kind: message.Notification, Event: &e}); err != nil && !errors.Is(err, conversation.ErrInterrupted) {
 							s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work %s changed but recipient %s could not be notified: %v", w.ID, recipient, err)}})
 						}
 					}
@@ -398,7 +404,9 @@ func (s *Session) run() {
 				}
 				receipt, err := s.Controller.Deliver(e.Actor, message.Draft{To: w.Owner, Kind: kind, Event: &e})
 				if err != nil {
-					s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s for %s remains pending: %v", e.Kind, w.ID, err)}})
+					if !errors.Is(err, conversation.ErrInterrupted) {
+						s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s for %s remains pending: %v", e.Kind, w.ID, err)}})
+					}
 					continue
 				}
 				notifications[receipt.MessageID] = []work.EventID{e.ID}
@@ -412,13 +420,28 @@ func (s *Session) run() {
 	}
 	for {
 		select {
+		case result := <-s.interruptDrain:
+			err := s.cancelInterruptedWork()
+			clear(delivered)
+			clear(failed)
+			clear(attempted)
+			clear(published)
+			clear(revoked)
+			clear(notifications)
+			clear(outstanding)
+			clear(coverages)
+			clear(seenChange)
+			clear(priorWorks)
+			queue = newNoticeQueue(s.progressConfig)
+			resetTimer()
+			result <- err
 		case <-s.ctx.Done():
 			return
 		case <-s.Store.Ready():
 			drain()
 			resetTimer()
 		case now := <-timerC:
-			if !s.closing.Load() {
+			if !s.closing.Load() && !s.interrupted.Load() {
 				drain()
 				retire()
 				queue.flush(now, sendNotice)
@@ -432,6 +455,9 @@ func (s *Session) run() {
 			}
 			if s.publish == nil {
 				s.emit(e)
+			}
+			if s.interrupted.Load() {
+				continue // Settlement retires these notices without waking agents.
 			}
 			switch event := e.(type) {
 			case conversation.AckEvent:

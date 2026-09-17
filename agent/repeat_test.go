@@ -42,8 +42,9 @@ func TestRepeatedIdenticalCallsAreNoticedThenStopped(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(results) != 11 {
-		t.Fatalf("%d results before stopping, want 11", len(results))
+	// Even the final invocation completed and must retain its actual result.
+	if len(results) != 12 {
+		t.Fatalf("%d results before stopping, want 12", len(results))
 	}
 	for i, r := range results {
 		noticed := strings.Contains(r, "consecutive call")

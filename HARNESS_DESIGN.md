@@ -607,6 +607,14 @@ milestones and do not block the Go session, memory store, or JSONL diagnostics.
 
 ## Foundation scope
 
+User-facing Stop is now `Session.Interrupt(ctx)`, distinct from terminal
+`StopAgent` and session `Close`. It cancels current exchanges across agents,
+settles tool history and queued deliveries, cancels outstanding delegated work,
+and retains the session for the next user instruction. Timeout only bounds the
+wait; interruption keeps ownership until settlement. See
+[ADR-003](docs/architecture/ADR-003-session-interruption.md) for the implemented
+contract and adapter behavior.
+
 The first three slices establish shared typed workflow operations, their tool
 adapters, public `harness.Session` assembly with owned resources and transport,
 and coordinated shutdown. `Close(ctx)` starts independent finalization and only

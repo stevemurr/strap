@@ -23,7 +23,8 @@ var slashCommands = []slashCommand{
 	{"/pause", "Pause an agent · [id]"},
 	{"/quit", "Exit Strap"},
 	{"/resume", "Resume an agent · [id]"},
-	{"/stop", "Stop an agent · [id]"},
+	{"/stop", "Stop current work; keep the conversation"},
+	{"/terminate", "Permanently stop an agent · [id]"},
 	{"/transcript", "Browse agent history · [id]"},
 }
 

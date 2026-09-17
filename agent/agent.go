@@ -217,6 +217,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 	if !a.started.CompareAndSwap(false, true) {
 		return errors.New("agent already started")
 	}
+	defer a.finishInterrupt()
 	defer func() {
 		a.emission.Lock()
 		defer a.emission.Unlock()
@@ -234,173 +235,208 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		return err
 	}
 	for {
-		if err := a.waitInbox(ctx); err != nil {
-			return err
-		}
-		incoming, err := a.config.Inbox.Receive(ctx)
+		run, cancel, err := a.beginExchange(ctx)
 		if err != nil {
 			return err
 		}
-		if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
-			last = incoming.ID
+		err = a.exchange(run, &last)
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		if err := a.consume(incoming); err != nil {
-			return err
+		if failure := a.reportError(); failure != nil {
+			return failure
 		}
-		if incoming.Kind == message.Observation {
+		if a.interruptPending() {
+			if err := a.settleInterrupt(); err != nil {
+				return err
+			}
 			continue
 		}
-		inputs := []message.Message{incoming}
-		admitted := false
-		malformed := 0
-		overrun := 0
-		for {
-			if err := a.checkpoint(ctx); err != nil {
-				return err
-			}
-			for _, incoming := range a.config.Inbox.Drain() {
-				if !admitted {
-					inputs = append(inputs, incoming)
-				}
-				if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
-					last = incoming.ID
-				}
-				if err := a.consume(incoming); err != nil {
-					return err
-				}
-			}
-			if err := a.checkpoint(ctx); err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
+	if err := a.waitInbox(ctx); err != nil {
+		return err
+	}
+	incoming, err := a.config.Inbox.Receive(ctx)
+	if err != nil {
+		return err
+	}
+	if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
+		*last = incoming.ID
+	}
+	if err := a.consume(incoming); err != nil {
+		return err
+	}
+	if incoming.Kind == message.Observation {
+		return nil
+	}
+	inputs := []message.Message{incoming}
+	admitted := false
+	malformed := 0
+	overrun := 0
+	for {
+		if err := a.checkpoint(ctx); err != nil {
+			return err
+		}
+		for _, incoming := range a.config.Inbox.Drain() {
 			if !admitted {
-				wake, err := a.admit(ctx, inputs)
-				if err != nil {
-					return err
-				}
-				if !wake {
-					break
-				}
-				admitted = true
-				if err := a.appendWakeContext(ctx, inputs); err != nil {
-					return err
-				}
+				inputs = append(inputs, incoming)
 			}
-			request, revision := a.request()
-			response, output, err := a.generate(ctx, request, revision)
-			var rejected *provider.ToolArgumentsError
-			if errors.As(err, &rejected) && ctx.Err() == nil && malformed < maxMalformedCalls {
-				malformed++
-				notice := fmt.Sprintf("Your previous %s call was discarded and nothing ran: %v. Emit the call again with every parameter closed, one tool call per block.", rejected.Name, err)
-				// The notice is a synthetic user message about a finished output.
-				// Linking it to that output breaks projection replay, which only
-				// accepts assistant messages on an output that is still active.
-				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
-					return err
-				}
-				continue
+			if incoming.Kind != message.Notification && incoming.Kind != message.Observation {
+				*last = incoming.ID
 			}
-			if errors.Is(err, ErrReasoningLimit) && ctx.Err() == nil && overrun < maxReasoningRetries {
-				overrun++
-				notice := fmt.Sprintf("Your previous response was cut off after %d KB of reasoning without a tool call or reply, and nothing ran. Act now: emit the next tool call or the final reply directly, without further deliberation.", a.config.Spec.ReasoningLimit>>10)
-				if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
-					return err
-				}
-				continue
+			if err := a.consume(incoming); err != nil {
+				return err
 			}
+		}
+		if err := a.checkpoint(ctx); err != nil {
+			return err
+		}
+		if !admitted {
+			wake, err := a.admit(ctx, inputs)
 			if err != nil {
 				return err
 			}
-			malformed = 0
-			overrun = 0
+			if !wake {
+				break
+			}
+			admitted = true
+			if err := a.appendWakeContext(ctx, inputs); err != nil {
+				return err
+			}
+		}
+		request, revision := a.request()
+		response, output, err := a.generate(ctx, request, revision)
+		var rejected *provider.ToolArgumentsError
+		if errors.As(err, &rejected) && ctx.Err() == nil && malformed < maxMalformedCalls {
+			malformed++
+			notice := fmt.Sprintf("Your previous %s call was discarded and nothing ran: %v. Emit the call again with every parameter closed, one tool call per block.", rejected.Name, err)
+			// The notice is a synthetic user message about a finished output.
+			// Linking it to that output breaks projection replay, which only
+			// accepts assistant messages on an output that is still active.
+			if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
+				return err
+			}
+			continue
+		}
+		if errors.Is(err, ErrReasoningLimit) && ctx.Err() == nil && overrun < maxReasoningRetries {
+			overrun++
+			notice := fmt.Sprintf("Your previous response was cut off after %d KB of reasoning without a tool call or reply, and nothing ran. Act now: emit the next tool call or the final reply directly, without further deliberation.", a.config.Spec.ReasoningLimit>>10)
+			if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		malformed = 0
+		overrun = 0
+		if err := a.checkpoint(ctx); err != nil {
+			return err
+		}
+		if len(response.ToolCalls) == 0 {
+			if response.Content == "" {
+				return errors.New("model returned no text or tool calls")
+			}
+			_, err := a.config.Outbox.Send(ctx, message.Draft{
+				To: a.config.ReplyTo, Kind: message.Reply, ReplyTo: *last, Content: response.Content, Output: &output,
+			})
+			if err != nil {
+				return err
+			}
+			break
+		}
+		if strings.TrimSpace(response.Content) != "" {
+			if err := a.report(Commentary{Output: output, Text: response.Content}); err != nil {
+				return err
+			}
+			if a.config.OnCommentary != nil {
+				a.config.OnCommentary(response.Content)
+			}
+		}
+		var toolRevision uint64
+		controlBatch := false
+		for _, call := range response.ToolCalls {
+			if a.controls[call.Name] != "" {
+				controlBatch = true
+			}
+		}
+		mixedControl := controlBatch && len(response.ToolCalls) != 1
+		yielded := false
+		for _, call := range response.ToolCalls {
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
-			if len(response.ToolCalls) == 0 {
-				if response.Content == "" {
-					return errors.New("model returned no text or tool calls")
-				}
-				_, err := a.config.Outbox.Send(ctx, message.Draft{
-					To: a.config.ReplyTo, Kind: message.Reply, ReplyTo: last, Content: response.Content, Output: &output,
-				})
-				if err != nil {
-					return err
-				}
-				break
+			var rejected error
+			if mixedControl {
+				rejected = errors.New("control tool must be the sole call; no calls in this batch executed")
 			}
-			if strings.TrimSpace(response.Content) != "" {
-				if err := a.report(Commentary{Output: output, Text: response.Content}); err != nil {
-					return err
-				}
-				if a.config.OnCommentary != nil {
-					a.config.OnCommentary(response.Content)
-				}
+			result, err := a.invokeCall(ctx, call, rejected)
+			if err == nil && !mixedControl && a.controls[call.Name] == tool.YieldToInbox {
+				yielded = true
 			}
-			var toolRevision uint64
-			controlBatch := false
-			for _, call := range response.ToolCalls {
-				if a.controls[call.Name] != "" {
-					controlBatch = true
-				}
+			if ctx.Err() != nil && err == nil && len(result.Content) == 0 {
+				err = ctx.Err()
 			}
-			mixedControl := controlBatch && len(response.ToolCalls) != 1
-			yielded := false
-			for _, call := range response.ToolCalls {
-				if err := a.checkpoint(ctx); err != nil {
-					return err
-				}
-				var rejected error
-				if mixedControl {
-					rejected = errors.New("control tool must be the sole call; no calls in this batch executed")
-				}
-				result, err := a.invokeCall(ctx, call, rejected)
-				if err == nil && !mixedControl && a.controls[call.Name] == tool.YieldToInbox {
-					yielded = true
-				}
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				if err != nil && result.Execution == nil {
-					result.Content = append(result.Content, tool.Text("Tool error: "+err.Error()).Content...)
-				}
-				if key := a.repeatKey(call, result, err); key == a.repeated.key {
-					a.repeated.count++
-				} else {
-					a.repeated = repeatedCall{key: key, count: 1}
-				}
-				if a.repeated.count >= maxRepeatedCalls {
-					return fmt.Errorf("tool %s called %d times in a row with the same request and the same result; stopping", call.Name, a.repeated.count)
-				}
-				if a.repeated.count >= repeatedCallHint {
-					result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with the same request and the same result. Repeating it will not change the outcome; change the arguments or the approach instead. After %d such calls this agent stops.", a.repeated.count, call.Name, maxRepeatedCalls)).Content...)
-				}
+			if err != nil && result.Execution == nil {
+				result.Content = append(result.Content, tool.Text("Tool error: "+err.Error()).Content...)
+			}
+			if ctx.Err() != nil {
 				toolRevision, err = a.appendHistory(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,
 				}, nil)
 				if err != nil {
 					return err
 				}
+				return ctx.Err()
 			}
-			{
-				calls := make([]string, len(response.ToolCalls))
-				for i, call := range response.ToolCalls {
-					calls[i] = call.ID
-				}
-				batch := ToolBatch{Calls: calls, ContextRevision: toolRevision}
-				if err := a.report(batch); err != nil {
-					return err
-				}
-				if a.config.OnToolBatch != nil {
-					a.config.OnToolBatch(batch)
-				}
+			if key := a.repeatKey(call, result, err); key == a.repeated.key {
+				a.repeated.count++
+			} else {
+				a.repeated = repeatedCall{key: key, count: 1}
 			}
-			if yielded {
-				if err := a.report(Yielded{Output: output, CallID: response.ToolCalls[0].ID, SettledRevision: toolRevision}); err != nil {
-					return err
-				}
-				break
+			if a.repeated.count >= repeatedCallHint {
+				result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with the same request and the same result. Repeating it will not change the outcome; change the arguments or the approach instead. After %d such calls this agent stops.", a.repeated.count, call.Name, maxRepeatedCalls)).Content...)
+			}
+
+			toolRevision, err = a.appendHistory(provider.Message{
+				Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,
+			}, nil)
+			if err != nil {
+				return err
+			}
+			if a.repeated.count >= maxRepeatedCalls {
+				return fmt.Errorf("tool %s called %d times in a row with the same request and the same result; stopping", call.Name, a.repeated.count)
 			}
 		}
+		{
+			calls := make([]string, len(response.ToolCalls))
+			for i, call := range response.ToolCalls {
+				calls[i] = call.ID
+			}
+			batch := ToolBatch{Calls: calls, ContextRevision: toolRevision}
+			if err := a.report(batch); err != nil {
+				return err
+			}
+			if a.config.OnToolBatch != nil {
+				a.config.OnToolBatch(batch)
+			}
+		}
+		if yielded {
+			if err := a.report(Yielded{Output: output, CallID: response.ToolCalls[0].ID, SettledRevision: toolRevision}); err != nil {
+				return err
+			}
+			break
+		}
 	}
+	return nil
 }
 
 func (a *Agent) consume(incoming message.Message) error {
