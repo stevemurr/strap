@@ -88,7 +88,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
-		progress := work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
+		progress := work.ReportWorkProgressRequest{WorkID: implementation.ID, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
 		receipt := operationResult(t, s, viaTools, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
 			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})
@@ -213,7 +213,7 @@ func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	if _, err := s.AssignWork(ctx, w.Assignee, work.AssignmentRequest{Kind: work.Implementation, Task: "delegate"}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
-	if _, err := s.ReportWorkProgress(ctx, s.Root(), work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Position: &work.WorkPosition{Objective: "wrong actor"}}); !errors.Is(err, work.ErrForbidden) {
+	if _, err := s.ReportWorkProgress(ctx, s.Root(), work.ReportWorkProgressRequest{WorkID: w.ID, Position: &work.WorkPosition{Objective: "wrong actor"}}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
 	before := len(s.Agents())

@@ -103,7 +103,7 @@ func (f acceptanceWorker) Submit(_ context.Context, r provider.Request, _ provid
 			return provider.Response{}, err
 		}
 		p.ref = receipt.Ref
-		return operation("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: p.w.Revision}, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic returned the fixture result", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: p.ref}}}}})
+		return operation("report_work_progress", work.ReportWorkProgressRequest{WorkID: p.w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic returned the fixture result", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: p.ref}}}}})
 	case 3:
 		var receipt work.ReportWorkProgressResult
 		if err := json.Unmarshal([]byte(lastResult(r)), &receipt); err != nil || len(receipt.FindingIDs) != 1 {

@@ -113,8 +113,8 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 	}
 	ready := work.ReadyForReview
 	progress, err := s.ReportWorkProgress(ctx, f.Implementor, work.ReportWorkProgressRequest{
-		WorkTarget: work.WorkTarget{ID: f.Original.ID, ExpectedRevision: f.Original.Revision},
-		Steps:      []work.StepProgress{{ID: f.Plan.Steps[0].ID, Status: &ready}},
+		WorkID: f.Original.ID,
+		Steps:  []work.StepProgress{{ID: f.Plan.Steps[0].ID, Status: &ready}},
 	})
 	if err != nil {
 		return f, fmt.Errorf("prepare schema submission: %w", err)
@@ -148,7 +148,7 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 	// prompt's required purpose report and the bounded arithmetic verification.
 	// Their real report is part of fixture state, outside the grading interval.
 	_, err = s.ReportWorkProgress(ctx, f.Auditor, work.ReportWorkProgressRequest{
-		WorkTarget: work.WorkTarget{ID: audit.ID, ExpectedRevision: audit.Revision},
+		WorkID: audit.ID,
 		Position: &work.WorkPosition{Objective: audit.Task, Note: observation,
 			NextStep: "Record the final audit conclusion."},
 	})
@@ -216,8 +216,8 @@ func (f fixture) schemaScript(id string) provider.Provider {
 	case roster.Implementor:
 		position := f.Schema.ExpectedPosition
 		correct = work.ReportWorkProgressRequest{
-			WorkTarget: work.WorkTarget{ID: f.Schema.Target.ID, ExpectedRevision: f.Schema.Target.Revision},
-			Position:   &position,
+			WorkID:   f.Schema.Target.ID,
+			Position: &position,
 		}
 	}
 	valid, err := json.Marshal(correct)

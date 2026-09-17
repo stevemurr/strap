@@ -73,7 +73,7 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	if err = json.Unmarshal([]byte(raw), &receipt); err != nil || receipt.EvidenceRef == "" {
 		t.Fatal(raw, err)
 	}
-	r, err := s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic contains decisive error", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}})
+	r, err := s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkID: w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic contains decisive error", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

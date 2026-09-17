@@ -52,7 +52,7 @@ func progressFixture(t *testing.T) (*work.Store, *inspection.ProgressReader, wor
 func TestProgressFragmentsPreserveEscapedRecordAndBudget(t *testing.T) {
 	s, r, w := progressFixture(t)
 	ctx := context.Background()
-	receipt, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Position: &work.WorkPosition{Objective: strings.Repeat("\"\\\n界", 500)}})
+	receipt, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkID: w.ID, Position: &work.WorkPosition{Objective: strings.Repeat("\"\\\n界", 500)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestProgressCollectionPinsPrefixAndRejectsCursorMutation(t *testing.T) {
 	s, r, w := progressFixture(t)
 	ctx := context.Background()
 	report := func() {
-		result, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Findings: []work.ProgressFindingDraft{{Claim: "concern", Basis: work.Inferred, Limitation: "unchecked"}}})
+		result, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkID: w.ID, Findings: []work.ProgressFindingDraft{{Claim: "concern", Basis: work.Inferred, Limitation: "unchecked"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestLiveProgressRevokesCollectionsAndFragmentsWhileArchiveStaysPassive(t *t
 	}
 	var id work.ProgressReportID
 	for i := 0; i < 2; i++ {
-		receipt, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Position: &work.WorkPosition{Objective: strings.Repeat("x", 4000)}})
+		receipt, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkID: w.ID, Position: &work.WorkPosition{Objective: strings.Repeat("x", 4000)}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -421,7 +421,7 @@ func schemaIntended(f fixture, call provider.ToolCall) bool {
 		return true
 	case "report_work_progress":
 		var a work.ReportWorkProgressRequest
-		return decodeSchemaArgs(call.Arguments, &a) == nil && a.ID == f.Schema.Target.ID && a.ExpectedRevision == f.Schema.Target.Revision && a.Position != nil && schemaEqual(a.Position, &f.Schema.ExpectedPosition) && len(a.Findings) == 0 && len(a.Steps) == 0
+		return decodeSchemaArgs(call.Arguments, &a) == nil && a.WorkID == f.Schema.Target.ID && a.Position != nil && schemaEqual(a.Position, &f.Schema.ExpectedPosition) && len(a.Findings) == 0 && len(a.Steps) == 0
 	}
 	return false
 }

@@ -2,6 +2,7 @@ package work
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -61,11 +62,13 @@ type WorkPosition struct {
 	Dependencies []ProgressDependency `json:"dependencies,omitempty"`
 }
 
-// ReportWorkProgressRequest identifies its subject exactly as every other work
-// mutation does: work_id and expected_revision. The assignment binding recorded
-// on the report is read from the work, never echoed by the caller.
+// ReportWorkProgressRequest names its work and nothing else. A report adds to a
+// record only its assignee writes, so there is no update for a revision to
+// protect: an owner who cancels or reassigns the work is caught by the state and
+// assignee checks instead. Requiring a counter that changes on every call cost
+// far more rejections than the conflicts it could find.
 type ReportWorkProgressRequest struct {
-	WorkTarget
+	WorkID   ID                     `json:"work_id"`
 	Position *WorkPosition          `json:"position,omitempty"`
 	Findings []ProgressFindingDraft `json:"findings,omitempty"`
 	Steps    []StepProgress         `json:"steps,omitempty"`
@@ -138,7 +141,7 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 		return result, err
 	}
 	defer s.endMutation(&err)
-	w, err := s.target(actor, u.WorkTarget, false)
+	w, err := s.assigned(actor, u.WorkID, false)
 	if err != nil {
 		return result, err
 	}
@@ -169,10 +172,10 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 			if d.WorkID != "" {
 				dep, ok := s.works[d.WorkID]
 				if !ok {
-					return result, ErrNotFound
+					return result, fmt.Errorf("%w: dependency names work %s; %s", ErrNotFound, d.WorkID, s.knownWorks(actor))
 				}
 				if dep.Owner != actor && dep.Assignee != actor {
-					return result, ErrForbidden
+					return result, fmt.Errorf("%w: dependency names work %s, which you neither own nor are assigned", ErrForbidden, d.WorkID)
 				}
 			}
 		}
@@ -211,16 +214,23 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 			return result, invalid("at most 8 evidence references per finding")
 		}
 		for _, e := range f.Evidence {
+			// An execution URI is a host-issued receipt, so a model that has
+			// none composes one that looks plausible. Naming the URI and where
+			// real ones come from is the difference between a repairable
+			// rejection and an unattributable one.
 			if strings.HasPrefix(e.URI, "execution:") {
 				if s.evidenceLookup == nil {
-					return result, ErrNotFound
+					return result, fmt.Errorf("%w: %s cites execution evidence, which this session does not record; cite the file or output you actually read", ErrNotFound, e.URI)
 				}
 				evidence, err := s.evidenceLookup(e.URI)
+				if errors.Is(err, ErrNotFound) {
+					return result, fmt.Errorf("%w: no execution evidence %s; an execution URI must be an evidence_ref returned by a diagnostic shell result, never one composed by hand; cite the file or output you read instead", ErrNotFound, e.URI)
+				}
 				if err != nil {
-					return result, err
+					return result, fmt.Errorf("execution evidence %s: %w", e.URI, err)
 				}
 				if evidence.WorkID != w.ID || evidence.AssignedAtRevision == 0 || evidence.AssignedAtRevision > w.AssignedAtRevision || evidence.AssignedAtRevision == w.AssignedAtRevision && evidence.Actor != actor {
-					return result, ErrForbidden
+					return result, fmt.Errorf("%w: execution evidence %s belongs to another assignment; cite only evidence issued to this one", ErrForbidden, e.URI)
 				}
 			}
 			if blank(e.URI) {
@@ -233,10 +243,10 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 		if f.Supersedes != "" {
 			prior, ok := s.progressFindings[f.Supersedes]
 			if !ok {
-				return result, ErrNotFound
+				return result, fmt.Errorf("%w: no finding %s; supersedes takes a finding_id from an earlier report_work_progress receipt", ErrNotFound, f.Supersedes)
 			}
 			if prior.WorkID != w.ID {
-				return result, ErrForbidden
+				return result, fmt.Errorf("%w: finding %s belongs to other work", ErrForbidden, f.Supersedes)
 			}
 			if superseded[prior.ID] {
 				return result, invalid("finding already superseded")

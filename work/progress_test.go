@@ -12,7 +12,7 @@ import (
 )
 
 func reportRequest(w Work) ReportWorkProgressRequest {
-	return ReportWorkProgressRequest{WorkTarget: target(w)}
+	return ReportWorkProgressRequest{WorkID: w.ID}
 }
 func observed(claim string) ProgressFindingDraft {
 	return ProgressFindingDraft{Claim: claim, Basis: Observed, Evidence: []EvidenceRef{{URI: "file:board.go", Detail: "parser input"}}}
@@ -63,7 +63,9 @@ func TestProgressAtomicStepsAndImmutableHistory(t *testing.T) {
 	if stored.Findings[0].Evidence[0].URI != "file:board.go" {
 		t.Fatal("output aliases stored report")
 	}
-	if _, err := s.ReportWorkProgress("impl", r); !errors.Is(err, ErrConflict) {
+	// The same report sent twice no longer collides on a revision; its step
+	// transitions are what reject it.
+	if _, err := s.ReportWorkProgress("impl", r); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("duplicate: %v", err)
 	}
 
@@ -132,7 +134,6 @@ func TestProgressReassignmentAndTerminalScopedRead(t *testing.T) {
 	r.Findings = []ProgressFindingDraft{observed("inherited finding")}
 	first := mustReport(t, s, w, r)
 	w = current(t, s, w.ID)
-	stale := target(w)
 	w, err := s.Reassign("root", ReassignRequest{WorkTarget: target(w), Assignee: "replacement"})
 	if err != nil {
 		t.Fatal(err)
@@ -147,14 +148,6 @@ func TestProgressReassignmentAndTerminalScopedRead(t *testing.T) {
 	w, err = s.Reassign("root", ReassignRequest{WorkTarget: target(w), Assignee: "impl"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	// Reporting against the view held before the reassignments is still
-	// rejected: the work moved, so expected_revision no longer matches.
-	r = reportRequest(w)
-	r.WorkTarget = stale
-	r.Position = &WorkPosition{Objective: "stale"}
-	if _, err = s.ReportWorkProgress("impl", r); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale view after reassignment: %v", err)
 	}
 	r = reportRequest(w)
 	r.Position = &WorkPosition{Objective: "new investigation", Blocker: "still blocked"}
@@ -266,7 +259,11 @@ func TestProgressRejectsInvalidReports(t *testing.T) {
 	}
 }
 
-func TestProgressConcurrentReportsHaveOneWinner(t *testing.T) {
+// Reports no longer contend for a revision, so concurrent ones all record. The
+// property that matters is that none of them is lost or corrupted: the store
+// serializes them and every finding survives. A model that repeats an identical
+// report now records it twice, which its own repeated-call detection notices.
+func TestProgressConcurrentReportsAllRecord(t *testing.T) {
 	s, _, w := fixture(t)
 	r := reportRequest(w)
 	r.Findings = []ProgressFindingDraft{observed("one observation")}
@@ -282,17 +279,16 @@ func TestProgressConcurrentReportsHaveOneWinner(t *testing.T) {
 	}
 	group.Wait()
 	close(results)
-	winners := 0
+	recorded := 0
 	for err := range results {
-		if err == nil {
-			winners++
-		} else if !errors.Is(err, ErrConflict) {
+		if err != nil {
 			t.Fatal(err)
 		}
+		recorded++
 	}
 	got, _ := s.GetWorkProgress("root", w.ID)
-	if winners != 1 || len(got.Findings) != 1 || got.Current.WorkRevision != w.Revision+1 {
-		t.Fatalf("winners=%d snapshot=%+v", winners, got)
+	if recorded != 8 || len(got.Findings) != 8 || got.Current.WorkRevision != w.Revision+8 {
+		t.Fatalf("recorded=%d snapshot=%+v", recorded, got)
 	}
 }
 
@@ -333,7 +329,7 @@ func (s *Store) reportSnapshot(actor identity.ActorID, r ReportWorkProgressReque
 	if err != nil {
 		return Work{}, err
 	}
-	return s.GetWork(actor, r.ID)
+	return s.GetWork(actor, r.WorkID)
 }
 
 func TestLegacyProgressCannotMutateOrInferAssignment(t *testing.T) {

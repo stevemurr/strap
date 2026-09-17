@@ -68,9 +68,9 @@ func seedAudit(ctx context.Context, s *harness.Session) (fixture, error) {
 	}
 	ready := work.ReadyForReview
 	progress, err := s.ReportWorkProgress(ctx, f.Implementor, work.ReportWorkProgressRequest{
-		WorkTarget: work.WorkTarget{ID: f.Original.ID, ExpectedRevision: f.Original.Revision},
-		Position:   &work.WorkPosition{Objective: f.Original.Task, Note: "The answer is ready for review.", NextStep: "Submit the answer."},
-		Steps:      []work.StepProgress{{ID: f.Plan.Steps[0].ID, Status: &ready}},
+		WorkID:   f.Original.ID,
+		Position: &work.WorkPosition{Objective: f.Original.Task, Note: "The answer is ready for review.", NextStep: "Submit the answer."},
+		Steps:    []work.StepProgress{{ID: f.Plan.Steps[0].ID, Status: &ready}},
 	})
 	if err != nil {
 		return f, fmt.Errorf("prepare first submission: %w", err)
@@ -116,9 +116,9 @@ func seedAudit(ctx context.Context, s *harness.Session) (fixture, error) {
 		return f, fmt.Errorf("assign repair: %w", err)
 	}
 	progress, err = s.ReportWorkProgress(ctx, f.Implementor, work.ReportWorkProgressRequest{
-		WorkTarget: work.WorkTarget{ID: repair.ID, ExpectedRevision: repair.Revision},
-		Position:   &work.WorkPosition{Objective: repair.Task, Note: "The explanation now describes combining two pairs.", NextStep: "Submit the repaired answer."},
-		Steps:      []work.StepProgress{{ID: f.Plan.Steps[0].ID, Status: &ready}},
+		WorkID:   repair.ID,
+		Position: &work.WorkPosition{Objective: repair.Task, Note: "The explanation now describes combining two pairs.", NextStep: "Submit the repaired answer."},
+		Steps:    []work.StepProgress{{ID: f.Plan.Steps[0].ID, Status: &ready}},
 	})
 	if err != nil {
 		return f, fmt.Errorf("prepare replacement submission: %w", err)

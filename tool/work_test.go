@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -41,7 +40,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, w.Revision, p.Steps[0].ID))
+	args := []byte(fmt.Sprintf(`{"work_id":%q,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, p.Steps[0].ID))
 	updated, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args})
 	if err != nil {
 		t.Fatal(err)
@@ -53,8 +52,15 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	if current.WorkRevision != w.Revision+1 {
 		t.Fatal("progress result did not expose next revision")
 	}
-	if _, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args}); !errors.Is(err, work.ErrConflict) {
-		t.Fatalf("reusing a revision must conflict: %v", err)
+	// A report names only its work, so repeating one records again rather than
+	// colliding; the work revision still advances for the next state change.
+	repeat, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args})
+	if err != nil {
+		t.Fatalf("repeated report: %v", err)
+	}
+	var second work.ReportWorkProgressResult
+	if json.Unmarshal([]byte(repeat.Content.Text()), &second) != nil || second.WorkRevision != current.WorkRevision+1 {
+		t.Fatalf("repeated report did not advance the work revision: %+v", second)
 	}
 	// Progress does not consume the owner's structural plan revision.
 	edit := []byte(fmt.Sprintf(`{"plan_id":%q,"expected_revision":%d,"title":"Updated plan"}`, p.ID, p.Revision))
@@ -68,7 +74,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 		}
 		return JSON(submission)
 	})
-	args = []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"summary":"Done"}`, current.WorkID, current.WorkRevision))
+	args = []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"summary":"Done"}`, second.WorkID, second.WorkRevision))
 	if _, err := submit.Call(context.Background(), Call{Actor: "worker", Arguments: args}); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +333,8 @@ func TestWorkToolsDeclareRevisionBookkeeping(t *testing.T) {
 			t.Fatalf("%s has no revision: %v", op.Definition().Name, got)
 		}
 	}
-	if got := declared(ReportWorkProgress(nil)); !slices.Equal(got, []string{"expected_revision"}) {
+	// A progress report carries no revision at all, so it declares none.
+	if got := declared(ReportWorkProgress(nil)); len(got) != 0 {
 		t.Fatalf("report_work_progress: %v", got)
 	}
 }

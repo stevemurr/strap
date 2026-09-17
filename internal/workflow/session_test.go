@@ -171,7 +171,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if len(changes) > 0 {
-		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: target, Steps: changes})
+		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkID: target.ID, Steps: changes})
 	}
 	return invoke("submit_work", work.SubmitRequest{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }

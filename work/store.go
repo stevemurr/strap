@@ -173,10 +173,13 @@ func known(label, none string, parts []string) string {
 	return label + ": " + strings.Join(parts, ", ")
 }
 
-func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, error) {
-	w, ok := s.works[t.ID]
+// assigned resolves the work an actor may act on. It carries no optimistic
+// concurrency, so it suits operations that only add to a record the actor alone
+// writes; anything that transitions shared state goes through target.
+func (s *Store) assigned(actor identity.ActorID, id ID, owner bool) (Work, error) {
+	w, ok := s.works[id]
 	if !ok {
-		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, t.ID, s.knownWorks(actor))
+		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, id, s.knownWorks(actor))
 	}
 	allowed := w.Assignee
 	if owner {
@@ -185,10 +188,18 @@ func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, 
 	if actor == "" || actor != allowed {
 		return Work{}, ErrForbidden
 	}
+	return w.Clone(), nil
+}
+
+func (s *Store) target(actor identity.ActorID, t WorkTarget, owner bool) (Work, error) {
+	w, err := s.assigned(actor, t.ID, owner)
+	if err != nil {
+		return Work{}, err
+	}
 	if t.ExpectedRevision == 0 || w.Revision != t.ExpectedRevision {
 		return Work{}, fmt.Errorf("%w: %s is at revision %d but expected_revision was %d; use the work_revision from your last receipt or read get_work", ErrConflict, w.ID, w.Revision, t.ExpectedRevision)
 	}
-	return w.Clone(), nil
+	return w, nil
 }
 func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, err error) {
 	if err = s.beginMutation(); err != nil {

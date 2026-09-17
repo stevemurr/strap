@@ -27,8 +27,8 @@ func TestRejectionsCarryIdsRevisionsAndNextStep(t *testing.T) {
 	_, err = s.SubmitWork(w.Assignee, SubmitRequest{WorkTarget: target(w), Summary: "premature"})
 	expect(err, ErrInvalid, "before submit_work: "+string(p.Steps[0].ID)+" is pending, "+string(p.Steps[1].ID)+" is pending", "report_work_progress steps")
 
-	_, err = s.ReportWorkProgress(w.Assignee, ReportWorkProgressRequest{WorkTarget: WorkTarget{ID: w.ID, ExpectedRevision: 9}, Position: &WorkPosition{Objective: "o"}})
-	expect(err, ErrConflict, string(w.ID)+" is at revision 1", "expected_revision was 9", "work_revision from your last receipt")
+	_, err = s.ReportWorkProgress(w.Assignee, ReportWorkProgressRequest{WorkID: "work-absent", Position: &WorkPosition{Objective: "o"}})
+	expect(err, ErrNotFound, "work work-absent", "live work visible to you")
 
 	_, err = s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: ptr(p.Revision + 5), Steps: []StepEdit{{ID: &p.Steps[2].ID, Title: ptr("t")}}})
 	expect(err, ErrConflict, "plan "+string(p.ID)+" is at revision", "revision from get_plan")

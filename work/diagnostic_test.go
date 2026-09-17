@@ -12,7 +12,7 @@ func TestDiagnosticSelectionSurvivesProgressButNotReassignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := s.ReportWorkProgress("r", ReportWorkProgressRequest{WorkTarget: WorkTarget{ID: a.ID, ExpectedRevision: a.Revision}, Position: &WorkPosition{Objective: "inspect"}})
+	report, err := s.ReportWorkProgress("r", ReportWorkProgressRequest{WorkID: a.ID, Position: &WorkPosition{Objective: "inspect"}})
 	if err != nil {
 		t.Fatal(err)
 	}

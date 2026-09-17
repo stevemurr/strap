@@ -42,7 +42,7 @@ func TestProgressRecordedPrefixAndArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Position: &work.WorkPosition{Objective: "establish state"}, Findings: []work.ProgressFindingDraft{{Claim: "a limitation", Basis: work.Inferred, Limitation: "not executed"}}})
+	first, err := s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkID: w.ID, Position: &work.WorkPosition{Objective: "establish state"}, Findings: []work.ProgressFindingDraft{{Claim: "a limitation", Basis: work.Inferred, Limitation: "not executed"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

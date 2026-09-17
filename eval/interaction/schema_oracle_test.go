@@ -271,7 +271,9 @@ func TestSchemaSuccessfulOperationDoesNotHideSameBatchEffects(t *testing.T) {
 	result := runSchemaResponses(t, func(f fixture) []provider.Response {
 		return []provider.Response{{ToolCalls: []provider.ToolCall{
 			adversarialAudit(f),
-			adversarialCall("cancel", "cancel_work", work.CancelRequest{WorkTarget: work.WorkTarget{ID: f.Original.ID, ExpectedRevision: f.Original.Revision + 1}, Reason: "Undo the assignment in the same batch."}),
+			// The extra action must land to exercise the grader, so it carries
+			// no revision that the graded operation could invalidate first.
+			adversarialCall("plan", "create_plan", map[string]any{"title": "Second plan in the same batch", "steps": []any{map[string]any{"title": "Do it again"}}}),
 		}}}
 	})
 	if result.Outcome != "failed" || !result.Behavior.Scorable || result.Harness.Passed != result.Harness.Total || result.ToolCalls != 2 {
@@ -304,7 +306,7 @@ func TestSchemaOracleAcceptsEquivalentJSONIntegers(t *testing.T) {
 func TestSchemaProgressRequiresRequestedPositionContent(t *testing.T) {
 	result := runSchemaScenarioResponses(t, "schema-progress-objective", func(f fixture) []provider.Response {
 		return []provider.Response{responseCall("report_work_progress", work.ReportWorkProgressRequest{
-			WorkTarget: work.WorkTarget{ID: f.Schema.Target.ID, ExpectedRevision: f.Schema.Target.Revision},
+			WorkID: f.Schema.Target.ID,
 
 			Position: &work.WorkPosition{Objective: f.Schema.ExpectedPosition.Objective},
 		})}

@@ -155,7 +155,7 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
-		progress := work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
+		progress := work.ReportWorkProgressRequest{WorkID: implementation.ID, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
 		receipt := operationResult(t, s, viaHTTP, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
 			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})

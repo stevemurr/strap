@@ -16,7 +16,7 @@ func (s *Session) ReportWorkProgress(ctx context.Context, actor identity.ActorID
 	if err = run.Err(); err != nil {
 		return work.ReportWorkProgressResult{}, err
 	}
-	w, err := s.Store.GetWork(actor, r.ID)
+	w, err := s.Store.GetWork(actor, r.WorkID)
 	if err != nil {
 		return work.ReportWorkProgressResult{}, err
 	}
