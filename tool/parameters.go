@@ -18,9 +18,8 @@ import (
 // Parameters is an immutable, compiled input contract. Its zero value is invalid.
 // Schema and Decode use the same contract; callers cannot replace either half.
 // Supported inputs are structs, pointers, slices, strings, booleans and integers.
-// JSON fields without omitempty are required. A null value means the field is
-// omitted: models send null for fields they mean to leave out, so a required
-// field set to null is reported as missing and an optional one is dropped.
+// JSON fields without omitempty are required. Optional fields may be omitted;
+// explicit null values are rejected, matching their non-null schema types.
 // Custom JSON/text codecs, maps, interfaces, recursive types and ambiguous fields
 // are rejected at construction instead of silently weakening the schema.
 type Parameters[A any] struct {
@@ -414,7 +413,7 @@ func (p Parameters[A]) Decode(raw json.RawMessage) (A, error) {
 	if value == nil {
 		return args, fmt.Errorf("arguments must be a JSON object, not null")
 	}
-	normalized, err := p.root.validate(withoutNulls(value), "arguments")
+	normalized, err := p.root.validate(value, "arguments")
 	if err != nil {
 		return args, err
 	}
@@ -432,7 +431,22 @@ func (p Parameters[A]) Decode(raw json.RawMessage) (A, error) {
 	return args, nil
 }
 func (p *parameterNode) validate(value any, path string) (any, error) {
-	bad := func() (any, error) { return nil, fmt.Errorf("%s must be %s", path, p.kind) }
+	bad := func() (any, error) {
+		// A string where an array or object belongs is the signature of a
+		// server tool parser that could not parse the emitted value and passed
+		// its raw text through. Observed generations close the array correctly
+		// and then keep writing, so naming the trailing text is the repair the
+		// model needs; "must be array" alone reads as a type error it already
+		// believes it satisfied.
+		if _, text := value.(string); text && (p.kind == "array" || p.kind == "object") {
+			closer := "]"
+			if p.kind == "object" {
+				closer = "}"
+			}
+			return nil, fmt.Errorf("%s must be %s, not a string; send the %s itself and stop at its closing %s, with no characters after it", path, p.kind, p.kind, closer)
+		}
+		return nil, fmt.Errorf("%s must be %s", path, p.kind)
+	}
 	switch p.kind {
 	case "object":
 		obj, ok := value.(map[string]any)
@@ -504,11 +518,18 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 		if p.maxItems != nil && len(items) > *p.maxItems {
 			return nil, fmt.Errorf("%s permits at most %d items", path, *p.maxItems)
 		}
+		// Report every failing element at once, for the same reason the object
+		// case reports every disallowed field at once: a model repairs exactly
+		// what the message names, so naming one element produces a retry per
+		// element. A plan whose second and third steps both omit a title takes
+		// two rejections to fix when only the second is named.
 		seen := map[string]bool{}
+		var failures []string
 		for i, item := range items {
 			v, err := p.item.validate(item, fmt.Sprintf("%s[%d]", path, i))
 			if err != nil {
-				return nil, err
+				failures = append(failures, err.Error())
+				continue
 			}
 			items[i] = v
 			if p.unique {
@@ -519,6 +540,13 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 				}
 				seen[key] = true
 			}
+		}
+		if len(failures) > 0 {
+			msg := failures[0]
+			if len(failures) > 1 {
+				msg += " (also: " + strings.Join(failures[1:], "; ") + ")"
+			}
+			return nil, errors.New(msg)
 		}
 		return items, nil
 	case "string":
@@ -601,29 +629,4 @@ func validParameterName(name string) bool {
 		return false
 	}
 	return true
-}
-
-// withoutNulls returns the value with every null object member and array
-// element removed, recursively, so null reads as "omitted" everywhere.
-func withoutNulls(v any) any {
-	switch v := v.(type) {
-	case map[string]any:
-		for k, x := range v {
-			if x == nil {
-				delete(v, k)
-				continue
-			}
-			v[k] = withoutNulls(x)
-		}
-		return v
-	case []any:
-		kept := v[:0]
-		for _, x := range v {
-			if x != nil {
-				kept = append(kept, withoutNulls(x))
-			}
-		}
-		return kept
-	}
-	return v
 }

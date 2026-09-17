@@ -366,3 +366,45 @@ func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
 		}
 	}
 }
+
+// Qwen tool parsers hand a nested array through as its raw text when the
+// generated value does not parse, so the message must name the trailing text
+// rather than report a bare type mismatch. Every other wrong type keeps the
+// short phrasing.
+func TestStringifiedCompositeExplainsTheTrailingText(t *testing.T) {
+	params, err := NewParameters[contractArgs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ raw, want string }{
+		{`{"title":"p","steps":"[{\"step_id\":\"s\"}]}"}`, "arguments.steps must be array, not a string; send the array itself and stop at its closing ], with no characters after it"},
+		{`{"title":"p","steps":["{\"step_id\":\"s\"}"]}`, "arguments.steps[0] must be object, not a string; send the object itself and stop at its closing }, with no characters after it"},
+		{`{"title":"p","steps":5}`, "arguments.steps must be array"},
+		{`{"title":"p","steps":[{"step_id":["s"]}]}`, "arguments.steps[0].step_id must be string"},
+	} {
+		_, err := params.Decode(json.RawMessage(c.raw))
+		if err == nil || err.Error() != c.want {
+			t.Fatalf("%s: got %v, want %q", c.raw, err, c.want)
+		}
+	}
+}
+
+// Models repair exactly what a message names, so a rejection that names only
+// the first bad element of an array costs one round trip per element. A single
+// failure keeps its unaggregated phrasing.
+func TestArrayRejectionNamesEveryFailingElement(t *testing.T) {
+	params, err := NewParameters[contractArgs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ raw, want string }{
+		{`{"title":"p","steps":[{"step_id":"s"},{},{}]}`, "arguments.steps[1].step_id is required (also: arguments.steps[2].step_id is required)"},
+		{`{"title":"p","steps":[{}]}`, "arguments.steps[0].step_id is required"},
+		{`{"title":"p","steps":[{"step_id":"s"},{"note":"n"}]}`, "arguments.steps[1].note is not an allowed field"},
+	} {
+		_, err := params.Decode(json.RawMessage(c.raw))
+		if err == nil || err.Error() != c.want {
+			t.Fatalf("%s: got %v, want %q", c.raw, err, c.want)
+		}
+	}
+}
