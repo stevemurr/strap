@@ -19,13 +19,13 @@ func (m *model) composerInset() int {
 
 func (m *model) transcriptTop() int {
 	if m.streamChrome() != 0 {
-		return 4
+		return 4 + m.stackBarHeight()
 	}
-	return 2
+	return 2 + m.stackBarHeight()
 }
 
 func (m *model) composerTop() int {
-	return 2 + m.viewport.Height + m.streamChrome() + m.completionHeight()
+	return 2 + m.stackBarHeight() + m.viewport.Height + m.streamChrome() + m.completionHeight()
 }
 
 func (m *model) composerView() []string {
@@ -61,7 +61,7 @@ func (m *model) composerMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 	if m.height < 8 || event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
 		return false, nil
 	}
-	left, top := 1+m.sidebarWidth(), m.composerTop()
+	left, top := 1, m.composerTop()
 	if event.X < left || event.X >= left+m.viewport.Width || event.Y < top || event.Y > top+m.input.Height()+1 {
 		return false, nil
 	}
@@ -86,7 +86,7 @@ func (m *model) composerHint() string {
 		return m.footer()
 	}
 	if m.streamUI.rosterFocused {
-		return "↑/↓ select · Enter compose · F6 return"
+		return "←/→ preview · Enter open · Esc compose · c completed"
 	}
 	if m.folds.focused {
 		return "↑/↓ fold · Enter expand · Esc compose"

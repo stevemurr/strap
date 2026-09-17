@@ -328,7 +328,7 @@ func (m *model) foldMouse(event tea.MouseMsg) bool {
 	if !m.streamIsVisible() || event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
 		return false
 	}
-	x, y := event.X-1-m.sidebarWidth(), event.Y-m.transcriptTop()+m.viewport.YOffset
+	x, y := event.X-1, event.Y-m.transcriptTop()+m.viewport.YOffset
 	if event.Y < m.transcriptTop() || event.Y >= m.transcriptTop()+m.viewport.Height {
 		return false
 	}

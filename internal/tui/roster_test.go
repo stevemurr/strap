@@ -32,37 +32,37 @@ func TestRosterKeyboardNavigation(t *testing.T) {
 
 	pressed(m, tea.KeyEnd)
 	last := m.streamUI.order[len(m.streamUI.order)-1]
-	if m.streamUI.selected != last {
-		t.Fatal("end did not select the last stream", m.streamUI.selected)
+	if m.streamUI.focusID != last {
+		t.Fatal("end did not select the last stream", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyHome)
-	if m.streamUI.selected != "" {
-		t.Fatal("home did not select the combined transcript", m.streamUI.selected)
+	if m.streamUI.focusID != "" {
+		t.Fatal("home did not select the combined transcript", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyDown)
-	if m.streamUI.selected != s.Root() {
-		t.Fatal("down did not advance to the first agent", m.streamUI.selected)
+	if m.streamUI.focusID != s.Root() {
+		t.Fatal("down did not advance to the first agent", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyUp)
-	if m.streamUI.selected != "" {
-		t.Fatal("up did not move back", m.streamUI.selected)
+	if m.streamUI.focusID != "" {
+		t.Fatal("up did not move back", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyPgDown)
-	if m.streamUI.selected != last {
-		t.Fatal("page down did not clamp at the last stream", m.streamUI.selected)
+	if m.streamUI.focusID != last {
+		t.Fatal("page down did not clamp at the last stream", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyPgUp)
-	if m.streamUI.selected != "" {
-		t.Fatal("page up did not clamp at the first stream", m.streamUI.selected)
+	if m.streamUI.focusID != "" {
+		t.Fatal("page up did not clamp at the first stream", m.streamUI.focusID)
 	}
 	// Bracket keys mirror the arrows.
 	rune_(m, "]")
-	if m.streamUI.selected != s.Root() {
-		t.Fatal("] did not advance the selection", m.streamUI.selected)
+	if m.streamUI.focusID != s.Root() {
+		t.Fatal("] did not advance the selection", m.streamUI.focusID)
 	}
 	rune_(m, "[")
-	if m.streamUI.selected != "" {
-		t.Fatal("[ did not move the selection back", m.streamUI.selected)
+	if m.streamUI.focusID != "" {
+		t.Fatal("[ did not move the selection back", m.streamUI.focusID)
 	}
 	// Keys the roster does not own stay available to the rest of the UI.
 	m.streamUI.rosterFocused = true
@@ -187,10 +187,14 @@ func TestRosterRendersAgentDetail(t *testing.T) {
 	m.rememberWork(work.Work{ID: "w-1", Kind: work.Implementation, State: work.Active, Assignee: "agent-2", Task: "build the thing"})
 	m.rememberWork(work.Work{ID: "w-2", Kind: work.Implementation, State: work.Active, Assignee: "agent-3", Task: "blocked thing", Blocker: "waiting on input"})
 	m.working["agent-2"] = true
-	view := ansi.Strip(m.View())
-	for _, want := range []string{"agent-2", "agent-3", "build the thing", "blocked"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("roster did not render %q\n%s", want, view)
+	m.focusRoster(true)
+	for _, id := range []message.ActorID{"agent-2", "agent-3"} {
+		m.streamUI.focusID = id
+		view := ansi.Strip(m.View())
+		for _, want := range []string{string(id), m.streamTask(id), m.rosterStatus(id)} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("preview did not render %q\n%s", want, view)
+			}
 		}
 	}
 	if summary := m.streamSummary(); summary == "" {
@@ -212,19 +216,19 @@ func TestRosterRendersAgentDetail(t *testing.T) {
 func TestRosterMouseWheelMovesSelection(t *testing.T) {
 	m, _ := focusedSetup(t)
 	m.selectStream("")
-	if m.sidebarWidth() == 0 {
+	if m.stackBarHeight() == 0 {
 		t.Fatal("the roster is not visible at this size")
 	}
 	m.Update(tea.MouseMsg{X: 1, Y: 3, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
 	if !m.streamUI.rosterFocused {
 		t.Fatal("scrolling the roster did not focus it")
 	}
-	advanced := m.streamUI.selected
+	advanced := m.streamUI.focusID
 	if advanced == "" {
 		t.Fatal("the wheel did not advance the selection")
 	}
 	m.Update(tea.MouseMsg{X: 1, Y: 3, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
-	if m.streamUI.selected == advanced {
+	if m.streamUI.focusID == advanced {
 		t.Fatal("the wheel did not move the selection back", m.streamUI.selected)
 	}
 }

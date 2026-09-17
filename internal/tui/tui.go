@@ -51,7 +51,7 @@ func Run(ctx context.Context, session Session, options Options) error {
 	listenCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := newModel(listenCtx, cancel, session, options)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	_, err := p.Run()
 	if ctx.Err() != nil {
 		return nil
@@ -297,6 +297,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
+		case "esc":
+			// Menus, previews, and selection consume Escape above. Only the
+			// live conversation treats it as a request to stop current work.
+			if !m.selecting && m.busy() {
+				return m, m.interruptWork()
+			}
+			return m, nil
 		case "ctrl+c", "ctrl+d":
 			return m.quit()
 		case "ctrl+t":
@@ -309,7 +316,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selecting {
 				return m, tea.DisableMouse
 			}
-			return m, tea.EnableMouseCellMotion
+			return m, tea.EnableMouseAllMotion
 		case "enter":
 			if m.selecting {
 				return m, nil
@@ -387,7 +394,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent list; ↑/↓ selects a stream; Enter returns to the root composer. Select Completed and press Enter, or press c in the list, to expand/collapse completed work.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool-only calls start folded with status, counts, and target previews. Click a triangle, or F7 then ↑/↓ and Enter, to inspect groups and tool results. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s segments; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nConsecutive tool-only calls start folded with status, counts, and target previews. Click a triangle, or F7 then ↑/↓ and Enter, to inspect groups and tool results. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s segments; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T shows or hides thinking; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -415,12 +422,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 				m.add("Error", "Usage: /stop (all current work). Use /terminate [agent-id] for permanent termination.", true)
 				break
 			}
-			if m.interrupting {
-				break
-			}
-			m.interrupting = true
-			m.add("System", "Stopping current work…", true)
-			return m, func() tea.Msg { return interrupted{err: m.session.Interrupt(m.ctx)} }
+			return m, m.interruptWork()
 		case "/inspect", "/pause", "/resume", "/terminate":
 			if len(fields) > 2 {
 				m.add("Error", "Usage: "+fields[0]+" [agent-id]", true)
@@ -677,11 +679,20 @@ func (m *model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+func (m *model) interruptWork() tea.Cmd {
+	if m.interrupting {
+		return nil
+	}
+	m.interrupting = true
+	m.add("System", "Stopping current work…", true)
+	return func() tea.Msg { return interrupted{err: m.session.Interrupt(m.ctx)} }
+}
+
 func (m *model) resize(width, height int) {
 	m.width, m.height = max(1, width), max(1, height)
 	// Keep two text columns internally so wide runes remain navigable even
 	// when the terminal is smaller; renderView clips each displayed row.
-	m.viewport.Width = max(1, m.width-2-m.sidebarWidth())
+	m.viewport.Width = max(1, m.width-2)
 	m.input.SetWidth(max(4, m.viewport.Width-m.composerInset()))
 	m.syncCompletion()
 	m.renderTranscript(false)
@@ -853,18 +864,18 @@ func (m *model) renderView() string {
 		lines = append(lines, suggestion)
 	}
 	lines = append(lines, m.renderComposer()...)
-	var roster []rosterLine
-	if m.sidebarWidth() != 0 {
-		roster = m.rosterLines(m.rosterHeight(), rosterColumns)
-	}
+	lines = append(m.stackBar(), lines...)
 	for i, row := range lines {
-		prefix := " "
-		if roster != nil {
-			prefix += fitStreamCell(roster[i].text, rosterColumns) + dimStyle.Render(" │ ")
-		}
-		lines[i] = ansi.Truncate(prefix+fitStreamCell(row, m.viewport.Width), m.width, "")
+		lines[i] = ansi.Truncate(" "+fitStreamCell(row, m.viewport.Width), m.width, "")
 	}
-	return line(m.header()) + "\n\n" + strings.Join(lines, "\n")
+	view := line(m.header()) + "\n\n" + strings.Join(lines, "\n")
+	if p := m.stackPeek(); p != nil {
+		s := newChipSurface(m.width, m.height)
+		s.paint(0, 0, view, -1)
+		s.paint(p.x, p.y, p.text, -1)
+		return s.String()
+	}
+	return view
 }
 
 func (m *model) header() string {
@@ -896,7 +907,7 @@ func (m *model) footer() string {
 		return "↑/↓ select · Tab complete · Enter confirm · Esc dismiss"
 	}
 	if m.streamUI.rosterFocused {
-		return "↑/↓ select · Enter open/compose · c completed · F6 return"
+		return "←/→ preview · Enter open · c completed · Esc compose"
 	}
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)

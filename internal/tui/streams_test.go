@@ -137,11 +137,11 @@ func TestRosterKeyboardPreservesDraftAndAlwaysSendsToRoot(t *testing.T) {
 	m.input.SetValue("unfinished draft")
 	m.Update(tea.KeyMsg{Type: tea.KeyF6})
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.streamUI.selected != "agent-2" || m.input.Value() != "unfinished draft" || m.input.Focused() {
+	if m.streamUI.focusID != "agent-2" || m.streamUI.selected != "root" || m.input.Value() != "unfinished draft" || m.input.Focused() {
 		t.Fatal("agent navigation disturbed the draft or failed to move focus")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if len(s.sent) != 0 || !m.input.Focused() {
+	if len(s.sent) != 0 || !m.input.Focused() || m.streamUI.selected != "agent-2" {
 		t.Fatal("Enter in the roster should focus the composer, not send")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -195,7 +195,7 @@ func TestFocusedLayoutFitsSmallTerminalsAndLargeRosters(t *testing.T) {
 
 func TestRosterMouseAndMultilineSelectionStayInTheirPanes(t *testing.T) {
 	m, _ := focusedSetup(t)
-	x, y := screenLocation(t, m.View(), "agent-2 · agent")
+	x, y := stackLocation(t, m, rosterChoice{id: "agent-2"})
 	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, x, y))
 	if m.streamUI.selected != "agent-2" || m.mouseSelection != nil {
 		t.Fatal("roster click started a copy instead of selecting an agent")

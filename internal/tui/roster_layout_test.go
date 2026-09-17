@@ -45,13 +45,14 @@ func manyAgents(t *testing.T) *model {
 
 func TestTaskFirstRosterWithManyAgents(t *testing.T) {
 	m := manyAgents(t)
+	m.resize(200, 38)
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Needs attention  2", "Working  3", "Idle  2", "Completed  4", "Stream scroll anchors", "Review agent grouping", "Agent list layout", "Keyboard navigation"} {
+	for _, want := range []string{"Needs attention  2", "Working  3", "Idle  2", "Completed  4"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q:\n%s", want, view)
 		}
 	}
-	if !m.streamUI.completedExpanded || !strings.Contains(view, "Markdown wrapping") {
+	if !m.streamUI.completedExpanded {
 		t.Fatal("completed work was hidden by default")
 	}
 	choices := m.rosterChoices()
@@ -64,8 +65,12 @@ func TestTaskFirstRosterWithManyAgents(t *testing.T) {
 	m.focusRoster(true)
 	for _, id := range want[2:] {
 		m.moveStream(1)
-		if m.streamUI.selected != id {
+		if m.streamUI.focusID != id {
 			t.Fatalf("keyboard skipped %s", id)
+		}
+		peek := ansi.Strip(m.View())
+		if !strings.Contains(peek, m.streamTask(id)) || !strings.Contains(peek, string(id)) {
+			t.Fatal("preview lost task or agent identity", peek)
 		}
 	}
 	m.moveStream(1)
@@ -78,7 +83,7 @@ func TestTaskFirstRosterWithManyAgents(t *testing.T) {
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.moveStream(1)
-	if m.streamUI.selected != "agent-6" {
+	if m.streamUI.focusID != "agent-6" {
 		t.Fatal("completed agents did not expand")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
@@ -125,6 +130,8 @@ func TestCompletedAgentsWithNewWorkOrErrorsRemainVisible(t *testing.T) {
 func TestGroupedRosterMouseAndNarrowNavigation(t *testing.T) {
 	m := manyAgents(t)
 	m.toggleCompleted()
+	m.focusRoster(true)
+	m.streamUI.completedFocused = true
 	x, y := screenLocation(t, m.View(), "▸ Completed")
 	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, x, y))
 	if !m.streamUI.completedExpanded {

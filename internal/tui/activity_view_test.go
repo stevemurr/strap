@@ -156,7 +156,7 @@ func TestActivityMouseAndKeyboardKeepDraftAndScroll(t *testing.T) {
 	m.viewport.GotoTop()
 	m.input.SetValue("unsent draft")
 	target := m.folds.targets[0]
-	click := tea.MouseMsg{X: 1 + m.sidebarWidth(), Y: m.transcriptTop() + target.row, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
+	click := tea.MouseMsg{X: 1, Y: m.transcriptTop() + target.row, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
 	m.Update(click)
 	if !m.folds.expanded[target.key] || m.viewport.YOffset != 0 || m.input.Value() != "unsent draft" {
 		t.Fatal("click lost draft/scroll")
@@ -205,7 +205,7 @@ func TestQuietComposerMouseSendAndNoFooterNoise(t *testing.T) {
 	}
 	m.input.SetValue("first\nsecond")
 	m.syncCompletion()
-	x := 1 + m.sidebarWidth() + m.viewport.Width - 2
+	x := 1 + m.viewport.Width - 2
 	y := m.composerTop() + m.input.Height() + 1
 	m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	if len(s.sent) != 1 || s.sent[0] != "first\nsecond" || m.input.Value() != "" {

@@ -55,7 +55,7 @@ func TestCopyModeReleasesAndRestoresMouseCapture(t *testing.T) {
 		t.Fatal("mouse changed frozen display")
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyF2})
-	if cmd == nil || reflect.TypeOf(cmd()) != reflect.TypeOf(tea.EnableMouseCellMotion()) {
+	if cmd == nil || reflect.TypeOf(cmd()) != reflect.TypeOf(tea.EnableMouseAllMotion()) {
 		t.Fatal("leaving copy mode did not restore mouse capture")
 	}
 }
@@ -83,7 +83,7 @@ func TestMouseScrollsAgentTranscriptAndLoadsOlderMessages(t *testing.T) {
 		t.Fatal("mouse scrolled transcript during selection")
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.transcript != nil || cmd == nil || reflect.TypeOf(cmd()) != reflect.TypeOf(tea.EnableMouseCellMotion()) {
+	if m.transcript != nil || cmd == nil || reflect.TypeOf(cmd()) != reflect.TypeOf(tea.EnableMouseAllMotion()) {
 		t.Fatal("leaving transcript copy mode did not restore mouse capture")
 	}
 }

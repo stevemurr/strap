@@ -21,6 +21,12 @@ import (
 type streamUI struct {
 	selected          message.ActorID // Empty selects All activity.
 	rosterFocused     bool
+	focusID           message.ActorID // Keyboard preview; Enter commits to selected.
+	hovering          bool
+	hover             rosterChoice
+	stackOffset       int
+	frozenStacks      []string
+	frozenPeek        *stackPreview
 	order             []message.ActorID // Stable discovery order, root first.
 	views             map[message.ActorID]*agentStream
 	works             map[work.ID]work.Work
@@ -89,7 +95,7 @@ func (e *entry) inStream(id message.ActorID) bool {
 
 func (m *model) streamIsVisible() bool {
 	return !m.selecting && m.mouseSelection == nil && m.transcript == nil &&
-		!(m.streamUI.rosterFocused && m.sidebarWidth() == 0) && m.height >= 8
+		!m.streamUI.rosterFocused && !m.streamUI.hovering && m.height >= 8
 }
 
 func (m *model) noteStreamEntry(e *entry) {
@@ -167,6 +173,8 @@ func (m *model) restoreStreamPosition(p streamPosition) {
 
 func (m *model) selectStream(id message.ActorID) {
 	m.folds.focused = false
+	m.streamUI.hovering = false
+	m.streamUI.focusID = id
 	m.streamUI.completedFocused = false
 	if m.rosterGroup(id) == "Completed" {
 		m.streamUI.completedExpanded = true
@@ -194,8 +202,13 @@ func (m *model) clearStreams() {
 }
 
 func (m *model) focusRoster(focus bool) {
+	m.streamUI.hovering = false
 	if focus {
 		m.folds.focused = false
+		if !m.streamUI.rosterFocused {
+			m.streamUI.focusID = m.streamUI.selected
+			m.streamUI.completedFocused = false
+		}
 	}
 	m.streamUI.rosterFocused = focus
 	if focus {
@@ -209,20 +222,24 @@ func (m *model) moveStream(delta int) {
 	choices := m.rosterChoices()
 	i := 0
 	for j, choice := range choices {
-		if choice.completed == m.streamUI.completedFocused && (choice.completed || choice.id == m.streamUI.selected) {
+		if choice == m.rosterCursor() {
 			i = j
 			break
 		}
 	}
 	choice := choices[max(0, min(len(choices)-1, i+delta))]
-	if choice.completed {
-		m.streamUI.completedFocused = true
-	} else {
-		m.selectStream(choice.id)
-	}
+	m.streamUI.hovering = false
+	m.streamUI.completedFocused = choice.completed
+	m.streamUI.focusID = choice.id
 }
 
 func (m *model) streamKey(key tea.KeyMsg) bool {
+	if m.streamUI.hovering {
+		m.streamUI.hovering = false
+		if key.String() == "esc" {
+			return true
+		}
+	}
 	if key.String() == "f6" {
 		m.focusRoster(!m.streamUI.rosterFocused)
 		return true
@@ -236,8 +253,9 @@ func (m *model) streamKey(key tea.KeyMsg) bool {
 			m.toggleCompleted()
 			break
 		}
+		m.selectStream(m.streamUI.focusID)
 		m.focusRoster(false)
-	case "tab", "esc":
+	case "esc":
 		m.focusRoster(false)
 	case "c":
 		m.toggleCompleted()
@@ -248,24 +266,29 @@ func (m *model) streamKey(key tea.KeyMsg) bool {
 	case "left":
 		if m.streamUI.completedFocused && m.streamUI.completedExpanded {
 			m.toggleCompleted()
+		} else {
+			m.moveStream(-1)
 		}
 	case "right":
 		if m.streamUI.completedFocused && !m.streamUI.completedExpanded {
 			m.toggleCompleted()
+		} else {
+			m.moveStream(1)
 		}
-	case "up", "[":
+	case "up", "[", "shift+tab":
 		m.moveStream(-1)
-	case "down", "]":
+	case "down", "]", "tab":
 		m.moveStream(1)
 	case "pgup":
 		m.moveStream(-5)
 	case "pgdown":
 		m.moveStream(5)
 	case "home":
-		m.selectStream("")
+		m.streamUI.focusID = ""
+		m.streamUI.completedFocused = false
 	case "end":
 		m.moveStream(len(m.rosterChoices()))
-	case "ctrl+c", "ctrl+d", "ctrl+t", "f2", "ctrl+home", "ctrl+end":
+	case "ctrl+c", "ctrl+d", "ctrl+t", "f2", "f7", "ctrl+home", "ctrl+end":
 		return false
 	}
 	return true

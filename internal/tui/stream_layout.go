@@ -20,17 +20,7 @@ func (m *model) streamChrome() int {
 	return 0
 }
 
-func (m *model) sidebarWidth() int {
-	if m.width >= 100 && m.streamChrome() != 0 {
-		return rosterColumns + 3 // Padding and divider.
-	}
-	return 0
-}
-
 func (m *model) rosterHeight() int {
-	if m.sidebarWidth() != 0 {
-		return m.height - 2 // Everything below the header, including the composer.
-	}
 	return m.viewport.Height + m.streamChrome()
 }
 
@@ -106,8 +96,20 @@ func (m *model) toggleCompleted() {
 		return
 	}
 	m.streamUI.completedExpanded = !m.streamUI.completedExpanded
-	if !m.streamUI.completedExpanded && m.rosterGroup(m.streamUI.selected) == "Completed" {
+	if !m.streamUI.completedExpanded && m.rosterGroup(m.rosterCursor().id) == "Completed" {
 		m.streamUI.completedFocused = true
+	}
+}
+
+func (m *model) syncRosterFocus() {
+	if len(m.groupedAgents("Completed")) == 0 && m.streamUI.completedFocused {
+		m.streamUI.completedFocused = false
+		m.streamUI.focusID = m.streamUI.selected
+	}
+	// A stream finishing work should not hide the chip currently being watched
+	// or previewed. Explicitly focusing the disclosure still permits collapsing.
+	if !m.streamUI.completedFocused && m.rosterGroup(m.rosterCursor().id) == "Completed" {
+		m.streamUI.completedExpanded = true
 	}
 }
 
@@ -145,20 +147,13 @@ func (m *model) rosterLines(height, width int) []rosterLine {
 		copy(lines, m.streamUI.frozenRoster)
 		return lines
 	}
-	// A finished agent can begin another operation while the roster is focused.
-	if len(m.groupedAgents("Completed")) == 0 {
-		m.streamUI.completedFocused = false
-	}
-	// Finishing work must not make the currently watched agent disappear.
-	if !m.streamUI.completedFocused && m.rosterGroup(m.streamUI.selected) == "Completed" {
-		m.streamUI.completedExpanded = true
-	}
+	m.syncRosterFocus()
 	lines := []rosterLine{{text: stateStyle.Bold(true).Render(fmt.Sprintf("Agents  %d", len(m.streamUI.order)))}, {text: dimStyle.Render(m.streamSummary())}, {}}
 	var rows []rosterLine
 	selectedStart, selectedEnd := 0, 0
 	addAgent := func(id message.ActorID) {
 		start := len(rows)
-		selected := id == m.streamUI.selected && !m.streamUI.completedFocused
+		selected := id == m.rosterCursor().id && !m.streamUI.completedFocused
 		marker := "○ "
 		switch m.rosterGroup(id) {
 		case "Needs attention":
@@ -331,7 +326,7 @@ func (m *model) streamFollowLabel() string {
 
 func (m *model) streamBody() string {
 	height := m.viewport.Height + m.streamChrome()
-	if m.streamUI.rosterFocused && m.sidebarWidth() == 0 {
+	if m.streamUI.rosterFocused && m.stackBarHeight() == 0 {
 		var rows []string
 		for _, line := range m.rosterLines(height, max(1, m.width-2)) {
 			rows = append(rows, line.text)
@@ -350,11 +345,14 @@ func (m *model) streamBody() string {
 }
 
 func (m *model) streamMouse(event tea.MouseMsg) bool {
+	if m.stackBarHeight() != 0 {
+		return m.stackMouse(event)
+	}
 	if m.mouseSelection != nil && m.mouseSelection.dragging {
 		return false
 	}
-	width := m.sidebarWidth()
-	if width == 0 && m.streamUI.rosterFocused {
+	width := 0
+	if m.streamUI.rosterFocused {
 		width = m.width
 	}
 	height := m.rosterHeight()
@@ -372,10 +370,7 @@ func (m *model) streamMouse(event tea.MouseMsg) bool {
 		return true
 	}
 	if event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress {
-		columns := rosterColumns
-		if m.sidebarWidth() == 0 {
-			columns = max(1, m.width-2)
-		}
+		columns := max(1, m.width-2)
 		rows := m.rosterLines(height, columns)
 		if line := rows[event.Y-2]; line.selectable {
 			m.mouseSelection = nil
@@ -385,6 +380,7 @@ func (m *model) streamMouse(event tea.MouseMsg) bool {
 				m.toggleCompleted()
 			} else {
 				m.selectStream(line.id)
+				m.focusRoster(false)
 			}
 			return true
 		}

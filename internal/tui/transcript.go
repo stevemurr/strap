@@ -194,12 +194,12 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.DisableMouse
 		}
 		m.renderAgentTranscript()
-		return m, tea.EnableMouseCellMotion
+		return m, tea.EnableMouseAllMotion
 	case "esc":
 		m.restoreStreamPosition(v.mainPosition)
 		m.transcript = nil
 		if v.copying {
-			return m, tea.EnableMouseCellMotion
+			return m, tea.EnableMouseAllMotion
 		}
 		return m, nil
 	case "t":

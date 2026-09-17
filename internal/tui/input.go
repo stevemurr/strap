@@ -32,7 +32,7 @@ func newInput() textarea.Model {
 // Grow with the draft, reserving space for conversation output. Textarea owns
 // wrapping and cursor scrolling when the draft exceeds the visible rows.
 func (m *model) syncInputHeight() {
-	limit := min(6, max(1, m.height-7-m.streamChrome()))
+	limit := min(6, max(1, m.height-7-m.streamChrome()-m.stackBarHeight()))
 	if m.height < 8 {
 		limit = min(6, m.height)
 	}

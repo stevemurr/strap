@@ -119,7 +119,7 @@ func (s *mouseSelection) view(width int) string {
 
 func (m *model) selectWithMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 	if event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress {
-		if m.transcript == nil && event.X >= 1+m.sidebarWidth() && event.Y >= m.composerTop()+1 && event.Y < m.composerTop()+1+m.input.Height() {
+		if m.transcript == nil && event.X >= 1 && event.Y >= m.composerTop()+1 && event.Y < m.composerTop()+1+m.input.Height() {
 			m.focusRoster(false)
 		}
 		view := m.View()
@@ -129,9 +129,9 @@ func (m *model) selectWithMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 		lines := strings.Split(view, "\n")
 		point := screenPoint{max(0, min(event.X, m.width-1)), max(0, min(event.Y, len(lines)-1))}
 		m.mouseSelection = &mouseSelection{lines: lines, start: point, end: point, dragging: true, status: "Drag to select · release to copy"}
-		// A multiline transcript drag must not copy the neighboring roster.
-		if m.transcript == nil && m.sidebarWidth() != 0 {
-			left, top := 1+m.sidebarWidth(), m.transcriptTop()
+		// A transcript drag must not copy the stacks or the composer.
+		if m.transcript == nil {
+			left, top := 1, m.transcriptTop()
 			m.mouseSelection.footerLeft = left
 			bottom := top + m.viewport.Height
 			if point.x >= left && point.y >= top && point.y < bottom {
