@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/inbox"
@@ -38,6 +39,8 @@ type Controller struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	done         chan struct{}
+	quiesce      chan struct{}
+	quiesceOnce  sync.Once
 	wg           sync.WaitGroup
 	root         message.ActorID
 	agents       map[message.ActorID]*ownedAgent
@@ -73,7 +76,7 @@ func WithWakeContext(f func(message.ActorID) agent.WakeContext) Option {
 func New(ctx context.Context, options ...Option) *Controller {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &Controller{
-		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}), quiesce: make(chan struct{}),
 		agents:   make(map[message.ActorID]*ownedAgent),
 		receipts: make(map[message.MessageID]message.Receipt),
 		events:   inbox.New[Event](),
@@ -82,7 +85,17 @@ func New(ctx context.Context, options ...Option) *Controller {
 		o(c)
 	}
 	go func() {
-		<-ctx.Done()
+		// Shutdown is either requested or forced. A requested shutdown lets each
+		// loop finish what it is doing and exit without an error to report; a
+		// cancelled context is an abort, and the cancellation it produces is a
+		// fact worth keeping. Close escalates the first into the second when a
+		// caller's budget runs out.
+		requested := false
+		select {
+		case <-ctx.Done():
+		case <-c.quiesce:
+			requested = true
+		}
 		// Close admission under the same lock as CreateAgent's Add. Once
 		// released, all admitted agents are registered and no more can join.
 		c.mu.Lock()
@@ -93,6 +106,10 @@ func New(ctx context.Context, options ...Option) *Controller {
 		}
 		c.mu.Unlock()
 		for _, owned := range ownedAgents {
+			if requested {
+				owned.agent.RequestQuiesce()
+				continue
+			}
 			owned.cancel()
 			owned.agent.RequestStop()
 		}
@@ -127,7 +144,7 @@ func (c *Controller) CreateAgent(parent message.ActorID, spec agent.Spec) (Creat
 }
 
 func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Creation, error) {
-	if c.closing || c.ctx.Err() != nil {
+	if c.closedLocked() {
 		return Creation{}, ErrClosed
 	}
 	if c.interrupted {
@@ -214,7 +231,7 @@ func (c *Controller) SendContext(ctx context.Context, to message.ActorID, conten
 	if err := ctx.Err(); err != nil {
 		return message.Receipt{}, err
 	}
-	if c.ctx.Err() != nil {
+	if c.closedLocked() {
 		return message.Receipt{}, ErrClosed
 	}
 	if c.interruptionPendingLocked() {
@@ -255,7 +272,7 @@ func (c *Controller) Deliver(from message.ActorID, draft message.Draft) (message
 }
 
 func (c *Controller) sendLocked(from message.ActorID, draft message.Draft) (message.Receipt, error) {
-	if c.ctx.Err() != nil {
+	if c.closedLocked() {
 		return message.Receipt{}, ErrClosed
 	}
 	if err := draft.Validate(); err != nil {
@@ -458,18 +475,42 @@ func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	return info, err
 }
 
-// Close cancels every owned agent and waits for its loop to exit. Cancellation is
-// cooperative: a model or tool that ignores its context can outlast this wait.
-// A timeout leaves ownership intact; Close may be called again to finish waiting.
+// Close asks every owned agent to stop at its next safe point and waits for the
+// loops to exit. Work already in flight finishes, so a clean shutdown reports no
+// cancellation. When ctx expires first the request escalates to cancellation,
+// which is cooperative: a model or tool that ignores its context can outlast the
+// wait. A timeout leaves ownership intact; Close may be called again to finish
+// waiting, and the escalation is not undone.
 func (c *Controller) Close(ctx context.Context) error {
-	c.cancel()
+	c.quiesceOnce.Do(func() { close(c.quiesce) })
 	select {
 	case <-c.done:
 		return nil
 	case <-ctx.Done():
+	}
+	// The request did not settle within the caller's budget. Escalate to
+	// cancellation and give the loops a moment to unwind, so a caller that
+	// budgeted for a close still gets one rather than only an error.
+	c.cancel()
+	grace := time.NewTimer(escalationGrace)
+	defer grace.Stop()
+	select {
+	case <-c.done:
+		return nil
+	case <-grace.C:
 		return ctx.Err()
 	}
 }
+
+// escalationGrace bounds the wait after a close escalates to cancellation.
+// Cancellation is cooperative, so a model or tool that ignores its context can
+// still outlast it; the caller then sees its own deadline.
+const escalationGrace = time.Second
+
+// closedLocked reports that the conversation no longer admits work. A close
+// that settles gracefully never cancels c.ctx, so the closing flag and not the
+// context is what makes a conversation closed.
+func (c *Controller) closedLocked() bool { return c.closing || c.ctx.Err() != nil }
 
 func (c *Controller) emit(event Event) error {
 	if c.reporter != nil {

@@ -60,21 +60,41 @@ func (s *Session) startCloseReason(reason string) *closeAttempt {
 		if s.telemetry != nil {
 			s.telemetry.stop()
 		}
-		s.cancelExecution()
 	}
 	a := &closeAttempt{done: make(chan struct{})}
 	s.attempt = a
 	go s.finalize(a)
 	return a
 }
+
+// settleBudget bounds the graceful phase of a close. It is sized for reaching a
+// checkpoint, not for finishing a model call: an idle or looping agent settles
+// in microseconds, while one awaiting a response settles only when the provider
+// answers, which no shutdown budget can usefully cover. Waiting longer would
+// stall every close by that much and cancel the call anyway.
+const settleBudget = 500 * time.Millisecond
+
 func (s *Session) finalize(a *closeAttempt) {
-	err := s.admission.Wait(context.Background())
+	// An unsettled interruption fences the loops, so nothing can be asked to
+	// stop until it finishes unwinding.
 	s.mu.Lock()
 	interruption := s.interruption
 	s.mu.Unlock()
 	if interruption != nil {
 		<-interruption.done
 	}
+	// Ask the agents to stop before cancelling anything. Cancelling first, as
+	// this used to, aborted whatever was in flight on every clean shutdown and
+	// reported it as a failed output, a failed tool call and a failed agent.
+	settle, stopSettle := context.WithTimeout(context.Background(), settleBudget)
+	if s.workflow != nil {
+		_ = s.workflow.Close(settle)
+	} else if s.controller != nil {
+		_ = s.controller.Close(settle)
+	}
+	stopSettle()
+	s.cancelExecution()
+	err := s.admission.Wait(context.Background())
 	if err == nil && s.workflow != nil {
 		err = s.workflow.Close(context.Background())
 	} else if err == nil && s.controller != nil {

@@ -127,6 +127,30 @@ func (a *Agent) ResumeSnapshot() (StateSnapshot, error) {
 	return s, a.reportError()
 }
 func (a *Agent) Resume() (State, error) { s, e := a.ResumeSnapshot(); return s.State, e }
+
+// errQuiesced unwinds the loop after a RequestQuiesce. It never reaches a
+// consumer: Run translates it to a clean exit.
+var errQuiesced = errors.New("agent quiesced")
+
+// RequestQuiesce asks the agent to exit at its next safe point without
+// cancelling anything in flight. A model call or tool already running finishes
+// and reports its own result, and the loop then stops between exchanges. Unlike
+// RequestStop it records no control transition, because neither the user nor
+// the model asked for it: the host is closing the conversation.
+func (a *Agent) RequestQuiesce() {
+	a.quiescing.Store(true)
+	a.control.mu.Lock()
+	// Wake an agent parked on its inbox; it re-checks the flag immediately.
+	if a.control.waitCancel != nil {
+		a.control.waitCancel()
+	}
+	// Wake anyone parked on a control transition, such as an interrupt fence
+	// waiting to be released, without recording a transition of its own.
+	close(a.control.changed)
+	a.control.changed = make(chan struct{})
+	a.control.mu.Unlock()
+}
+
 func (a *Agent) RequestStopSnapshot() (StateSnapshot, error) {
 	// This short control boundary also fences successful response commitment.
 	a.control.mu.Lock()
@@ -169,6 +193,11 @@ func (a *Agent) checkpointState(ctx context.Context, next State) error {
 			a.emission.Unlock()
 			return context.Canceled
 		}
+		if a.quiescing.Load() {
+			a.control.mu.Unlock()
+			a.emission.Unlock()
+			return errQuiesced
+		}
 		switch a.control.state {
 		case StopRequested, Stopped, Failed:
 			a.control.mu.Unlock()
@@ -203,6 +232,15 @@ func (a *Agent) waitInbox(ctx context.Context) error {
 			a.control.mu.Unlock()
 			a.emission.Unlock()
 			continue
+		}
+		// Re-check under the lock RequestQuiesce uses to read waitCancel: a
+		// quiesce between the checkpoint above and the assignment below would
+		// otherwise find nothing to wake and leave this loop parked until the
+		// close escalated to cancellation.
+		if a.quiescing.Load() {
+			a.control.mu.Unlock()
+			a.emission.Unlock()
+			return errQuiesced
 		}
 		a.setStateLocked(Idle)
 		waitCtx, cancel := context.WithCancel(ctx)

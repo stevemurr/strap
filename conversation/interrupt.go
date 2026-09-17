@@ -31,7 +31,7 @@ func (c *Controller) Interrupt(ctx context.Context) error {
 		return err
 	}
 	c.mu.Lock()
-	if c.closing || c.ctx.Err() != nil {
+	if c.closedLocked() {
 		c.mu.Unlock()
 		return ErrClosed
 	}
@@ -81,7 +81,7 @@ func (c *Controller) finishInterruption(a *interruptAttempt, agents []*ownedAgen
 			a.err = errors.Join(a.err, ErrAgentStopped)
 		}
 	}
-	if c.ctx.Err() != nil {
+	if c.closedLocked() {
 		a.err = errors.Join(a.err, ErrClosed)
 	}
 	close(a.done)

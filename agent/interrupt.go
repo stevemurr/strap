@@ -55,6 +55,12 @@ func (a *Agent) beginExchange(ctx context.Context) (context.Context, context.Can
 			a.control.mu.Unlock()
 			return nil, nil, err
 		}
+		// The host is closing. Any interruption has already settled by now, so
+		// only the wait for a release remains and nothing is left to fence.
+		if a.quiescing.Load() {
+			a.control.mu.Unlock()
+			return nil, nil, errQuiesced
+		}
 		if a.control.interrupt != nil {
 			settled, changed := a.control.interrupt.settled, a.control.changed
 			a.control.mu.Unlock()

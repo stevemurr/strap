@@ -204,7 +204,10 @@ func scanTrace(ctx context.Context, path string, m *TaskMetrics) error {
 			case conversation.AgentRegistered:
 				m.Roles[string(v.Registration.Role)]++
 			case conversation.AgentExited:
-				if v.Err != nil {
+				// A cancelled exit is a shutdown that outran its settle budget,
+				// not something the task did wrong. A clean close reports no
+				// error at all, so anything else here is a real failure.
+				if v.Err != nil && !errors.Is(v.Err, context.Canceled) {
 					m.AgentErrors++
 				}
 			case conversation.UsageEvent:

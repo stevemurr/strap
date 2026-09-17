@@ -77,6 +77,7 @@ type Agent struct {
 	emission       sync.Mutex
 	reporting      reportState
 	stopRequested  atomic.Bool
+	quiescing      atomic.Bool
 	nextOutput     uint64
 	nextInvocation uint64
 	nextWake       uint64
@@ -219,6 +220,12 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 	}
 	defer a.finishInterrupt()
 	defer func() {
+		// A quiesce is the host shutting the conversation down, not a failure
+		// and not an abort, so the exit carries no error for consumers to
+		// filter. Only work actually interrupted reports cancellation.
+		if errors.Is(err, errQuiesced) {
+			err = nil
+		}
 		a.emission.Lock()
 		defer a.emission.Unlock()
 		a.control.mu.Lock()
