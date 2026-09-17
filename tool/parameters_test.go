@@ -119,6 +119,10 @@ func TestParametersRejectUnsupportedDefinitions(t *testing.T) {
 		t.Fatal("accepted uninitialized contract")
 	}
 }
+
+// Wider Go types advertise only the range a JSON number carries exactly, and
+// the decoder holds the same line. Values just past that bound are rejected
+// rather than rounded down onto it, which is what a float64 decoder would do.
 func TestIntegerContractPreservesExactValues(t *testing.T) {
 	type args struct {
 		Signed   int64  `json:"signed"`
@@ -126,15 +130,15 @@ func TestIntegerContractPreservesExactValues(t *testing.T) {
 	}
 	p := parameters[args]()
 	for _, raw := range []string{
-		`{"signed":-9223372036854775808,"unsigned":18446744073709551615}`,
-		`{"signed":-9223372036854775808.0,"unsigned":184467440737095516150e-1}`,
+		`{"signed":-9007199254740991,"unsigned":9007199254740991}`,
+		`{"signed":-9007199254740991.0,"unsigned":90071992547409910e-1}`,
 		`{"signed":0e99999999999999999999,"unsigned":0e-99999999999999999999}`,
 	} {
 		if _, err := p.Decode([]byte(raw)); err != nil {
 			t.Fatalf("%s: %v", raw, err)
 		}
 	}
-	for _, raw := range []string{`{"signed":9223372036854775808,"unsigned":0}`, `{"signed":0,"unsigned":18446744073709551616}`, `{"signed":0,"unsigned":-1}`, `{"signed":1e99999999999999,"unsigned":0}`, `{"signed":1e-99999999999999,"unsigned":0}`} {
+	for _, raw := range []string{`{"signed":9007199254740992,"unsigned":0}`, `{"signed":0,"unsigned":9007199254740992}`, `{"signed":9223372036854775807,"unsigned":0}`, `{"signed":0,"unsigned":18446744073709551615}`, `{"signed":0,"unsigned":-1}`, `{"signed":1e99999999999999,"unsigned":0}`, `{"signed":1e-99999999999999,"unsigned":0}`} {
 		if _, err := p.Decode([]byte(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
@@ -269,8 +273,8 @@ func TestCompositionPreservesIntegerBoundsAndTopLevelTypeHints(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := op.Definition().Parameters
-	if !strings.Contains(string(raw), "18446744073709551615") {
-		t.Fatalf("integer bound rounded in schema: %s", raw)
+	if !strings.Contains(string(raw), "9007199254740991") || strings.Contains(string(raw), "18446744073709551615") {
+		t.Fatalf("composition did not carry the exact-JSON integer bound: %s", raw)
 	}
 	var schema struct {
 		Properties map[string]struct {

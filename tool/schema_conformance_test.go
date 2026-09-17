@@ -171,7 +171,7 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 				t.Run(mutation.name, func(t *testing.T) { check(t, mutateSchemaSeed(t, tc.seed, mutation), false) })
 			}
 			if tc.name == "assign_audit" || tc.name == "assign_repair" {
-				for _, revision := range []string{"1.0", "1e0", "9007199254740993", "18446744073709551615"} {
+				for _, revision := range []string{"1.0", "1e0", "9007199254740991", "90071992547409910e-1"} {
 					t.Run("valid revision "+revision, func(t *testing.T) {
 						check(t, mutateSchemaSeed(t, tc.seed, schemaMutation{path: "expected_revision", replacement: revision}), true)
 					})
@@ -256,7 +256,7 @@ func TestAuditSchemaAndDispatchConform(t *testing.T) {
 			valid     bool
 		}{mutation.name, string(mutateSchemaSeed(t, fail, mutation)), false})
 	}
-	for _, revision := range []string{"1.0", "9007199254740993", "18446744073709551615"} {
+	for _, revision := range []string{"1.0", "9007199254740991", "90071992547409910e-1"} {
 		cases = append(cases, struct {
 			name, raw string
 			valid     bool

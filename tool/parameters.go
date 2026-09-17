@@ -196,6 +196,23 @@ func parameters[A any](constraints ...Constraint) Parameters[A] {
 	return p
 }
 
+// jsonSafeInteger is the largest magnitude a JSON number carries exactly. A
+// wider Go type cannot advertise its full range: a bound beyond this does not
+// survive a round trip through consumers that read JSON numbers as float64, and
+// a schema that states one is claiming something it cannot mean. The decoder
+// applies the same bound, so the contract and the check stay identical.
+var jsonSafeInteger = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 53), big.NewInt(1))
+
+func exactJSON(bound *big.Int) *big.Int {
+	if bound.CmpAbs(jsonSafeInteger) <= 0 {
+		return bound
+	}
+	if bound.Sign() < 0 {
+		return new(big.Int).Neg(jsonSafeInteger)
+	}
+	return new(big.Int).Set(jsonSafeInteger)
+}
+
 func compileParameter(t reflect.Type, visiting map[reflect.Type]bool) (*parameterNode, error) {
 	if visiting[t] {
 		return nil, fmt.Errorf("recursive parameter type %v", t)
@@ -285,12 +302,12 @@ func compileParameter(t reflect.Type, visiting map[reflect.Type]bool) (*paramete
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		p.kind = "integer"
 		bound := new(big.Int).Lsh(big.NewInt(1), uint(t.Bits()-1))
-		p.minimum = new(big.Int).Neg(bound)
-		p.maximum = new(big.Int).Sub(bound, big.NewInt(1))
+		p.minimum = exactJSON(new(big.Int).Neg(bound))
+		p.maximum = exactJSON(new(big.Int).Sub(bound, big.NewInt(1)))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		p.kind = "integer"
 		p.minimum = big.NewInt(0)
-		p.maximum = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(t.Bits())), big.NewInt(1))
+		p.maximum = exactJSON(new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(t.Bits())), big.NewInt(1)))
 	default:
 		return nil, fmt.Errorf("unsupported parameter type %v", t)
 	}
