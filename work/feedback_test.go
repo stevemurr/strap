@@ -27,8 +27,8 @@ func TestRejectionsCarryIdsRevisionsAndNextStep(t *testing.T) {
 	_, err = s.SubmitWork(w.Assignee, SubmitRequest{WorkTarget: target(w), Summary: "premature"})
 	expect(err, ErrInvalid, "before submit_work: "+string(p.Steps[0].ID)+" is pending, "+string(p.Steps[1].ID)+" is pending", "report_work_progress steps")
 
-	_, err = s.ReportWorkProgress(w.Assignee, ReportWorkProgressRequest{WorkTarget: target(w), AssignedAtRevision: 4, Position: &WorkPosition{Objective: "o"}})
-	expect(err, ErrConflict, "assigned_at_revision 4 does not match this assignment's 1")
+	_, err = s.ReportWorkProgress(w.Assignee, ReportWorkProgressRequest{WorkTarget: WorkTarget{ID: w.ID, ExpectedRevision: 9}, Position: &WorkPosition{Objective: "o"}})
+	expect(err, ErrConflict, string(w.ID)+" is at revision 1", "expected_revision was 9", "work_revision from your last receipt")
 
 	_, err = s.UpdatePlan("root", PlanUpdate{PlanID: &p.ID, ExpectedRevision: ptr(p.Revision + 5), Steps: []StepEdit{{ID: &p.Steps[2].ID, Title: ptr("t")}}})
 	expect(err, ErrConflict, "plan "+string(p.ID)+" is at revision", "revision from get_plan")
@@ -52,14 +52,14 @@ func TestRejectionsCarryIdsRevisionsAndNextStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SubmitResearch("researcher", SubmitResearchRequest{WorkTarget: target(research), AssignedAtRevision: 1, Summary: "s", FindingIDs: []ProgressFindingID{"finding-1"}})
+	_, err = s.SubmitResearch("researcher", SubmitResearchRequest{WorkTarget: target(research), Summary: "s", FindingIDs: []ProgressFindingID{"finding-1"}})
 	expect(err, ErrNotFound, "finding finding-1 was never recorded for "+string(research.ID), "omit finding_ids if none were recorded")
 
 	// Not-found rejections name what does exist for the caller, so a guessed
 	// id turns into a lookup instead of another guess.
 	_, err = s.GetResearchBrief("root", "brief-guess")
 	expect(err, ErrNotFound, "no brief has been delivered to you", "research not yet delivered: "+string(research.ID))
-	delivered, err := s.SubmitResearch("researcher", SubmitResearchRequest{WorkTarget: target(research), AssignedAtRevision: 1, Summary: "done"})
+	delivered, err := s.SubmitResearch("researcher", SubmitResearchRequest{WorkTarget: target(research), Summary: "done"})
 	if err != nil {
 		t.Fatal(err)
 	}

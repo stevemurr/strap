@@ -41,7 +41,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"assigned_at_revision":1,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, w.Revision, p.Steps[0].ID))
+	args := []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, w.Revision, p.Steps[0].ID))
 	updated, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args})
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,8 @@ func TestSubmitAuditDoesNotAcceptAuthorityFields(t *testing.T) {
 
 func TestWorkToolSchemasHaveValidRequiredArrays(t *testing.T) {
 	definitions := append(PlanTools(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }),
-		AssignWork(nil), SubmitWork(nil), SubmitAudit(nil), GetWork(nil), GetPlan(nil), GetAudit(nil), CancelWork(nil), ReassignWork(nil))
+		SubmitWork(nil), SubmitAudit(nil), GetWork(nil), GetPlan(nil), GetAudit(nil), CancelWork(nil), ReassignWork(nil))
+	definitions = append(definitions, AssignmentTools(nil)...)
 	var check func(any)
 	check = func(v any) {
 		switch v := v.(type) {
@@ -126,7 +127,7 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 		{"pass omitted", "pass", "", true},
 		{"pass empty", "pass", "[]", true},
 		{"pass nonempty", "pass", finding, false},
-		{"pass null", "pass", "null", true}, // null means omitted
+		{"pass null", "pass", "null", false},
 		{"pass string", "pass", `"[]"`, false},
 		{"fail omitted", "fail", "", false},
 		{"fail empty", "fail", "[]", false},
@@ -158,13 +159,13 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 			}
 		})
 	}
-	// The pass and fail forms are one flat object keyed by verdict. Findings
-	// stay optional at the top level because only the fail form requires
-	// them; that form's rule is enforced at dispatch and tested above.
+	// Common fields remain visible at the top level, while oneOf preserves
+	// each verdict's complete argument constraints.
 	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { return Result{}, nil })
 	var schema struct {
-		Type       string   `json:"type"`
-		Required   []string `json:"required"`
+		Type       string            `json:"type"`
+		OneOf      []json.RawMessage `json:"oneOf"`
+		Required   []string          `json:"required"`
 		Properties map[string]struct {
 			Enum        []string `json:"enum"`
 			Description string   `json:"description"`
@@ -173,7 +174,7 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if schema.Type != "object" || !slices.Equal(schema.Properties["verdict"].Enum, []string{"pass", "fail"}) || strings.Contains(string(op.Definition().Parameters), "oneOf") {
+	if schema.Type != "object" || !slices.Equal(schema.Properties["verdict"].Enum, []string{"pass", "fail"}) || len(schema.OneOf) != 2 {
 		t.Fatalf("audit schema shape: %+v", schema)
 	}
 	if !slices.Equal(schema.Required, []string{"verdict", "expected_revision", "submission_id", "summary", "work_id"}) {
@@ -316,34 +317,40 @@ func TestWorkToolsDeclareRevisionBookkeeping(t *testing.T) {
 	if got := declared(CreatePlan(plans)); len(got) != 0 {
 		t.Fatalf("create_plan takes no revision: %v", got)
 	}
-	if got := declared(AssignWork(func(context.Context, Call, AssignWorkArgs) (Result, error) { return Text("ok"), nil })); len(got) != 1 || got[0] != "expected_revision" {
-		t.Fatalf("assign_work: %v", got)
+	for _, op := range AssignmentTools(func(context.Context, Call, work.AssignmentRequest) (Result, error) { return Text("ok"), nil }) {
+		got := declared(op)
+		if op.Definition().Name == "assign_audit" || op.Definition().Name == "assign_repair" {
+			if !slices.Equal(got, []string{"expected_revision"}) {
+				t.Fatalf("%s: %v", op.Definition().Name, got)
+			}
+		} else if len(got) != 0 {
+			t.Fatalf("%s has no revision: %v", op.Definition().Name, got)
+		}
 	}
-	if got := declared(ReportWorkProgress(nil)); len(got) != 2 || got[0] != "expected_revision" || got[1] != "assigned_at_revision" {
+	if got := declared(ReportWorkProgress(nil)); !slices.Equal(got, []string{"expected_revision"}) {
 		t.Fatalf("report_work_progress: %v", got)
 	}
 }
 
-// Models put objective at the top level and send null for omitted optional
-// fields; both are repaired before validation, while unknown fields are still
-// rejected.
-func TestProgressReportAcceptsTopLevelObjectiveAndNulls(t *testing.T) {
-	var got work.ReportWorkProgressRequest
-	report := ReportWorkProgress(func(_ context.Context, _ Call, r work.ReportWorkProgressRequest) (Result, error) {
-		got = r
+// The progress tool accepts exactly the advertised shape, without rewriting
+// objective aliases, dropping nulls, or re-encoding revision numbers as floats.
+func TestProgressReportRejectsUndocumentedAliasesAndNulls(t *testing.T) {
+	calls := 0
+	report := ReportWorkProgress(func(context.Context, Call, work.ReportWorkProgressRequest) (Result, error) {
+		calls++
 		return Text("ok"), nil
 	})
-	raw := `{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"objective":"Ship it","findings":null,"steps":null}`
-	if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(raw)}); err != nil {
-		t.Fatal(err)
+	for _, raw := range []string{
+		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"objective":"Ship it"}`,
+		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it"},"findings":null}`,
+		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it"},"steps":null}`,
+		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"x"},"priority":1}`,
+	} {
+		if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(raw)}); err == nil {
+			t.Fatalf("accepted %s", raw)
+		}
 	}
-	if got.Position == nil || got.Position.Objective != "Ship it" || got.Findings != nil || got.Steps != nil {
-		t.Fatalf("%+v", got)
-	}
-	if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"x"},"priority":1}`)}); err == nil {
-		t.Fatal("unknown field accepted")
-	}
-	if got := report.(interface{ BookkeepingParameters() []string }).BookkeepingParameters(); len(got) != 2 {
-		t.Fatalf("bookkeeping lost through the wrapper: %v", got)
+	if calls != 0 {
+		t.Fatalf("invalid progress reports reached handler %d times", calls)
 	}
 }

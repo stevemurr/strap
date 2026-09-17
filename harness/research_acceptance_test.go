@@ -48,7 +48,7 @@ func (f acceptanceRoot) Submit(_ context.Context, r provider.Request, _ provider
 		if err := json.Unmarshal([]byte(lastResult(r)), &created); err != nil {
 			return provider.Response{}, err
 		}
-		return operation("assign_work", map[string]any{"kind": "research", "assignee": created.AgentID, "task": "Diagnose the fixture and deliver findings"})
+		return operation("assign_research", map[string]any{"assignee": created.AgentID, "task": "Diagnose the fixture and deliver findings"})
 	case 3:
 		return operation("wait_for_input", struct{}{})
 	case 4:
@@ -94,7 +94,7 @@ func (f acceptanceWorker) Submit(_ context.Context, r provider.Request, _ provid
 				p.w = *m.Envelope.Work
 			}
 		}
-		return operation("shell", map[string]any{"work_id": p.w.ID, "assigned_at_revision": p.w.AssignedAtRevision, "command": "printf diagnostic-result"})
+		return operation("shell", map[string]any{"work_id": p.w.ID, "command": "printf diagnostic-result"})
 	case 2:
 		var receipt struct {
 			Ref string `json:"evidence_ref"`
@@ -103,13 +103,13 @@ func (f acceptanceWorker) Submit(_ context.Context, r provider.Request, _ provid
 			return provider.Response{}, err
 		}
 		p.ref = receipt.Ref
-		return operation("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: p.w.Revision}, AssignedAtRevision: p.w.AssignedAtRevision, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic returned the fixture result", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: p.ref}}}}})
+		return operation("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: p.w.Revision}, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic returned the fixture result", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: p.ref}}}}})
 	case 3:
 		var receipt work.ReportWorkProgressResult
 		if err := json.Unmarshal([]byte(lastResult(r)), &receipt); err != nil || len(receipt.FindingIDs) != 1 {
 			return provider.Response{}, fmt.Errorf("report: %v %s", err, lastResult(r))
 		}
-		return operation("submit_research", work.SubmitResearchRequest{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: receipt.WorkRevision}, AssignedAtRevision: p.w.AssignedAtRevision, Summary: "Diagnostic finding delivered", FindingIDs: receipt.FindingIDs})
+		return operation("submit_research", work.SubmitResearchRequest{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: receipt.WorkRevision}, Summary: "Diagnostic finding delivered", FindingIDs: receipt.FindingIDs})
 	default:
 		return operation("wait_for_input", struct{}{})
 	}

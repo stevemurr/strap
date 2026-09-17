@@ -142,22 +142,29 @@ Commands run with host permissions, without a sandbox or approval prompt.
 
 Type a message and press Enter. Input stays available while agents work and always
 addresses Strap's root, regardless of which agent you are watching. The root's
-live stream opens by default. At 100 columns or wider, a persistent agent list
-keeps each task on its first line, with the agent ID and status beneath it.
+live stream opens by default. At 40 columns by 18 rows or larger, overlapping
+agent chips occupy a strip above the full-width conversation and composer.
+The strip starts at five rows and wraps when the terminal has room to show the team.
+Each chip shows a task label and a status symbol; its color stays tied to the agent.
 Agents are grouped by attention needed, working, idle, inactive, and completed,
-in discovery order within each group. Root stays at the top. Completed work is
+in discovery order within each group. Root has its own status chip at the start,
+with All activity above it. Completed work is
 expanded by default; idle agents with unfinished work remain visible.
 Work awaiting review or blocked work remains distinct from an agent being idle;
 `!` also flags execution errors. The selected stream header shows role, execution
 state, parent, and the last context measurement; its live status line shows
 current activity or error/blocker details. Unknown counts remain explicit.
 
-Press F6 to focus the agent list, use Up / Down to select a live stream, and press
-Enter, Tab, Escape, or F6 to return to the composer. Click an agent to select it;
-scrolling over the list moves between agents. In narrower terminals, F6 opens
-the list in place of the transcript. The list scrolls to keep the selection
-visible without dropping task names. Select the Completed heading and press
-Enter, or press `c` anywhere in the focused list, to expand or collapse it.
+Hover over a chip to preview its full task, agent ID, role, status, latest update,
+and unread count. Press F6 and use the arrows or Tab / Shift-Tab to preview agents
+from the keyboard. Previewing does not switch streams or mark their updates read.
+Enter or a click opens the stream and returns to the composer; Escape or F6
+returns without switching. When the team cannot fit in the available rows, the
+strip scrolls horizontally to keep the focused chip visible; its edge arrows
+and mouse wheel also navigate previews.
+In smaller terminals, F6 opens a compact list in place of the transcript.
+Select the Completed heading and press Enter, or press `c` anywhere in the
+focused stacks or list, to expand or collapse it.
 Clicking its disclosure does the same. `/focus [id]` selects
 a live stream, `/focus root` returns to root, and `/focus all` shows All activity.
 Viewing a stream never pauses an agent, changes its context, or redirects input.
@@ -273,12 +280,14 @@ Type `/` to reveal commands; there is no permanent command toolbar.
 | Up / Down | Select a suggestion, move within multiline input, or recall single-line history |
 | Alt+Up / Alt+Down | Recall history / restore the unfinished draft |
 | Tab / Escape | Complete / dismiss suggestions; Tab otherwise inserts four spaces |
-| F6 | Focus the agent list / return to the root composer |
+| Escape (live conversation) | Cancel in-flight work through `/stop`, keeping the conversation and draft; open menus or previews dismiss first |
+| F6 | Focus the agent stacks (compact list on small terminals) / return to the composer |
 | F7 | Focus activity folds / return to the root composer |
 | Up / Down, then Enter (folds focused) | Select and expand a group or tool result |
 | Click a disclosure triangle | Expand / collapse an activity group or tool result |
 | Click ↑ in the composer | Send the draft through the same path as Enter |
-| Up / Down, then Enter (agent list focused) | Select a live stream, then return to composing |
+| Arrows or Tab / Shift-Tab, then Enter (agents focused) | Preview an agent, then open its stream and return to composing |
+| Hover an agent chip / click it | Preview status / open its stream |
 | `/focus [id\|root\|all]` | Watch an agent's live stream or All activity; defaults to root |
 | Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |
 | Ctrl-Home / Ctrl-End | Jump to the beginning / end |
@@ -385,8 +394,9 @@ The CLI exposes tools according to each agent’s role:
 | `create_plan` | Root creates the shared plan once, with nested initial steps |
 | `add_step` / `edit_step` / `cancel_steps` / `reorder_steps` / `rename_plan` | Root changes one plan or one step per call using the plan revision; step status is never set here |
 | `report_work_progress` | Current worker reports a full position, findings, or eligible scoped steps using work and assignment revisions |
-| `create_agent` | Root creates an idle registered `implementor` or `auditor`; no task starts |
-| `assign_work` | Require an existing `assignee`: implementation takes task and optional scope; audit takes original work/revision/submission; repair takes original work/revision/audit |
+| `create_agent` | Root creates an idle registered `researcher`, `implementor`, or `auditor`; no task starts |
+| `assign_implementation` / `assign_research` | Assign a bounded task to an existing eligible `assignee`; only implementation accepts optional plan scope |
+| `assign_audit` / `assign_repair` | Assign review using the original work/revision/submission, or repair using the original work/revision/failed audit |
 | `list_work` | Root discovers work in all states; optional assignee/kind/state filters, default 20 results, max 100, fixed-prefix continuation cursor |
 | `get_plan` / `get_work` | Read current authorized snapshots, scoped steps, and available submission/repair findings |
 | `get_audit` | Read an immutable verdict, summary, and findings using the event's `audit_id` |
@@ -507,7 +517,7 @@ accepted session log for delivery observations, so work continues without a UI r
 uses the runtime-bound `Sender`.
 
 Tracked delegation uses `create_agent({role:"implementor"})`, followed by
-`assign_work({kind:"implementation",assignee:agent_id,task:"..."})`. Choose `auditor`
+`assign_implementation({assignee:agent_id,task:"..."})`. Choose `auditor`
 for independent review; implementors also handle repairs. Roles are immutable.
 `harness.Session.CreateAgent(ctx, actor, roster.CreateRequest)` uses the same path.
 The controller's raw `CreateAgent(parent, spec)` remains a work-independent runtime
@@ -902,7 +912,7 @@ constraints once; schema generation and runtime decoding use that one contract.
 See [the tool contract design](DESIGN.md#typed-tool-contracts) and
 [the executable example](tool/example_test.go).
 
-Worker progress uses `report_work_progress` with explicit `assigned_at_revision`.
+Worker progress uses `report_work_progress` with `work_id` and `expected_revision`.
 Legacy worker `update_plan`, `update_work`, and Go/HTTP `UpdateProgress` mutations
 are rejected without changing work. A supplied position replaces all its fields;
 omit it for finding-only or step-only reports. HTTP uses `POST /sessions/{id}/work/report-progress`.
@@ -911,7 +921,8 @@ omit it for finding-only or step-only reports. HTTP uses `POST /sessions/{id}/wo
 ## Research and recorded progress
 
 `create_agent` supports `researcher`, `implementor`, and `auditor`. Creation is
-idle; `assign_work` starts an assignment. Research takes a bounded question,
+idle; the appropriate `assign_implementation`, `assign_research`, `assign_audit`,
+or `assign_repair` tool starts an assignment. Research takes a bounded question,
 context and expected output without plan scope. `submit_research` stores an
 immutable brief and moves research to `delivered`. Implementation and repair
 still use `submit_work` and require independent audit for acceptance.
@@ -927,8 +938,9 @@ still use `submit_work` and require independent audit for acceptance.
 | File editing | Yes | — | Yes | — |
 | Messaging and configured file/PDF/web reads | Yes | Yes | Yes | Yes |
 
-Worker progress requires `work_id`, current `expected_revision`, and the exact
-`assigned_at_revision`. A supplied `position` replaces the entire prior position;
+Worker progress requires `work_id` and the current `expected_revision`, exactly
+as every other work mutation does; the assignment binding recorded on the report
+is read from the work. A supplied `position` replaces the entire prior position;
 omitting it preserves that position. Findings are immutable, with observed or
 inferred basis, evidence, limitations and explicit supersession. Step progress
 updates the authoritative scoped plan immediately. The legacy worker `update_work`

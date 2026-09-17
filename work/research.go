@@ -41,12 +41,11 @@ type ProposedStep struct {
 }
 type SubmitResearchRequest struct {
 	WorkTarget
-	AssignedAtRevision Revision            `json:"assigned_at_revision"`
-	Summary            string              `json:"summary"`
-	FindingIDs         []ProgressFindingID `json:"finding_ids,omitempty"`
-	OpenQuestions      []string            `json:"open_questions,omitempty"`
-	Recommendation     string              `json:"recommendation,omitempty"`
-	ProposedSteps      []ProposedStep      `json:"proposed_steps,omitempty"`
+	Summary        string              `json:"summary"`
+	FindingIDs     []ProgressFindingID `json:"finding_ids,omitempty"`
+	OpenQuestions  []string            `json:"open_questions,omitempty"`
+	Recommendation string              `json:"recommendation,omitempty"`
+	ProposedSteps  []ProposedStep      `json:"proposed_steps,omitempty"`
 }
 type ResearchBrief struct {
 	ID                 ResearchBriefID     `json:"brief_id"`
@@ -91,9 +90,6 @@ func (s *Store) SubmitResearch(actor identity.ActorID, r SubmitResearchRequest) 
 	}
 	if w.Kind != Research || w.State != Active {
 		return result, ErrState
-	}
-	if r.AssignedAtRevision == 0 || r.AssignedAtRevision != w.AssignedAtRevision {
-		return result, ErrConflict
 	}
 	if blank(r.Summary) || len(r.FindingIDs) > 256 || len(r.OpenQuestions) > 32 || len(r.ProposedSteps) > 32 {
 		return result, invalid("summary required; at most 256 findings, 32 questions and 32 proposed steps")

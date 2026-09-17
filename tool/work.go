@@ -160,16 +160,6 @@ func UpdateWork(handle Handler[work.ProgressUpdate]) Tool {
 		Minimum("expected_revision", 1), MinLength("work_id", 1))
 }
 
-// AssignWorkArgs preserves the tool API while sharing its typed application request.
-type AssignWorkArgs = work.AssignmentRequest
-
-func AssignWork(handle Handler[AssignWorkArgs]) Tool {
-	branches := []Tool{}
-	for _, b := range assignmentContracts() {
-		branches = append(branches, b.tool(handle))
-	}
-	return composeBy("kind", provider.ToolDefinition{Name: "assign_work", Description: "Create NEW tracked implementation, audit, repair, or research work for a required existing assignee. To transfer an existing work item to a replacement agent, use reassign_work. Use create_agent first to create one. Implementation requires task; scope is optional. Research requires task and forbids scope, work_id, expected_revision, submission_id and audit_id. Omit work_id, expected_revision, submission_id, and audit_id for implementation, including when reusing an agent. Audit and repair use the original implementation work_id and its current expected_revision. Audit requires submission_id; repair requires the failing verdict audit_id. For audit/repair, omit task, context, expected_output, and scope: the server derives them. Returns work registration, not delivery or completion."}, branches...)
-}
 func SubmitWork(handle Handler[work.SubmitRequest]) Tool {
 	return builtin("submit_work",
 		"Submit implementation or repairs for audit. All scoped steps must be ready_for_review and your blocker cleared. The receipt's work_revision is current for any later mutation. A text reply does not submit work.",
@@ -256,5 +246,6 @@ func ListWork(handle Handler[work.ListQuery]) Tool {
 }
 
 func SubmitResearch(h Handler[work.SubmitResearchRequest]) Tool {
-	return builtin("submit_research", "Deliver an immutable research brief. Use current work and assignment revisions. Cite current finding IDs; proposed steps do not change the plan. Delivery ends this investigation and does not accept implementation work.", h, MinLength("work_id", 1), Minimum("expected_revision", 1), Minimum("assigned_at_revision", 1), MinLength("summary", 1), MaxItems("finding_ids", 256), UniqueItems("finding_ids"), MaxItems("open_questions", 32), MaxItems("proposed_steps", 32)).Bookkeeping("expected_revision", "assigned_at_revision")
+	return builtin("submit_research", "Deliver an immutable research brief. Use the current work revision as expected_revision. Cite current finding IDs; proposed steps do not change the plan. Delivery ends this investigation and does not accept implementation work.", h, MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("summary", 1), MaxItems("finding_ids", 256), UniqueItems("finding_ids"), MaxItems("open_questions", 32), MaxItems("proposed_steps", 32),
+		Reject("", "assigned_at_revision", "submit_research takes no assignment binding; the brief records it from current work")).Bookkeeping("expected_revision")
 }

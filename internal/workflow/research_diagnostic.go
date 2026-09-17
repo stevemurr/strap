@@ -29,7 +29,7 @@ func (s *Session) researchDiagnosticTool() tool.Tool {
 		if err = run.Err(); err != nil {
 			return tool.Result{}, err
 		}
-		w, err := s.Store.AdmitResearchDiagnostic(c.Actor, r.WorkID, r.AssignedAtRevision)
+		w, err := s.Store.AdmitResearchDiagnostic(c.Actor, r.WorkID)
 		if err != nil {
 			return tool.Result{}, err
 		}

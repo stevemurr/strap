@@ -12,7 +12,7 @@ func TestReportChecksRecordedEvidenceAndPreservesInheritedBinding(t *testing.T) 
 	}))
 	w, _ := s.AssignResearch("root", ResearchAssignRequest{Assignee: "r", Task: "inspect"})
 	request := func(ref string) ReportWorkProgressRequest {
-		return ReportWorkProgressRequest{WorkTarget: WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AssignedAtRevision: w.AssignedAtRevision, Findings: []ProgressFindingDraft{{Claim: "observed", Basis: Observed, Evidence: []EvidenceRef{{URI: ref}}}}}
+		return ReportWorkProgressRequest{WorkTarget: WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Findings: []ProgressFindingDraft{{Claim: "observed", Basis: Observed, Evidence: []EvidenceRef{{URI: ref}}}}}
 	}
 	evidence = ExecutionEvidence{WorkID: "other", AssignedAtRevision: 1, Actor: "r"}
 	for _, ref := range []string{"execution:forged", "execution:known"} {

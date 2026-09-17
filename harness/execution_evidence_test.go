@@ -37,7 +37,7 @@ func (p *evidenceScript) Submit(_ context.Context, r provider.Request, _ provide
 		if command == "" {
 			command = "printf '%05000ddecisive-error\\n' 0"
 		}
-		args, _ := json.Marshal(tool.ResearchDiagnosticArgs{WorkID: assigned.ID, AssignedAtRevision: assigned.AssignedAtRevision, Command: command})
+		args, _ := json.Marshal(tool.ResearchDiagnosticArgs{WorkID: assigned.ID, Command: command})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "diagnostic", Name: "shell", Arguments: args}}}, nil
 	}
 	p.receipt <- r.Messages[len(r.Messages)-1].Content.Text()
@@ -73,7 +73,7 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	if err = json.Unmarshal([]byte(raw), &receipt); err != nil || receipt.EvidenceRef == "" {
 		t.Fatal(raw, err)
 	}
-	r, err := s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AssignedAtRevision: w.AssignedAtRevision, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic contains decisive error", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}})
+	r, err := s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic contains decisive error", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -82,13 +82,13 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
 	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
-	implementation := operationResult(t, s, viaTools, root, "assign_work", assignment, func() (work.Work, error) {
+	implementation := operationResult(t, s, viaTools, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: assignment.Context, ExpectedOutput: assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
-		progress := work.ReportWorkProgressRequest{AssignedAtRevision: implementation.AssignedAtRevision, WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
+		progress := work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
 		receipt := operationResult(t, s, viaTools, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
 			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})
@@ -102,7 +102,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 			t.Fatal(err)
 		}
 		auditRequest := work.AssignmentRequest{Kind: work.AuditWork, Assignee: auditor.AgentID, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: submission.ID}
-		auditing := operationResult(t, s, viaTools, root, "assign_work", auditRequest, func() (work.Work, error) {
+		auditing := operationResult(t, s, viaTools, root, "assign_audit", tool.AssignAuditArgs{Assignee: auditRequest.Assignee, WorkTarget: work.WorkTarget{ID: auditRequest.WorkID, ExpectedRevision: auditRequest.ExpectedRevision}, SubmissionID: auditRequest.SubmissionID}, func() (work.Work, error) {
 			return s.AssignWork(ctx, root, auditRequest)
 		})
 		inspection := operationResult(t, s, viaTools, auditing.Assignee, "get_work", map[string]any{"work_id": auditing.ID}, func() (work.Inspection, error) {
@@ -124,7 +124,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 				t.Fatal(e)
 			}
 			repairRequest := work.AssignmentRequest{Kind: work.Repair, Assignee: implementation.Assignee, WorkID: original.ID, ExpectedRevision: original.Revision, AuditID: lastAudit.ID}
-			repairWork := operationResult(t, s, viaTools, root, "assign_work", repairRequest, func() (work.Work, error) { return s.AssignWork(ctx, root, repairRequest) })
+			repairWork := operationResult(t, s, viaTools, root, "assign_repair", tool.AssignRepairArgs{Assignee: repairRequest.Assignee, WorkTarget: work.WorkTarget{ID: repairRequest.WorkID, ExpectedRevision: repairRequest.ExpectedRevision}, AuditID: repairRequest.AuditID}, func() (work.Work, error) { return s.AssignWork(ctx, root, repairRequest) })
 			repair := operationResult(t, s, viaTools, implementation.Assignee, "get_work", map[string]any{"work_id": repairWork.ID}, func() (work.Inspection, error) {
 				return s.InspectWork(ctx, implementation.Assignee, repairWork.ID)
 			})
@@ -147,7 +147,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 		t.Fatalf("unexpected audit/repair outcome: %+v, %+v, %+v", final, plan, audit)
 	}
 	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "reassign then cancel"}
-	extra := operationResult(t, s, viaTools, root, "assign_work", assignment, func() (work.Work, error) {
+	extra := operationResult(t, s, viaTools, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: assignment.Context, ExpectedOutput: assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	oldAssignee := extra.Assignee
@@ -213,7 +213,7 @@ func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	if _, err := s.AssignWork(ctx, w.Assignee, work.AssignmentRequest{Kind: work.Implementation, Task: "delegate"}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
-	if _, err := s.ReportWorkProgress(ctx, s.Root(), work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AssignedAtRevision: w.AssignedAtRevision, Position: &work.WorkPosition{Objective: "wrong actor"}}); !errors.Is(err, work.ErrForbidden) {
+	if _, err := s.ReportWorkProgress(ctx, s.Root(), work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Position: &work.WorkPosition{Objective: "wrong actor"}}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
 	before := len(s.Agents())

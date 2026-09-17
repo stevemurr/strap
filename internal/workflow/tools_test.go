@@ -34,7 +34,7 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	if err := json.Unmarshal([]byte(created.Content.Text()), &p); err != nil {
 		t.Fatal(err)
 	}
-	value := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task", Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{p.Steps[0].ID}}})
+	value := invokeRoot(t, s, "assign_implementation", tool.AssignImplementationArgs{Assignee: createWorker(t, s, roster.Implementor), Task: "task", Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{p.Steps[0].ID}}})
 	var w work.Work
 	if err := json.Unmarshal([]byte(value.Content.Text()), &w); err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	if err := json.Unmarshal([]byte(v.Content.Text()), &inspection); err != nil || len(inspection.Steps) != 1 || inspection.Steps[0].Title != "first" {
 		t.Fatal(inspection, err)
 	}
-	receipt, err := s.Store.ReportWorkProgress(w.Assignee, work.ReportWorkProgressRequest{AssignedAtRevision: w.AssignedAtRevision, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Steps: []work.StepProgress{{ID: p.Steps[0].ID, Status: ptr(work.ReadyForReview)}}})
+	receipt, err := s.Store.ReportWorkProgress(w.Assignee, work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Steps: []work.StepProgress{{ID: p.Steps[0].ID, Status: ptr(work.ReadyForReview)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.Store.GetWork(s.Root(), w.ID)
-	v = invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	v = invokeRoot(t, s, "assign_audit", tool.AssignAuditArgs{Assignee: createWorker(t, s, roster.Auditor), WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: sub.ID})
 	var a work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &a)
 	v = invokeRoot(t, s, "get_work", map[string]any{"work_id": a.ID})
@@ -74,8 +74,8 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.GetWork(context.Background(), s.Root(), w.ID)
-	repairArgs := tool.AssignWorkArgs{Kind: work.Repair, Assignee: w.Assignee, WorkID: w.ID, ExpectedRevision: w.Revision, AuditID: audit.ID}
-	v = invokeRoot(t, s, "assign_work", repairArgs)
+	repairArgs := tool.AssignRepairArgs{Assignee: w.Assignee, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AuditID: audit.ID}
+	v = invokeRoot(t, s, "assign_repair", repairArgs)
 	var repair work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &repair)
 	v = invokeRoot(t, s, "get_work", map[string]any{"work_id": repair.ID})
@@ -98,18 +98,21 @@ func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 func TestAssignmentAndReassignmentRejectInvalidRequests(t *testing.T) {
 	ctx, s := recoverySession(t)
 	w := assigned(t, s)
-	for _, args := range []map[string]any{
-		{"kind": "implementation", "task": "task", "work_id": "unexpected"},
-		{"kind": "audit", "task": "unexpected", "work_id": w.ID, "expected_revision": w.Revision, "submission_id": "sub"},
-		{"kind": "implementation", "task": "task", "assignee": "missing"},
-		{"kind": "implementation", "task": "task", "scope": map[string]any{"plan_id": "missing", "step_ids": []string{"missing"}}},
-		{"kind": "audit", "work_id": w.ID, "expected_revision": w.Revision, "submission_id": "missing"},
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"assign_implementation", map[string]any{"assignee": w.Assignee, "task": "task", "work_id": "unexpected"}},
+		{"assign_audit", map[string]any{"assignee": w.Assignee, "task": "unexpected", "work_id": w.ID, "expected_revision": w.Revision, "submission_id": "sub"}},
+		{"assign_implementation", map[string]any{"task": "task", "assignee": "missing"}},
+		{"assign_implementation", map[string]any{"assignee": w.Assignee, "task": "task", "scope": map[string]any{"plan_id": "missing", "step_ids": []string{"missing"}}}},
+		{"assign_audit", map[string]any{"assignee": w.Assignee, "work_id": w.ID, "expected_revision": w.Revision, "submission_id": "missing"}},
 	} {
-		if _, err := callAs(s, ctx, s.Root(), "assign_work", args); err == nil {
-			t.Fatal("accepted", args)
+		if _, err := callAs(s, ctx, s.Root(), tc.name, tc.args); err == nil {
+			t.Fatal("accepted", tc)
 		}
 	}
-	if _, err := callAs(s, ctx, w.Assignee, "assign_work", map[string]any{"kind": "implementation", "assignee": w.Assignee, "task": "no delegation"}); !errors.Is(err, work.ErrForbidden) {
+	if _, err := callAs(s, ctx, w.Assignee, "assign_implementation", map[string]any{"assignee": w.Assignee, "task": "no delegation"}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -126,7 +129,7 @@ func TestAssignmentAndReassignmentRejectInvalidRequests(t *testing.T) {
 		}
 	}
 	// Reusing a provisioned implementor is supported.
-	invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "second", Assignee: w.Assignee})
+	invokeRoot(t, s, "assign_implementation", tool.AssignImplementationArgs{Task: "second", Assignee: w.Assignee})
 	_, err := s.Controller.StopAgent(w.Assignee)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +138,7 @@ func TestAssignmentAndReassignmentRejectInvalidRequests(t *testing.T) {
 		v, ok := e.(conversation.AgentExited)
 		return ok && v.Agent == w.Assignee
 	})
-	if _, err := callAs(s, ctx, s.Root(), "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Task: "dead", Assignee: w.Assignee}); err == nil {
+	if _, err := callAs(s, ctx, s.Root(), "assign_implementation", tool.AssignImplementationArgs{Task: "dead", Assignee: w.Assignee}); err == nil {
 		t.Fatal("dead worker reused")
 	}
 	invokeRoot(t, s, "cancel_work", map[string]any{"work_id": w.ID, "expected_revision": w.Revision, "reason": "withdraw"})
@@ -152,7 +155,7 @@ func TestAuditReassignmentUsesExplicitAuditor(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.Store.GetWork(s.Root(), w.ID)
-	v := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	v := invokeRoot(t, s, "assign_audit", tool.AssignAuditArgs{Assignee: createWorker(t, s, roster.Auditor), WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: sub.ID})
 	var a work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &a)
 	v = invokeRoot(t, s, "reassign_work", map[string]any{"assignee": createWorker(t, s, roster.Auditor), "work_id": a.ID, "expected_revision": a.Revision})
@@ -181,7 +184,7 @@ func TestCanceledAuditCannotInspectRevokedSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, _ = s.Store.GetWork(s.Root(), w.ID)
-	v := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	v := invokeRoot(t, s, "assign_audit", tool.AssignAuditArgs{Assignee: createWorker(t, s, roster.Auditor), WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: sub.ID})
 	var a work.Work
 	json.Unmarshal([]byte(v.Content.Text()), &a)
 	invokeRoot(t, s, "cancel_work", map[string]any{"work_id": a.ID, "expected_revision": a.Revision, "reason": "withdraw review"})

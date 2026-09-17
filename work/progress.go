@@ -60,12 +60,15 @@ type WorkPosition struct {
 	DecisionNeed string               `json:"decision_need,omitempty"`
 	Dependencies []ProgressDependency `json:"dependencies,omitempty"`
 }
+
+// ReportWorkProgressRequest identifies its subject exactly as every other work
+// mutation does: work_id and expected_revision. The assignment binding recorded
+// on the report is read from the work, never echoed by the caller.
 type ReportWorkProgressRequest struct {
 	WorkTarget
-	AssignedAtRevision Revision               `json:"assigned_at_revision"`
-	Position           *WorkPosition          `json:"position,omitempty"`
-	Findings           []ProgressFindingDraft `json:"findings,omitempty"`
-	Steps              []StepProgress         `json:"steps,omitempty"`
+	Position *WorkPosition          `json:"position,omitempty"`
+	Findings []ProgressFindingDraft `json:"findings,omitempty"`
+	Steps    []StepProgress         `json:"steps,omitempty"`
 }
 type WorkProgressReport struct {
 	ID                 ProgressReportID  `json:"report_id"`
@@ -138,9 +141,6 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 	w, err := s.target(actor, u.WorkTarget, false)
 	if err != nil {
 		return result, err
-	}
-	if u.AssignedAtRevision == 0 || u.AssignedAtRevision != w.AssignedAtRevision {
-		return result, fmt.Errorf("%w: assigned_at_revision %d does not match this assignment's %d; it never changes during an assignment", ErrConflict, u.AssignedAtRevision, w.AssignedAtRevision)
 	}
 	if w.State != Active {
 		return result, ErrState

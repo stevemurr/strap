@@ -19,7 +19,7 @@ func TestResearchProgressHTTPRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "/sessions/" + s.ID()
-	r := work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AssignedAtRevision: w.AssignedAtRevision, Position: &work.WorkPosition{Objective: "Compare requirements"}, Findings: []work.ProgressFindingDraft{{Claim: "unverified concern", Basis: work.Inferred, Limitation: "not executed"}}}
+	r := work.ReportWorkProgressRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Position: &work.WorkPosition{Objective: "Compare requirements"}, Findings: []work.ProgressFindingDraft{{Claim: "unverified concern", Basis: work.Inferred, Limitation: "not executed"}}}
 	response := request(t, s.http, "POST", base+"/work/report-progress", httpapi.WorkRequest[work.ReportWorkProgressRequest]{Actor: reg.AgentID, Request: r})
 	var receipt work.ReportWorkProgressResult
 	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &receipt) != nil {
@@ -39,7 +39,7 @@ func TestResearchProgressHTTPRoundTrip(t *testing.T) {
 	if stale.Code != 409 {
 		t.Fatal(stale.Code)
 	}
-	brief := work.SubmitResearchRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: receipt.WorkRevision}, AssignedAtRevision: w.AssignedAtRevision, Summary: "Need a runtime check", FindingIDs: receipt.FindingIDs}
+	brief := work.SubmitResearchRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: receipt.WorkRevision}, Summary: "Need a runtime check", FindingIDs: receipt.FindingIDs}
 	delivered := request(t, s.http, "POST", base+"/work/research", httpapi.WorkRequest[work.SubmitResearchRequest]{Actor: reg.AgentID, Request: brief})
 	var b work.SubmitResearchResult
 	if delivered.Code != 200 || json.Unmarshal(delivered.Body.Bytes(), &b) != nil {

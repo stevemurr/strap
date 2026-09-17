@@ -64,7 +64,7 @@ func TestResearchBriefDeliveryAndPassiveReconstruction(t *testing.T) {
 	req.Findings = []ProgressFindingDraft{observed("source differs")}
 	report := mustReport(t, s, w, req)
 	w = current(t, s, w.ID)
-	r := SubmitResearchRequest{WorkTarget: target(w), AssignedAtRevision: w.AssignedAtRevision, Summary: "Inconclusive at runtime", FindingIDs: report.FindingIDs, OpenQuestions: []string{"Does it run?"}, ProposedSteps: []ProposedStep{{Title: "Verify behavior", AcceptanceCriteria: []string{"run check"}}}}
+	r := SubmitResearchRequest{WorkTarget: target(w), Summary: "Inconclusive at runtime", FindingIDs: report.FindingIDs, OpenQuestions: []string{"Does it run?"}, ProposedSteps: []ProposedStep{{Title: "Verify behavior", AcceptanceCriteria: []string{"run check"}}}}
 	receipt, err := s.SubmitResearch("r", r)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestResearchBriefRejectsSupersededAndOversizedContent(t *testing.T) {
 	req.Findings = []ProgressFindingDraft{f}
 	mustReport(t, s, w, req)
 	w = current(t, s, w.ID)
-	r := SubmitResearchRequest{WorkTarget: target(w), AssignedAtRevision: w.AssignedAtRevision, Summary: "summary", FindingIDs: first.FindingIDs}
+	r := SubmitResearchRequest{WorkTarget: target(w), Summary: "summary", FindingIDs: first.FindingIDs}
 	if _, err = s.SubmitResearch("r", r); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}

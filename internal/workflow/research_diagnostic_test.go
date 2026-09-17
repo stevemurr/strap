@@ -45,7 +45,7 @@ func TestDiagnosticCapturesExplicitWorkBeforeExecution(t *testing.T) {
 		}
 	}
 	op := s.researchDiagnosticTool()
-	args, _ := json.Marshal(tool.ResearchDiagnosticArgs{WorkID: a.ID, AssignedAtRevision: a.AssignedAtRevision, Command: "inspect"})
+	args, _ := json.Marshal(tool.ResearchDiagnosticArgs{WorkID: a.ID, Command: "inspect"})
 	result, err := op.Call(context.Background(), tool.Call{Actor: "r", Arguments: args, InvocationID: "r/tool-1"})
 	if err != nil || result.Execution == nil || result.Execution.WorkID != string(a.ID) || result.Execution.Actor != "r" {
 		t.Fatal(result, err)

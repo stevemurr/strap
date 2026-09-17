@@ -40,12 +40,12 @@ func TestResearcherCreationAndConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw := string(tool.Parameters)
-			if !strings.Contains(raw, "assigned_at_revision") || !strings.Contains(raw, "60000") {
+			if strings.Contains(raw, "assigned_at_revision") || !strings.Contains(raw, "work_id") || !strings.Contains(raw, "60000") {
 				t.Fatal(raw)
 			}
 		}
 		switch tool.Name {
-		case "write_file", "edit_file", "assign_work", "submit_work", "submit_audit":
+		case "write_file", "edit_file", "assign_implementation", "assign_audit", "assign_repair", "assign_research", "submit_work", "submit_audit":
 			t.Fatalf("researcher received %s", tool.Name)
 		}
 	}

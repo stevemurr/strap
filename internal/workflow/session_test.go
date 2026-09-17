@@ -72,7 +72,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 		if !p.assigned {
 			p.assigned = true
-			return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
+			return invoke("assign_implementation", tool.AssignImplementationArgs{Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
 		}
 		for i := len(r.Messages) - 1; i >= 0; i-- {
 			m := r.Messages[i]
@@ -90,7 +90,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 						p.repaired = map[work.AuditID]bool{}
 					}
 					p.repaired[e.AuditID] = true
-					return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Repair, Assignee: p.implementor, WorkID: w.ID, ExpectedRevision: w.Revision, AuditID: e.AuditID})
+					return invoke("assign_repair", tool.AssignRepairArgs{Assignee: p.implementor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AuditID: e.AuditID})
 				}
 			}
 			if e.Kind == work.AuditCompleted && e.Work.State == work.Accepted {
@@ -109,7 +109,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 					continue
 				}
 				p.reviews[e.SubmissionID] = true
-				return invoke("assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: p.auditor, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: w.LatestSubmissionID})
+				return invoke("assign_audit", tool.AssignAuditArgs{Assignee: p.auditor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: w.LatestSubmissionID})
 			}
 		}
 		return provider.Response{Content: "Waiting for the work cycle."}, nil
@@ -128,7 +128,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		return provider.Response{}, err
 	}
 	for _, def := range r.Tools {
-		if def.Name == "assign_work" || def.Name == "create_agent" {
+		if def.Name == "assign_implementation" || def.Name == "create_agent" {
 			return provider.Response{}, fmt.Errorf("delegation leaked to worker")
 		}
 		if w.Kind == work.AuditWork && def.Name == "submit_work" {
@@ -171,7 +171,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if len(changes) > 0 {
-		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: target, AssignedAtRevision: w.AssignedAtRevision, Steps: changes})
+		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: target, Steps: changes})
 	}
 	return invoke("submit_work", work.SubmitRequest{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }
@@ -352,7 +352,7 @@ func invokeRoot(t *testing.T, s *Session, name string, args any) tool.Result {
 }
 func assigned(t *testing.T, s *Session) work.Work {
 	t.Helper()
-	result := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: createWorker(t, s, roster.Implementor), Task: "task"})
+	result := invokeRoot(t, s, "assign_implementation", tool.AssignImplementationArgs{Assignee: createWorker(t, s, roster.Implementor), Task: "task"})
 	var w work.Work
 	if e := json.Unmarshal([]byte(result.Content.Text()), &w); e != nil {
 		t.Fatal(e)
@@ -419,7 +419,7 @@ func TestAuditCancellationWakesRootAndSubmissionNeedsNoLiveImplementor(t *testin
 		t.Fatal("submitted work still requires active execution")
 	}
 	original, _ := s.Store.GetWork(s.Root(), w.ID)
-	result := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: original.Revision, SubmissionID: sub.ID})
+	result := invokeRoot(t, s, "assign_audit", tool.AssignAuditArgs{Assignee: createWorker(t, s, roster.Auditor), WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: original.Revision}, SubmissionID: sub.ID})
 	var audit work.Work
 	_ = json.Unmarshal([]byte(result.Content.Text()), &audit)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
@@ -493,7 +493,7 @@ func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 		state, ok := e.(conversation.AgentStateChanged)
 		return ok && state.Agent == id && state.State == agent.Paused
 	})
-	value := invokeRoot(t, s, "assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: id, Task: "paused work"})
+	value := invokeRoot(t, s, "assign_implementation", tool.AssignImplementationArgs{Assignee: id, Task: "paused work"})
 	var w work.Work
 	_ = json.Unmarshal([]byte(value.Content.Text()), &w)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {

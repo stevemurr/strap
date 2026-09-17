@@ -74,7 +74,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 		if !p.assigned {
 			p.assigned = true
-			return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Implementation, Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
+			return invoke("assign_implementation", tool.AssignImplementationArgs{Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
 		}
 		for i := len(r.Messages) - 1; i >= 0; i-- {
 			m := r.Messages[i]
@@ -92,7 +92,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 						p.repaired = map[work.AuditID]bool{}
 					}
 					p.repaired[e.AuditID] = true
-					return invoke("assign_work", tool.AssignWorkArgs{Kind: work.Repair, Assignee: p.implementor, WorkID: w.ID, ExpectedRevision: w.Revision, AuditID: e.AuditID})
+					return invoke("assign_repair", tool.AssignRepairArgs{Assignee: p.implementor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, AuditID: e.AuditID})
 				}
 			}
 			if e.Kind == work.AuditCompleted && e.Work.State == work.Accepted {
@@ -111,7 +111,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 					continue
 				}
 				p.reviews[e.SubmissionID] = true
-				return invoke("assign_work", tool.AssignWorkArgs{Kind: work.AuditWork, Assignee: p.auditor, WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: w.LatestSubmissionID})
+				return invoke("assign_audit", tool.AssignAuditArgs{Assignee: p.auditor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: w.LatestSubmissionID})
 			}
 		}
 		return provider.Response{Content: "Waiting for the work cycle."}, nil
@@ -130,7 +130,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		return provider.Response{}, err
 	}
 	for _, def := range r.Tools {
-		if def.Name == "assign_work" || def.Name == "create_agent" {
+		if def.Name == "assign_implementation" || def.Name == "create_agent" {
 			return provider.Response{}, fmt.Errorf("delegation leaked to worker")
 		}
 		if w.Kind == work.AuditWork && def.Name == "submit_work" {
@@ -164,7 +164,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if len(changes) > 0 {
-		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: target, AssignedAtRevision: w.AssignedAtRevision, Steps: changes})
+		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkTarget: target, Steps: changes})
 	}
 	return invoke("submit_work", work.SubmitRequest{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }

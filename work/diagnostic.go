@@ -4,7 +4,7 @@ import "github.com/stevemurr/strap/identity"
 
 // AdmitResearchDiagnostic serializes validation/capture with publication of
 // assignment transitions, then releases every ledger lock before execution.
-func (s *Store) AdmitResearchDiagnostic(actor identity.ActorID, id ID, binding Revision) (Work, error) {
+func (s *Store) AdmitResearchDiagnostic(actor identity.ActorID, id ID) (Work, error) {
 	s.emission.Lock()
 	defer s.emission.Unlock()
 	s.mu.Lock()
@@ -21,9 +21,6 @@ func (s *Store) AdmitResearchDiagnostic(actor identity.ActorID, id ID, binding R
 	}
 	if w.State != Active {
 		return Work{}, ErrState
-	}
-	if binding == 0 || binding != w.AssignedAtRevision {
-		return Work{}, ErrConflict
 	}
 	return w.Clone(), nil
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func reportRequest(w Work) ReportWorkProgressRequest {
-	return ReportWorkProgressRequest{WorkTarget: target(w), AssignedAtRevision: w.AssignedAtRevision}
+	return ReportWorkProgressRequest{WorkTarget: target(w)}
 }
 func observed(claim string) ProgressFindingDraft {
 	return ProgressFindingDraft{Claim: claim, Basis: Observed, Evidence: []EvidenceRef{{URI: "file:board.go", Detail: "parser input"}}}
@@ -132,7 +132,7 @@ func TestProgressReassignmentAndTerminalScopedRead(t *testing.T) {
 	r.Findings = []ProgressFindingDraft{observed("inherited finding")}
 	first := mustReport(t, s, w, r)
 	w = current(t, s, w.ID)
-	oldBinding := w.AssignedAtRevision
+	stale := target(w)
 	w, err := s.Reassign("root", ReassignRequest{WorkTarget: target(w), Assignee: "replacement"})
 	if err != nil {
 		t.Fatal(err)
@@ -148,11 +148,13 @@ func TestProgressReassignmentAndTerminalScopedRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Reporting against the view held before the reassignments is still
+	// rejected: the work moved, so expected_revision no longer matches.
 	r = reportRequest(w)
-	r.AssignedAtRevision = oldBinding
+	r.WorkTarget = stale
 	r.Position = &WorkPosition{Objective: "stale"}
 	if _, err = s.ReportWorkProgress("impl", r); !errors.Is(err, ErrConflict) {
-		t.Fatalf("reassignment back: %v", err)
+		t.Fatalf("stale view after reassignment: %v", err)
 	}
 	r = reportRequest(w)
 	r.Position = &WorkPosition{Objective: "new investigation", Blocker: "still blocked"}
@@ -235,7 +237,6 @@ func TestProgressRejectsInvalidReports(t *testing.T) {
 		want   error
 	}{
 		{"empty", func(r *ReportWorkProgressRequest, _ Work) {}, ErrInvalid},
-		{"missing binding", func(r *ReportWorkProgressRequest, _ Work) { r.AssignedAtRevision = 0 }, ErrConflict},
 		{"missing objective", func(r *ReportWorkProgressRequest, _ Work) { r.Position = &WorkPosition{} }, ErrInvalid},
 		{"missing evidence", func(r *ReportWorkProgressRequest, _ Work) {
 			r.Findings = []ProgressFindingDraft{{Claim: "observed", Basis: Observed}}
