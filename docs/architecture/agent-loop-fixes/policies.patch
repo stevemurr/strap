@@ -1,0 +1,205 @@
+--- a/agent/agent.go
++++ b/agent/agent.go
+@@ -88,7 +88,6 @@
+ 	usage          usageTracker
+ 	started        atomic.Bool
+ 	control        lifecycle
+-	repeated       repeatedCall
+ 	bookkeeping    map[string]map[string]bool // Tool name to argument names ignored by repeatKey.
+ }
+ 
+@@ -208,15 +207,15 @@
+ // Each tool batch settles before inbox input is consumed and another model call
+ // begins. There is deliberately no revision validation or proposal loop here.
+ func (a *Agent) Run(ctx context.Context) (err error) {
++	if !a.started.CompareAndSwap(false, true) {
++		return errors.New("agent already started")
++	}
+ 	ctx, cancel := context.WithCancel(ctx)
+ 	defer cancel()
+ 	a.reporting.mu.Lock()
+ 	a.reporting.cancel = cancel
+ 	a.reporting.mu.Unlock()
+ 	var last message.MessageID
+-	if !a.started.CompareAndSwap(false, true) {
+-		return errors.New("agent already started")
+-	}
+ 	defer a.finishInterrupt()
+ 	defer func() {
+ 		a.emission.Lock()
+@@ -280,6 +279,7 @@
+ 	admitted := false
+ 	malformed := 0
+ 	overrun := 0
++	var repeated repeatedCall // Owned by this exchange, across its tool batches.
+ 	for {
+ 		if err := a.checkpoint(ctx); err != nil {
+ 			return err
+@@ -397,13 +397,13 @@
+ 				}
+ 				return ctx.Err()
+ 			}
+-			if key := a.repeatKey(call, result, err); key == a.repeated.key {
+-				a.repeated.count++
++			if key := a.repeatKey(call, result, err); key == repeated.key {
++				repeated.count++
+ 			} else {
+-				a.repeated = repeatedCall{key: key, count: 1}
+-			}
+-			if a.repeated.count >= repeatedCallHint {
+-				result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with the same request and the same result. Repeating it will not change the outcome; change the arguments or the approach instead. After %d such calls this agent stops.", a.repeated.count, call.Name, maxRepeatedCalls)).Content...)
++				repeated = repeatedCall{key: key, count: 1}
++			}
++			if repeated.count >= repeatedCallHint {
++				result.Content = append(result.Content, tool.Text(fmt.Sprintf("Notice: this is consecutive call %d of %s with the same request and the same result. Repeating it will not change the outcome; change the arguments or the approach instead. After %d such calls this agent stops.", repeated.count, call.Name, maxRepeatedCalls)).Content...)
+ 			}
+ 
+ 			toolRevision, err = a.appendHistory(provider.Message{
+@@ -412,8 +412,8 @@
+ 			if err != nil {
+ 				return err
+ 			}
+-			if a.repeated.count >= maxRepeatedCalls {
+-				return fmt.Errorf("tool %s called %d times in a row with the same request and the same result; stopping", call.Name, a.repeated.count)
++			if repeated.count >= maxRepeatedCalls {
++				return fmt.Errorf("tool %s called %d times in a row with the same request and the same result; stopping", call.Name, repeated.count)
+ 			}
+ 		}
+ 		{
+--- a/agent/interrupt.go
++++ b/agent/interrupt.go
+@@ -102,7 +102,6 @@
+ 	if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text("The user interrupted execution. Completed actions remain in effect; interrupted actions may have partial effects. Do not retry or continue the previous task automatically. Wait for a new instruction.")}, nil); err != nil {
+ 		return err
+ 	}
+-	a.repeated = repeatedCall{}
+ 	a.emission.Lock()
+ 	a.control.mu.Lock()
+ 	if a.stopRequested.Load() {
+--- a/work/reporting.go
++++ b/work/reporting.go
+@@ -98,8 +98,32 @@
+ 	s.emission.Unlock()
+ 	*err = errors.Join(*err, publishErr)
+ }
++// reservationSteps is the ownership rule shared by live mutation and replay.
++// Audit and repair children use scope but never own its reservation.
++func reservationSteps(w Work) []StepID {
++	if w.Kind != Implementation || w.State.Terminal() || w.Scope == nil {
++		return nil
++	}
++	return w.Scope.StepIDs
++}
++
++// replaceWork updates the work and its derived reservation index together.
++// Callers hold s.mu; this method does not publish or append mutation changes.
++func (s *Store) replaceWork(id ID, v Work) {
++	for _, step := range reservationSteps(s.works[id]) {
++		if s.reserved[step] == id {
++			delete(s.reserved, step)
++		}
++	}
++	v = v.Clone()
++	s.works[id] = v
++	for _, step := range reservationSteps(v) {
++		s.reserved[step] = id
++	}
++}
++
+ func (s *Store) putWork(id ID, v Work) {
+-	s.works[id] = v
++	s.replaceWork(id, v)
+ 	s.change.Works = append(s.change.Works, v.Clone())
+ }
+ func (s *Store) putPlan(id PlanID, v Plan) {
+--- a/work/readmodel.go
++++ b/work/readmodel.go
+@@ -16,7 +16,7 @@
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
+ 	for _, w := range c.Works {
+-		s.works[w.ID] = w.Clone()
++		s.replaceWork(w.ID, w)
+ 	}
+ 	for _, p := range c.Plans {
+ 		s.plans[p.ID] = p.Clone()
+--- a/work/actorstate.go
++++ b/work/actorstate.go
+@@ -63,14 +63,6 @@
+ 	if actor == "" {
+ 		return out
+ 	}
+-	reserved := map[StepID]ID{}
+-	for _, w := range s.works {
+-		if live(w) && w.Scope != nil {
+-			for _, id := range w.Scope.StepIDs {
+-				reserved[id] = w.ID
+-			}
+-		}
+-	}
+ 	for _, p := range s.plans {
+ 		if p.Owner != actor {
+ 			continue
+@@ -78,7 +70,7 @@
+ 		plan := PlanState{PlanID: p.ID, Revision: p.Revision, Title: shorten(p.Title)}
+ 		for _, step := range p.Steps {
+ 			if step.Status != CancelledStep {
+-				plan.Steps = append(plan.Steps, StepState{StepID: step.ID, Status: step.Status, Title: shorten(step.Title), ReservedBy: reserved[step.ID]})
++				plan.Steps = append(plan.Steps, StepState{StepID: step.ID, Status: step.Status, Title: shorten(step.Title), ReservedBy: s.reserved[step.ID]})
+ 			}
+ 		}
+ 		out.Plans = append(out.Plans, plan)
+--- a/work/store.go
++++ b/work/store.go
+@@ -367,11 +367,6 @@
+ 		}
+ 	}
+ 	w := Work{ID: ID(s.id("work")), Kind: Implementation, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: actor, RequestedBy: actor, Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput, Scope: r.Scope}.Clone()
+-	if w.Scope != nil {
+-		for _, id := range w.Scope.StepIDs {
+-			s.reserved[id] = w.ID
+-		}
+-	}
+ 	s.putWork(w.ID, w)
+ 	s.emit(WorkAssigned, actor, w, true)
+ 	return w.Clone(), nil
+--- a/work/review.go
++++ b/work/review.go
+@@ -150,7 +150,6 @@
+ 		for i := range p.Steps {
+ 			if slices.Contains(original.Scope.StepIDs, p.Steps[i].ID) {
+ 				p.Steps[i].Status = Completed
+-				delete(s.reserved, p.Steps[i].ID)
+ 			}
+ 		}
+ 	} else {
+@@ -276,7 +275,6 @@
+ 		p := s.plans[w.Scope.PlanID].Clone()
+ 		for i := range p.Steps {
+ 			if s.reserved[p.Steps[i].ID] == w.ID {
+-				delete(s.reserved, p.Steps[i].ID)
+ 				p.Steps[i].Status = Pending
+ 			}
+ 		}
+--- a/harness/session.go
++++ b/harness/session.go
+@@ -470,14 +470,12 @@
+ // sat idle until the session budget expired. Listing problems never block a
+ // wait; only a definite absence of live work does.
+ func (s *Session) rootMayWait(ctx context.Context, c tool.Call) error {
+-	page, err := s.ListWork(ctx, c.Actor, work.ListQuery{Limit: 100})
+-	if err != nil {
++	view, err := s.workView(ctx)
++	if err != nil {
++		return nil // Preserve the existing policy when state cannot be read.
++	}
++	if len(view.ActorState(c.Actor).Owned) != 0 {
+ 		return nil
+-	}
+-	for _, item := range page.Items {
+-		if !item.State.Terminal() {
+-			return nil
+-		}
+ 	}
+ 	return errors.New("wait_for_input rejected: you own no active delegated work, so no worker result can arrive. If the task is finished, send the final reply as a text-only response now; if work remains, assign it first")
+ }

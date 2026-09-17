@@ -3,7 +3,10 @@
 Status: implemented. Explicit role-based creation, required-assignee assignment and
 reassignment, explicit repair assignment, recorded role views, and fixed-prefix
 work discovery are implemented together. The sections below retain the reviewed
-contract and intended sequencing; both stages are now complete.
+contract and intended sequencing; both stages are now complete. Assignment tool
+names and shared decoding were updated on September 16, 2026 by the
+[schema architecture fix](MODEL_TOOL_SCHEMA_REVIEW.md). Earlier validation results
+below describe the interface that existed at the time.
 
 Implementation also addressed issues found during verification:
 
@@ -41,8 +44,7 @@ STRAP_EVAL_URL=http://127.0.0.1:1234 STRAP_EVAL_MODEL=your-model \
 
 ```javascript
 const worker = create_agent({role: "implementor"});
-const task = assign_work({
-  kind: "implementation",
+const task = assign_implementation({
   assignee: worker.agent_id,
   task: "Do X, Y, and Z.",
   expected_output: "Completed changes and verification evidence."
@@ -58,14 +60,14 @@ The intended contracts are:
 
 - `create_agent` creates an idle, registered agent. It does not assign a task or
   initiate a model request. Registration means workflow eligibility is established.
-- `assign_work` creates a work item and schedules its delivery to a required,
+- The four operation-specific assignment tools create a work item and schedules its delivery to a required,
   existing assignee. It never creates an agent.
 - `reassign_work` changes an active work item's assignee to a required, existing
   agent. It never creates, resumes, or stops an agent.
 - `submit_work` records a submission and requests review. It creates no auditor.
 - `submit_audit` records a verdict and its effects on the reviewed work. It creates
   no agent or repair assignment.
-- `assign_work(kind="repair")` explicitly creates repair work from a failing audit.
+- `assign_repair` explicitly creates repair work from a failing audit.
 - `list_work` discovers tracked work without requiring a work ID, including work
   that has already been submitted, accepted, closed, or cancelled.
 
@@ -75,12 +77,14 @@ Plans remain optional. A single task can contain X, Y, and Z without creating a 
 
 ## 2. Roles and model instructions
 
-Start with the existing two execution configurations; do not add arbitrary role
-names, model-authored system prompts, or a role registry discovery tool in this change.
+The application provides fixed execution configurations. Do not add arbitrary
+role names or model-authored system prompts as assignment inputs. Research is
+covered in the [research design](RESEARCH_STATUS_DESIGN.md).
 
 | Creation role | Purpose | Eligible work kinds |
 |---|---|---|
-| `implementor` | Execute assigned tasks, including investigation, implementation, and corrections | `implementation`, `repair` |
+| `researcher` | Investigate a bounded question and submit an immutable brief | `research` |
+| `implementor` | Execute assigned implementation tasks and corrections | `implementation`, `repair` |
 | `auditor` | Independently verify a submitted outcome and record findings | `audit` |
 
 `root` is an inspection role established by session bootstrap; it is not an allowed
@@ -89,17 +93,17 @@ reassign tracked work. Role selection does not allow the model to grant capabili
 The application resolves the role to its configured provider, prompt, and tool set.
 An agent's role is immutable for its lifetime. Create another agent to change roles.
 
-Proposed `create_agent` description:
+The `create_agent` description follows this rule:
 
 > Create an idle agent with a configured role. Choose implementor to execute tasks
 > or repairs; choose auditor to independently review submitted work. Returns
-> agent_id and role. Then call assign_work with that agent_id as assignee to begin
+> agent_id and role. Then call the appropriate assignment tool with that agent_id as assignee to begin
 > tracked work. Creation alone does not start a task.
 
-Proposed root instruction in `harness/prompts.go`:
+The root instructions in `harness/prompts.go` follow this rule:
 
 > To create or spawn an agent, call create_agent with role implementor for task
-> execution or repairs, or auditor for independent review. Then call assign_work
+> execution or repairs, or auditor for independent review. Then call the appropriate assignment tool
 > with the returned agent_id as assignee. You may reuse an existing eligible agent.
 > Plans and scope are optional. Put task-specific requirements in the assignment.
 > An idle agent is not necessarily free of assigned work; inspect its assignments
@@ -137,40 +141,42 @@ The agent starts idle. Lifecycle state remains a separately observable snapshot
 through list/inspection. No task, scope, provider, tools, parent, or caller identity
 is accepted from model arguments. The bound caller becomes the parent.
 
-`assign_work` retains one public name with three strict schema branches:
+Each assignment operation has one public tool name and one strict input contract:
 
-| Kind | Required arguments | Optional arguments | Derived by application/store |
+| Tool | Required arguments | Optional arguments | Derived by application/store |
 |---|---|---|---|
-| `implementation` | `kind`, `assignee`, `task` | `context`, `expected_output`, `scope` | Owner, work ID, initial revision |
-| `audit` | `kind`, `assignee`, `work_id`, `expected_revision`, `submission_id` | None | Audit task and scope from the selected submission |
-| `repair` | `kind`, `assignee`, `work_id`, `expected_revision`, `audit_id` | None | Repair task, findings, expected output, and affected scope from the audit |
+| `assign_implementation` | `assignee`, `task` | `context`, `expected_output`, `scope` | Owner, work ID, initial revision |
+| `assign_research` | `assignee`, `task` | `context`, `expected_output` | Owner, work ID, initial revision |
+| `assign_audit` | `assignee`, `work_id`, `expected_revision`, `submission_id` | None | Audit task and scope from the selected submission |
+| `assign_repair` | `assignee`, `work_id`, `expected_revision`, `audit_id` | None | Repair task, findings, expected output, and affected scope from the audit |
 
 For audit and repair, `work_id` identifies the **original implementation work**.
 `expected_revision` is that original work's current revision. `audit_id` is a
 verdict record ID, not the audit work item's ID. These distinctions must appear in
 the tool description and examples.
 
-All branches require a nonempty assignee; omitted, empty, null, unknown, and
-incompatible values fail validation without creating an agent. Repair callers
+All assignment operations require a nonempty assignee; omitted, empty, null,
+unknown, and incompatible values fail validation without creating an agent. Repair callers
 cannot override findings, task, or scope. Audit callers cannot replace the submitted
-requirements with a new task. Keep strict branch validation in `tool.Compose`.
+requirements with a new task. The tool name supplies the internal work kind;
+payloads do not accept `kind`.
 
 ### Strict JSON decoding and normalized commands
 
-Tool calls and HTTP command bodies must use the same declarative input contracts
-before converting JSON into the shared Go request. A flat Go struct cannot tell
+Assignment tool calls and matching HTTP command bodies use the same declarative
+input contracts before converting JSON into the shared Go request. A flat Go struct cannot tell
 an omitted field from an explicitly supplied `null` or empty value after ordinary
 JSON decoding. `DisallowUnknownFields` alone cannot enforce the branch contract.
 
-Factor the existing branch types, `Parameters` values, constraints, and normalization
-functions into `tool/work_contract.go` (new). Both `AssignWork`'s composed tool and
-an exported `DecodeAssignment` function use those exact branch definitions. Schema
+The operation types, `Parameters` values, constraints, and normalization
+functions live in `tool/work_contract.go`. Both `AssignmentTools` and
+the exported `DecodeAssignment` function use those exact operation definitions. Schema
 generation and decoding must remain coupled; do not maintain a second handwritten
 HTTP schema or run a tool callback merely to validate arguments.
 
 ```go
-// Proposed pure decoders; no actor checks, handlers, or runtime side effects.
-func DecodeAssignment(raw json.RawMessage) (work.AssignmentRequest, error)
+// Pure decoders; no actor checks, handlers, or runtime side effects.
+func DecodeAssignment(name string, raw json.RawMessage) (work.AssignmentRequest, error)
 func DecodeReassignment(raw json.RawMessage) (work.ReassignRequest, error)
 func DecodeAgentCreation(raw json.RawMessage) (roster.CreateRequest, error)
 ```
@@ -181,6 +187,9 @@ workflow and work store do not acquire a dependency on `tool` for domain validat
 Do not add `UnmarshalJSON` methods to these request structs: `tool.Parameters`
 deliberately rejects custom codecs when compiling a schema.
 
+Assignment HTTP routes use the operation names (`/work/assign_implementation`,
+`/work/assign_research`, `/work/assign_audit`, and `/work/assign_repair`). The old
+`/work/assign` route and `assign_work` tool are removed, with no compatibility alias.
 The HTTP handler first validates the command envelope and retains `request` as
 `json.RawMessage`. It then calls the appropriate pure decoder and passes its
 normalized result to the shared harness operation. Missing/null requests, malformed
@@ -188,19 +197,21 @@ JSON, unknown envelope fields, and trailing values are invalid. Retain request-s
 limits and authorization before execution. Do not decode `request` into the flat
 `AssignmentRequest` first, or round-trip it through JSON to perform validation.
 
-Each assignment branch rejects every field not declared for that branch, regardless
+Each assignment operation rejects every field not declared for that operation, regardless
 of its value. For example, implementation requests with `submission_id: null`,
 `submission_id: ""`, or `audit_id: ""` are all invalid; absence is valid. Explicit
 null is invalid for optional fields too. Missing required fields, wrong scalar
 types, empty required identifiers, and nested unknown fields are invalid on both
-wire surfaces. Match exactly one branch before normalization.
+assignment wire surfaces. Select the contract by operation name before normalization.
 
 After decoding, the workflow performs the common semantic validation for tools,
 HTTP, and direct Go: valid kind, required values, no nonzero incompatible selectors,
 authority, role eligibility, and current work/submission/audit relationships. Direct
 Go values have no wire-level field-presence distinction; their zero-valued unused
 fields mean absent. Promise identical semantics for normalized commands, and
-identical JSON acceptance/rejection for the tool and HTTP wire surfaces.
+identical JSON acceptance/rejection for matching assignment tool and HTTP operations.
+This does not promise schema parity for unrelated HTTP commands, including the
+existing audit-verdict HTTP decoder.
 
 `reassign_work` requires `work_id`, `expected_revision`, and `assignee`. It addresses
 the actual active work item being moved, including a repair or audit child.
@@ -217,8 +228,7 @@ orchestration pseudocode; values come from preceding tool results):
 ```javascript
 const auditor = create_agent({role: "auditor"});
 let original = get_work({work_id: task.work_id}).work;
-assign_work({
-  kind: "audit",
+assign_audit({
   assignee: auditor.agent_id,
   work_id: original.work_id,
   expected_revision: original.revision,
@@ -227,8 +237,7 @@ assign_work({
 
 // After audit_completed reports a failing verdict:
 original = get_work({work_id: task.work_id}).work;
-const repair = assign_work({
-  kind: "repair",
+const repair = assign_repair({
   assignee: worker.agent_id, // Reuse, or explicitly create another implementor.
   work_id: original.work_id,
   expected_revision: original.revision,
@@ -244,13 +253,13 @@ const repair = assign_work({
 ```text
 implementation active
   submit_work → needs_check
-  assign_work(kind=audit) → checking + active audit child
+  assign_audit → checking + active audit child
     submit_audit(pass) → accepted + closed audit child
     submit_audit(fail) → changes_requested + closed audit child
       [owner chooses when and to whom to assign repairs]
-      assign_work(kind=repair) → changes_requested + active repair child
+      assign_repair → changes_requested + active repair child
       submit_work(repair) → needs_check + closed repair child
-      assign_work(kind=audit) → checking + new active audit child
+      assign_audit → checking + new active audit child
 ```
 
 Do not introduce a new original-work state solely to distinguish waiting for a
@@ -304,7 +313,7 @@ In one existing store mutation transaction:
    identifies an audit child, not the original implementation.
 4. Reject a second repair for the same audit. Cancellation ends the implementation
    cycle, so replacement of an active repair uses `reassign_work`, not another
-   `assign_work`. Guard this under the store lock, including concurrent requests.
+   `assign_repair`. Guard this under the store lock, including concurrent requests.
 5. Derive the repair's scope from the union of finding step IDs, ordered according
    to the original scope. For unscoped work, retain a nil scope. Preserve all
    findings in the linked immutable audit; callers cannot select only convenient

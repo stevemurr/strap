@@ -20,16 +20,16 @@ caller against the current record.
 ```text
 Root owns plan
   → create_agent(role=implementor): idle registered agent
-  → assign_work: implementation to explicit assignee over selected step IDs
+  → assign_implementation: explicit assignee over selected step IDs
   → implementor updates shared progress
   → submit_work: immutable outcome, needs_check
   → root receives review request
   → create_agent(role=auditor), or select an existing auditor
-  → assign_work: audit to explicit assignee
+  → assign_audit: explicit assignee
   → submit_audit
       pass → implementation accepted, scoped steps completed
       fail → immutable findings, original changes_requested
-               → root assign_work(kind=repair, assignee, original work/revision, audit_id)
+               → root assign_repair(assignee, original work/revision, audit_id)
                → submit_work: superseding outcome, needs_check
 ```
 
@@ -238,8 +238,11 @@ edit fields. Flat tools give status no field, require `step_id` for edits, and k
 each tool-call literal small. Workers report progress through
 `report_work_progress`; step status changes only through progress and audits.
 
-`assign_work` composes implementation, audit, and repair argument contracts; `submit_audit`
-composes pass and fail contracts. Pass accepts omitted or empty findings; fail
+`assign_implementation`, `assign_research`, `assign_audit`, and `assign_repair`
+each expose one operation-specific argument contract without a `kind` input.
+Schema generation and decoding share that contract; the adapter supplies the
+internal work kind. `submit_audit` composes pass and fail contracts and publishes
+the complete `oneOf` branches. Pass accepts omitted or empty findings; fail
 requires at least one finding.
 `submit_work` maps to its store operation. `get_audit` resolves the immutable
 outcome identified by an event’s audit ID. The tool package owns JSON contracts;
@@ -313,7 +316,7 @@ Dispatch must operate independently of whether a UI consumer is currently readin
    delegation example exercises fail → repair → pass without a model server.
 
 The application exposes one registered creation path, `create_agent(role)`, separate
-from `assign_work`. The root is registered during bootstrap. Raw controller creation
+from the assignment tools. The root is registered during bootstrap. Raw controller creation
 remains idle and does not confer tracked-work eligibility. The old task-only
 creation callback has been removed; core tests define a local `create_test_agent`.
 

@@ -46,7 +46,8 @@ Conversation controller
                 ├── provider.Provider
                 └── tool.Tool instances
                     ├── create_agent → application registration + controller (if supplied)
-                    ├── assign_work → application callback → work store (if supplied)
+                    ├── assign_implementation / assign_audit / assign_repair / assign_research
+                    │               → application callback → work store (if supplied)
                     ├── send_message → bound sender (if supplied)
                     ├── message_status → receipt lookup (if supplied)
                     └── Supplied tools
@@ -77,7 +78,7 @@ fills it in. The controller does not hold its lock while calling a model or tool
 | `tool` | `Tool.Definition`, `Tool.Call(ctx, Call) (Result, error)` | Model-visible operation and ordered text/image results |
 | `content` | `Content`, `Part`, `Image`, `Clone` | Provider-independent text/image payloads and snapshots |
 | `tool` | `Call{Arguments, Actor, Sender}` | Model arguments plus runtime-supplied caller identity and routing |
-| `tool` | `AssignWork(handle)`, `PlanTools(handle)`, `SubmitWork(handle)`, `SubmitAudit(handle)` | Tool contracts with operations supplied by the application |
+| `tool` | `AssignmentTools(handle)`, `PlanTools(handle)`, `SubmitWork(handle)`, `SubmitAudit(handle)` | Tool contracts with operations supplied by the application |
 
 The controller, agent, and inbox are concrete types. Interfaces exist for injected
 provider, tool, and outgoing-message implementations; there is no umbrella runtime
@@ -394,16 +395,16 @@ Send → controller assigns message ID and orders delivery
 
 ## Delegation and review
 
-The CLI root calls `create_agent` with role `implementor` or `auditor` to create an
-idle registered agent from a snapshotted spec. It then calls `assign_work` with an
-existing eligible assignee. Assignment never creates, stops, or resumes agents;
+The CLI root calls `create_agent` with role `researcher`, `implementor`, or
+`auditor` to create an idle registered agent from a snapshotted spec. It then calls the operation-specific
+assignment tool with an existing eligible assignee. Assignment never creates, stops, or resumes agents;
 failed assignment leaves the selected agent available. Root bootstrap is the only
 root registration path. Only root receives creation, assignment, and recovery tools.
 
 Implementors call `report_work_progress` with a work ID/revision to report progress, then
 `submit_work` to capture an immutable outcome. Submission suspends writes and
-emits a review request. The root assigns an auditor through the same `assign_work`
-tool with kind `audit`, an existing auditor assignee, original work ID/revision, and exact submission ID.
+emits a review request. The root assigns an auditor through `assign_audit`
+with an existing auditor assignee, original work ID/revision, and exact submission ID.
 
 The application owns distinct auditor specifications and role membership. Auditors
 cannot implement or repair. `submit_audit` records pass/fail atomically; a fail

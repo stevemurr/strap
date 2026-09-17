@@ -110,7 +110,7 @@ The default root prompt selects the agent workflow for explicit research,
 investigation, source review, implementation planning or change requests, and for
 answers requiring source inspection, commands, tests or file changes. Root creates
 a shared plan, breaks the task into phases, and uses create_agent/select plus
-assign_work to delegate each phase. Investigation goes to researchers;
+the operation-specific assignment tools to delegate each phase. Investigation goes to researchers;
 implementation goes to implementors and requires independent audit acceptance.
 One assignment can be one phase. Direct responses cover greetings, clarification
 and questions answerable from the conversation or general knowledge without those
@@ -545,7 +545,7 @@ The model-facing surface is:
 | Tool | Caller | Contract |
 | --- | --- | --- |
 | `create_agent(role=researcher)` | Root | Create idle researcher; no assignment yet |
-| `assign_work(kind=research)` | Root | Assign bounded investigation |
+| `assign_research` | Root | Assign bounded investigation |
 | `update_plan` | Root | Create/revise shared todo structure; retain reservation rules |
 | `get_work` | Authorized owner/assignee | Read assignment definition, lifecycle, revision, outcome references |
 | `report_work_progress` | Current worker | Record progress/findings and eligible assigned step changes |

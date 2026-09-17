@@ -681,7 +681,7 @@ idle role registration before returning. The previous raw parent/spec harness AP
 and HTTP AgentProfile resolver are removed. Raw controller creation remains below
 the application boundary. Assignment and reassignment require existing eligible
 assignees; neither creates or stops agents. Failed audits record immutable findings;
-the root explicitly starts repair with `assign_work(kind="repair", ...)`.
+the root explicitly starts repair with `assign_repair(...)`.
 
 The application agent views live in `harness/projection`, with aliases exported by
 `harness`, so inspection does not import its parent package. Live, model, HTTP,

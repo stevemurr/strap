@@ -46,7 +46,7 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `POST /agents/{agent}/tokens` | `{ "revision": N }`; explicit provider I/O (`measure` capability) |
 | `POST /messages` | `{ "to": "agent-1", "content": "..." }` |
 | `GET /receipts/{message}` | Delivery receipt |
-| `POST /work/assign`, `/reassign`, `/cancel`, `/progress`, `/plan`, `/submit`, `/audit` | `{ "actor": "agent-1", "request": ... }`; request is the corresponding public `work` type |
+| `POST /work/assign_implementation`, `/assign_audit`, `/assign_repair`, `/assign_research`, `/reassign`, `/cancel`, `/progress`, `/plan`, `/submit`, `/audit` | `{ "actor": "agent-1", "request": ... }`; assignment request is the corresponding `tool.Assign*Args` type; other requests use the corresponding public `work` type |
 | `GET /work?actor=...` | Root-only work discovery across all states; optional assignee/kind/state, limit 1–100 (default 20), or cursor plus optional limit |
 | `GET /work/{work}?actor=...` | Work inspection, including related submission/audit evidence |
 | `GET /plans/{plan}?actor=...` | Plan snapshot |
