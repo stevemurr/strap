@@ -6,6 +6,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/httpapi"
 	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 	"reflect"
 	"testing"
@@ -25,11 +26,28 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 		t.Fatal(legacy.Code)
 	}
 	impl := createHTTPWorker(t, s)
-	for _, raw := range []string{`{"kind":"implementation","task":"task"}`, `{"kind":"implementation","assignee":null,"task":"task"}`, fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task","work_id":""}`, impl), fmt.Sprintf(`{"kind":"audit","assignee":%q,"work_id":"w","expected_revision":1,"submission_id":"s","task":""}`, impl)} {
-		response := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(raw)})
+	for _, tc := range []struct {
+		action string
+		raw    string
+	}{
+		{"assign_implementation", `{"task":"task"}`},
+		{"assign_implementation", `{"assignee":null,"task":"task"}`},
+		{"assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"task","work_id":""}`, impl)},
+		{"assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"task","kind":"implementation"}`, impl)},
+		{"assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"task","context":null}`, impl)},
+		{"assign_audit", fmt.Sprintf(`{"assignee":%q,"work_id":"w","expected_revision":1,"submission_id":"s","task":""}`, impl)},
+		{"assign_audit", fmt.Sprintf(`{"assignee":%q,"work_id":"w","expected_revision":1,"audit_id":"a"}`, impl)},
+		{"assign_repair", fmt.Sprintf(`{"assignee":%q,"work_id":"w","expected_revision":1,"submission_id":"s"}`, impl)},
+		{"assign_research", fmt.Sprintf(`{"assignee":%q,"task":"task","scope":{"plan_id":"p","step_ids":["s"]}}`, impl)},
+	} {
+		response := request(t, s.http, "POST", base+"/work/"+tc.action, httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(tc.raw)})
 		if response.Code != 400 {
-			t.Fatal(raw, response.Code, response.Body.String())
+			t.Fatal(tc.action, tc.raw, response.Code, response.Body.String())
 		}
+	}
+	removed := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task"}`, impl))})
+	if removed.Code != 404 {
+		t.Fatal("removed assignment route remains available", removed.Code, removed.Body.String())
 	}
 	page, e := s.ListWork(ctx, s.Root(), work.ListQuery{})
 	if e != nil || len(page.Items) != 0 || len(s.Agents()) != 2 {
@@ -82,5 +100,24 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 	denied := request(t, s.http, "GET", base+"/work?actor="+string(impl), nil)
 	if denied.Code != 403 {
 		t.Fatal(denied.Code)
+	}
+}
+
+func TestResearchAssignmentUsesItsOperationContract(t *testing.T) {
+	ctx, s := recoverySession(t, true)
+	researcher, err := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Researcher})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := request(t, s.http, "POST", "/sessions/"+s.ID()+"/work/assign_research", httpapi.WorkRequest[tool.AssignResearchArgs]{
+		Actor:   s.Root(),
+		Request: tool.AssignResearchArgs{Assignee: researcher.AgentID, Task: "Investigate the protocol", Context: "Review its documented limits", ExpectedOutput: "A concise set of findings"},
+	})
+	var assigned work.Work
+	if err := json.Unmarshal(response.Body.Bytes(), &assigned); err != nil || response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String(), err)
+	}
+	if assigned.Kind != work.Research || assigned.Assignee != researcher.AgentID || assigned.Task != "Investigate the protocol" {
+		t.Fatal(assigned)
 	}
 }

@@ -55,7 +55,7 @@ func (f wakeRoot) Submit(_ context.Context, r provider.Request, _ provider.Obser
 				break
 			}
 		}
-		return operation("assign_work", map[string]any{"kind": "implementation", "assignee": created.AgentID, "task": "do first", "scope": map[string]any{"plan_id": p.plan.ID, "step_ids": []work.StepID{p.plan.Steps[0].ID}}})
+		return operation("assign_implementation", map[string]any{"assignee": created.AgentID, "task": "do first", "scope": map[string]any{"plan_id": p.plan.ID, "step_ids": []work.StepID{p.plan.Steps[0].ID}}})
 	case 4:
 		if err := json.Unmarshal([]byte(lastResult(r)), &p.w); err != nil {
 			return provider.Response{}, err

@@ -129,7 +129,7 @@ func TestDefaultRoleToolsPreserveCLIOrder(t *testing.T) {
 	for _, tool := range request.Tools {
 		names = append(names, tool.Name)
 	}
-	want := []string{"shell", "read_pdf", "read_file", "write_file", "edit_file", "get_audit", "get_plan", "get_work", "get_work_progress", "get_research_brief", "wait_for_input", "create_agent", "create_plan", "add_step", "edit_step", "cancel_steps", "reorder_steps", "rename_plan", "assign_work", "cancel_work", "reassign_work", "list_work", "send_message", "message_status", "stop_agent", "pause_agent", "resume_agent", "inspect_agent", "list_agents"}
+	want := []string{"shell", "read_pdf", "read_file", "write_file", "edit_file", "get_audit", "get_plan", "get_work", "get_work_progress", "get_research_brief", "wait_for_input", "create_agent", "create_plan", "add_step", "edit_step", "cancel_steps", "reorder_steps", "rename_plan", "assign_implementation", "assign_audit", "assign_repair", "assign_research", "cancel_work", "reassign_work", "list_work", "send_message", "message_status", "stop_agent", "pause_agent", "resume_agent", "inspect_agent", "list_agents"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatal(names)
 	}
@@ -149,7 +149,7 @@ func TestDefaultRoleToolsPreserveCLIOrder(t *testing.T) {
 	}
 worker:
 	for _, d := range request.Tools {
-		if d.Name == "assign_work" || d.Name == "submit_audit" {
+		if d.Name == "assign_implementation" || d.Name == "assign_audit" || d.Name == "assign_repair" || d.Name == "assign_research" || d.Name == "submit_audit" {
 			t.Fatalf("worker got %s", d.Name)
 		}
 	}

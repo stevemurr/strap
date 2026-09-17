@@ -2,7 +2,6 @@ package tool
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -15,26 +14,39 @@ type nullArgs struct {
 	} `json:"meta,omitempty"`
 }
 
-// Models send null for fields they mean to leave out. Null is treated as
-// omitted everywhere: optional fields and array elements disappear, a
-// required field set to null is reported as missing, and a top-level null is
-// still not an object.
-func TestNullMeansOmitted(t *testing.T) {
+// Omission and explicit null are different JSON values. A schema advertising a
+// string, object, or array must not silently accept null in any of those slots.
+func TestNullDoesNotMeanOmitted(t *testing.T) {
 	params, err := NewParameters[nullArgs]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := params.Decode(json.RawMessage(`{"title":"t","note":null,"tags":["a",null,"b"],"meta":{"owner":null}}`))
-	if err != nil {
-		t.Fatal(err)
+	schema := compileExportedSchema(t, params.Schema())
+	for _, raw := range []string{
+		`null`,
+		`{"title":null}`,
+		`{"title":"t","note":null}`,
+		`{"title":"t","tags":null}`,
+		`{"title":"t","tags":["a",null,"b"]}`,
+		`{"title":"t","meta":null}`,
+		`{"title":"t","meta":{"owner":null}}`,
+		`{"title":"t","unknown":null}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if err := validateExportedSchema(t, schema, json.RawMessage(raw)); err == nil {
+				t.Fatal("schema accepted null", raw)
+			}
+			if _, err := params.Decode(json.RawMessage(raw)); err == nil {
+				t.Fatal("decoder accepted null", raw)
+			}
+		})
 	}
-	if got.Title != "t" || got.Note != nil || strings.Join(got.Tags, ",") != "a,b" || got.Meta == nil || got.Meta.Owner != "" {
-		t.Fatalf("%+v", got)
-	}
-	if _, err := params.Decode(json.RawMessage(`{"title":null}`)); err == nil || !strings.Contains(err.Error(), "title is required") {
-		t.Fatalf("required null: %v", err)
-	}
-	if _, err := params.Decode(json.RawMessage(`null`)); err == nil || !strings.Contains(err.Error(), "not null") {
-		t.Fatalf("top-level null: %v", err)
+	for _, raw := range []string{`{"title":"t"}`, `{"title":"t","note":"","tags":[],"meta":{}}`} {
+		if err := validateExportedSchema(t, schema, json.RawMessage(raw)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := params.Decode(json.RawMessage(raw)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

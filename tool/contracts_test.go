@@ -123,12 +123,12 @@ func TestSenderAndLedgerToolCallbacks(t *testing.T) {
 			}
 			return Text(string(r.ID)), nil
 		}), `{"work_id":"selected","expected_revision":2,"assignee":"new"}`},
-		{AssignWork(func(_ context.Context, _ Call, r AssignWorkArgs) (Result, error) {
+		{assignmentTool(t, "assign_audit", func(_ context.Context, _ Call, r work.AssignmentRequest) (Result, error) {
 			if r.Kind != work.AuditWork || r.ExpectedRevision != 2 || r.SubmissionID != "sub" {
 				t.Error(r)
 			}
 			return Text(string(r.WorkID)), nil
-		}), `{"kind":"audit","assignee":"auditor","work_id":"selected","expected_revision":2,"submission_id":"sub"}`},
+		}), `{"assignee":"auditor","work_id":"selected","expected_revision":2,"submission_id":"sub"}`},
 	}
 	for _, op := range operations {
 		result, err := op.tool.Call(context.Background(), Call{Arguments: json.RawMessage(op.raw)})
@@ -173,13 +173,13 @@ func TestCompositionRequiresNameAndBranches(t *testing.T) {
 			t.Fatal("invalid composition accepted")
 		}
 	}
-	op := AssignWork(func(_ context.Context, _ Call, a AssignWorkArgs) (Result, error) {
+	op := assignmentTool(t, "assign_implementation", func(_ context.Context, _ Call, a work.AssignmentRequest) (Result, error) {
 		if a.Task != "task" || a.Kind != work.Implementation {
 			t.Error(a)
 		}
 		return Text("assigned"), nil
 	})
-	if result, err := op.Call(context.Background(), Call{Arguments: json.RawMessage(`{"kind":"implementation","assignee":"worker","task":"task"}`)}); err != nil || result.Content.Text() != "assigned" {
+	if result, err := op.Call(context.Background(), Call{Arguments: json.RawMessage(`{"assignee":"worker","task":"task"}`)}); err != nil || result.Content.Text() != "assigned" {
 		t.Fatal(result, err)
 	}
 }

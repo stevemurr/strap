@@ -62,7 +62,7 @@ func TestScriptValidatesAssignmentsAndWorkerCapabilities(t *testing.T) {
 			case "unknown worker work":
 				request.Messages[0].Envelope.Work = &work.Work{ID: "missing"}
 			case "delegating worker":
-				request.Tools = []provider.ToolDefinition{{Name: "assign_work"}}
+				request.Tools = []provider.ToolDefinition{{Name: "assign_implementation"}}
 			case "implementing auditor":
 				sub, err := store.SubmitWork("worker", work.SubmitRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Summary: "ready"})
 				if err != nil {

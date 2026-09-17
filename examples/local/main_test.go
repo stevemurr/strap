@@ -58,14 +58,16 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 		if last.Role == "user" || last.Role == "tool" && (impl != "" || auditor != "") {
 			for _, op := range request.Tools {
 				switch op.Function.Name {
-				case "assign_work":
+				case "assign_audit":
 					if env.Event != nil && env.Event.Kind == work.ReviewRequested {
 						item := env.Event.Work
-						name = "assign_work"
-						args = map[string]any{"kind": "audit", "assignee": auditor, "work_id": item.ID, "expected_revision": item.Revision, "submission_id": item.LatestSubmissionID}
-					} else if env.Kind == message.Instruction {
-						name = "assign_work"
-						args = map[string]any{"kind": "implementation", "assignee": impl, "task": "calculate two plus two"}
+						name = "assign_audit"
+						args = map[string]any{"assignee": auditor, "work_id": item.ID, "expected_revision": item.Revision, "submission_id": item.LatestSubmissionID}
+					}
+				case "assign_implementation":
+					if env.Kind == message.Instruction {
+						name = "assign_implementation"
+						args = map[string]any{"assignee": impl, "task": "calculate two plus two"}
 					}
 				case "submit_work":
 					if env.Work != nil {
@@ -80,7 +82,7 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 				}
 			}
 		}
-		if name == "assign_work" {
+		if name == "assign_audit" || name == "assign_implementation" {
 			if env.Event != nil && env.Event.Kind == work.ReviewRequested {
 				if auditor == "" {
 					name = "create_agent"

@@ -431,8 +431,10 @@ func workCall[T, R any](w http.ResponseWriter, r *http.Request, fn func(context.
 }
 func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, action string) {
 	switch action {
-	case "assign":
-		decodedCall(w, r, tool.DecodeAssignment, s.AssignWork)
+	case "assign_implementation", "assign_audit", "assign_repair", "assign_research":
+		decodedCall(w, r, func(raw json.RawMessage) (work.AssignmentRequest, error) {
+			return tool.DecodeAssignment(action, raw)
+		}, s.AssignWork)
 	case "reassign":
 		decodedCall(w, r, tool.DecodeReassignment, s.ReassignWork)
 	case "cancel":

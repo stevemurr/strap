@@ -17,6 +17,7 @@ import (
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/httpapi"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -205,7 +206,7 @@ func TestHTTPWorkArtifactRoutes(t *testing.T) {
 	_, s := recoverySession(t, true)
 	base := "/sessions/" + s.ID()
 	worker := createHTTPWorker(t, s)
-	w := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[work.AssignmentRequest]{Actor: s.Root(), Request: work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "task"}})
+	w := request(t, s.http, "POST", base+"/work/assign_implementation", httpapi.WorkRequest[tool.AssignImplementationArgs]{Actor: s.Root(), Request: tool.AssignImplementationArgs{Assignee: worker, Task: "task"}})
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

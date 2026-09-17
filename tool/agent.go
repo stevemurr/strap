@@ -60,7 +60,7 @@ func DecodeAgentCreation(raw json.RawMessage) (roster.CreateRequest, error) {
 // CreateAgent creates an idle registered execution agent; assignment is separate.
 func CreateAgent(handle Handler[roster.CreateRequest]) Tool {
 	return Func[roster.CreateRequest]{Spec: Definition[roster.CreateRequest]{
-		Name: "create_agent", Description: "Create an idle agent. Choose implementor for tasks or repairs, auditor for independent review, or researcher for investigation. Returns agent_id and role. Then call assign_work with agent_id as assignee. Creation alone does not start a task.", Parameters: creationParameters,
+		Name: "create_agent", Description: "Create an idle agent. Choose implementor for tasks or repairs, auditor for independent review, or researcher for investigation. Returns agent_id and role. Then call assign_implementation, assign_repair, assign_audit, or assign_research with agent_id as assignee. Creation alone does not start a task.", Parameters: creationParameters,
 	}, Invoke: func(ctx context.Context, c Call, r roster.CreateRequest) (Result, error) { return handle(ctx, c, r) }}
 }
 

@@ -40,7 +40,7 @@ func (p *rootDies) Submit(_ context.Context, r provider.Request, _ provider.Obse
 				break
 			}
 		}
-		return call("assign_work", fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"keep busy"}`, assignee)), nil
+		return call("assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"keep busy"}`, assignee)), nil
 	default:
 		return provider.Response{}, errors.New("model exploded")
 	}

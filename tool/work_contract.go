@@ -4,116 +4,159 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/work"
-	"strings"
 )
 
-// A branch couples its schema, pure decoding, and normalization. HTTP never
-// executes a tool callback to decode arguments.
+// Each operation owns one contract for its schema, tool calls, and HTTP decoding.
+// The operation name selects the command; its arguments contain no discriminator.
 type assignmentContract interface {
+	name() string
 	tool(Handler[work.AssignmentRequest]) Tool
 	decode(json.RawMessage) (work.AssignmentRequest, error)
 }
-type assignmentBranch[A any] struct {
-	name       string
-	parameters Parameters[A]
+
+type assignmentOperation[A any] struct {
+	definition Definition[A]
 	normalize  func(A) work.AssignmentRequest
 }
 
-func (b assignmentBranch[A]) tool(h Handler[work.AssignmentRequest]) Tool {
-	return Func[A]{Spec: Definition[A]{Name: b.name, Parameters: b.parameters, Bookkeeping: []string{"expected_revision"}}, Invoke: func(ctx context.Context, c Call, a A) (Result, error) {
-		r := b.normalize(a)
-		if err := r.Validate(); err != nil {
-			return Result{}, err
-		}
-		return h(ctx, c, r)
-	}}
+func (o assignmentOperation[A]) name() string { return o.definition.Name }
+
+func (o assignmentOperation[A]) command(a A) (work.AssignmentRequest, error) {
+	r := o.normalize(a)
+	return r, r.Validate()
 }
-func (b assignmentBranch[A]) decode(raw json.RawMessage) (work.AssignmentRequest, error) {
-	a, err := b.parameters.Decode(raw)
+
+func (o assignmentOperation[A]) tool(h Handler[work.AssignmentRequest]) Tool {
+	return Func[A]{
+		Spec: o.definition,
+		Invoke: func(ctx context.Context, c Call, a A) (Result, error) {
+			r, err := o.command(a)
+			if err != nil {
+				return Result{}, err
+			}
+			return h(ctx, c, r)
+		},
+	}
+}
+
+func (o assignmentOperation[A]) decode(raw json.RawMessage) (work.AssignmentRequest, error) {
+	a, err := o.definition.Parameters.Decode(raw)
 	if err != nil {
 		return work.AssignmentRequest{}, err
 	}
-	return b.normalize(a), nil
+	return o.command(a)
 }
 
-type implementationArgs struct {
-	Kind           work.Kind        `json:"kind"`
+// AssignImplementationArgs starts new implementation work for an existing agent.
+type AssignImplementationArgs struct {
 	Assignee       identity.ActorID `json:"assignee"`
 	Task           string           `json:"task"`
 	Context        string           `json:"context,omitempty"`
 	ExpectedOutput string           `json:"expected_output,omitempty"`
 	Scope          *work.Scope      `json:"scope,omitempty"`
 }
-type auditArgs struct {
-	Kind     work.Kind        `json:"kind"`
+
+// AssignAuditArgs binds an independent audit to an original work and submission.
+type AssignAuditArgs struct {
 	Assignee identity.ActorID `json:"assignee"`
 	work.WorkTarget
 	SubmissionID work.SubmissionID `json:"submission_id"`
 }
-type repairArgs struct {
-	Kind     work.Kind        `json:"kind"`
+
+// AssignRepairArgs binds repairs to the failed audit of an original work.
+type AssignRepairArgs struct {
 	Assignee identity.ActorID `json:"assignee"`
 	work.WorkTarget
 	AuditID work.AuditID `json:"audit_id"`
 }
 
-var implementationContract = assignmentBranch[implementationArgs]{"assign_implementation", parameters[implementationArgs](
-	Description("task", "Implementation only. Omit task for audit and repair; their task is derived from the original work."),
-	Description("context", "Implementation only; omit for audit and repair."),
-	Description("expected_output", "Implementation only; omit for audit and repair."),
-	Description("scope", "Implementation only; audit and repair scopes are derived and must be omitted."),
-	Enum("kind", "implementation"), MinLength("assignee", 1), MinLength("task", 1), MinLength("scope.plan_id", 1), MinItems("scope.step_ids", 1), UniqueItems("scope.step_ids"), MinLength("scope.step_ids[]", 1)),
-	func(a implementationArgs) work.AssignmentRequest {
-		return work.AssignmentRequest{Kind: a.Kind, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput, Scope: a.Scope}
-	},
-}
-var auditContract = assignmentBranch[auditArgs]{"assign_audit", parameters[auditArgs](
-	Enum("kind", "audit"), MinLength("assignee", 1), MinLength("work_id", 1), Minimum("expected_revision", 1), Description("expected_revision", "Audit or repair only: use the original work revision. Omit for new implementation assignments, including reuse of an existing agent."), MinLength("submission_id", 1)),
-	func(a auditArgs) work.AssignmentRequest {
-		return work.AssignmentRequest{Kind: a.Kind, Assignee: a.Assignee, WorkID: a.ID, ExpectedRevision: a.ExpectedRevision, SubmissionID: a.SubmissionID}
-	},
-}
-var repairContract = assignmentBranch[repairArgs]{"assign_repair", parameters[repairArgs](
-	Enum("kind", "repair"), MinLength("assignee", 1), MinLength("work_id", 1), Minimum("expected_revision", 1), Description("expected_revision", "Audit or repair only: use the original work revision. Omit for new implementation assignments, including reuse of an existing agent."), MinLength("audit_id", 1)),
-	func(a repairArgs) work.AssignmentRequest {
-		return work.AssignmentRequest{Kind: a.Kind, Assignee: a.Assignee, WorkID: a.ID, ExpectedRevision: a.ExpectedRevision, AuditID: a.AuditID}
-	},
-}
-
-type researchArgs struct {
-	Kind           work.Kind        `json:"kind"`
+// AssignResearchArgs starts a bounded investigation for an existing researcher.
+type AssignResearchArgs struct {
 	Assignee       identity.ActorID `json:"assignee"`
 	Task           string           `json:"task"`
 	Context        string           `json:"context,omitempty"`
 	ExpectedOutput string           `json:"expected_output,omitempty"`
 }
 
-var researchContract = assignmentBranch[researchArgs]{"assign_research", parameters[researchArgs](Enum("kind", "research"), MinLength("assignee", 1), MinLength("task", 1)), func(a researchArgs) work.AssignmentRequest {
-	return work.AssignmentRequest{Kind: a.Kind, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput}
-}}
+var implementationContract = assignmentOperation[AssignImplementationArgs]{
+	definition: Definition[AssignImplementationArgs]{
+		Name:        "assign_implementation",
+		Description: "Assign new implementation work to an existing implementor. Supply a task and optional context, expected_output, and scope containing plan_id and step_ids. Creates tracked work; the receipt is registration, not completion. Use reassign_work to transfer existing work.",
+		Parameters: parameters[AssignImplementationArgs](
+			MinLength("assignee", 1), MinLength("task", 1),
+			MinLength("scope.plan_id", 1), MinItems("scope.step_ids", 1),
+			UniqueItems("scope.step_ids"), MinLength("scope.step_ids[]", 1)),
+	},
+	normalize: func(a AssignImplementationArgs) work.AssignmentRequest {
+		return work.AssignmentRequest{Kind: work.Implementation, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput, Scope: a.Scope}
+	},
+}
+
+var auditContract = assignmentOperation[AssignAuditArgs]{
+	definition: Definition[AssignAuditArgs]{
+		Name:        "assign_audit",
+		Description: "Assign an independent audit of a specific submission to an existing auditor. Use the original implementation work_id, its current revision as expected_revision, and latest_submission_id as submission_id. The auditor must not have implemented or repaired this submission chain. Task and scope are derived from the original work.",
+		Bookkeeping: []string{"expected_revision"},
+		Parameters: parameters[AssignAuditArgs](
+			MinLength("assignee", 1), MinLength("work_id", 1), Minimum("expected_revision", 1),
+			Description("expected_revision", "Use the current revision of the original implementation work."),
+			MinLength("submission_id", 1)),
+	},
+	normalize: func(a AssignAuditArgs) work.AssignmentRequest {
+		return work.AssignmentRequest{Kind: work.AuditWork, Assignee: a.Assignee, WorkID: a.ID, ExpectedRevision: a.ExpectedRevision, SubmissionID: a.SubmissionID}
+	},
+}
+
+var repairContract = assignmentOperation[AssignRepairArgs]{
+	definition: Definition[AssignRepairArgs]{
+		Name:        "assign_repair",
+		Description: "Assign repairs for a failed audit to an existing implementor. Use the original implementation work_id, its current revision as expected_revision, and the failing verdict's audit_id. Task, findings, and scope are derived from the original work and audit. After repair submission, assign an independent audit of the original work's latest submission.",
+		Bookkeeping: []string{"expected_revision"},
+		Parameters: parameters[AssignRepairArgs](
+			MinLength("assignee", 1), MinLength("work_id", 1), Minimum("expected_revision", 1),
+			Description("expected_revision", "Use the current revision of the original implementation work."),
+			MinLength("audit_id", 1)),
+	},
+	normalize: func(a AssignRepairArgs) work.AssignmentRequest {
+		return work.AssignmentRequest{Kind: work.Repair, Assignee: a.Assignee, WorkID: a.ID, ExpectedRevision: a.ExpectedRevision, AuditID: a.AuditID}
+	},
+}
+
+var researchContract = assignmentOperation[AssignResearchArgs]{
+	definition: Definition[AssignResearchArgs]{
+		Name:        "assign_research",
+		Description: "Assign a bounded investigation to an existing researcher. Supply the question as task and optional context and expected_output. Include relevant plan information in context. Creates tracked research work; the receipt is registration, not findings or completion.",
+		Parameters:  parameters[AssignResearchArgs](MinLength("assignee", 1), MinLength("task", 1)),
+	},
+	normalize: func(a AssignResearchArgs) work.AssignmentRequest {
+		return work.AssignmentRequest{Kind: work.Research, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput}
+	},
+}
 
 func assignmentContracts() []assignmentContract {
 	return []assignmentContract{implementationContract, auditContract, repairContract, researchContract}
 }
-func DecodeAssignment(raw json.RawMessage) (work.AssignmentRequest, error) {
-	var selected work.AssignmentRequest
-	matches := 0
-	failures := []string{}
-	for _, b := range assignmentContracts() {
-		a, err := b.decode(raw)
-		if err != nil {
-			failures = append(failures, err.Error())
-			continue
+
+// AssignmentTools exposes each assignment operation using its complete contract.
+func AssignmentTools(h Handler[work.AssignmentRequest]) []Tool {
+	var tools []Tool
+	for _, operation := range assignmentContracts() {
+		tools = append(tools, operation.tool(h))
+	}
+	return tools
+}
+
+// DecodeAssignment validates the named operation without executing a tool handler.
+func DecodeAssignment(name string, raw json.RawMessage) (work.AssignmentRequest, error) {
+	for _, operation := range assignmentContracts() {
+		if operation.name() == name {
+			return operation.decode(raw)
 		}
-		matches++
-		selected = a
 	}
-	if matches != 1 {
-		return work.AssignmentRequest{}, fmt.Errorf("%w: assignment must match exactly one operation: %s", work.ErrInvalid, strings.Join(failures, "; "))
-	}
-	return selected, selected.Validate()
+	return work.AssignmentRequest{}, fmt.Errorf("%w: unknown assignment operation %q", work.ErrInvalid, name)
 }
 
 var reassignmentParameters = parameters[work.ReassignRequest](MinLength("work_id", 1), Minimum("expected_revision", 1), MinLength("assignee", 1))

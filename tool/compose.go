@@ -38,15 +38,11 @@ func Compose(definition provider.ToolDefinition, branches ...Tool) (Tool, error)
 	return composeTool(definition, "", branches...)
 }
 
-// ComposeBy is Compose for alternatives that one field tells apart, such as
-// assign_work's kind or submit_audit's verdict. Every branch must constrain
-// field to exactly one enum value. Instead of a oneOf, the advertised schema
-// is one flat object: the union of the branches' properties, field as a single
-// enum of every branch value, and a top-level required naming field plus
-// every property all branches require. Models that flatten or ignore oneOf
-// otherwise never learn that the field is mandatory or what it accepts.
-// Dispatch reads field and runs that branch's strict decode, so a rejection
-// states one form's rule instead of one contradictory verdict per form.
+// ComposeBy is Compose for alternatives selected by a required field, such as
+// submit_audit's verdict. Every branch must require field and constrain it to
+// exactly one enum value. Complete branch schemas remain authoritative under
+// oneOf; top-level properties only make their common shape easier to discover.
+// Dispatch runs the selected branch's strict decode and reports its error.
 func ComposeBy(field string, definition provider.ToolDefinition, branches ...Tool) (Tool, error) {
 	if field == "" {
 		return nil, fmt.Errorf("composition discriminator must be named")
@@ -119,6 +115,7 @@ func discriminatorValues(schemas []json.RawMessage, field string) ([]string, map
 	byValue := map[string]int{}
 	for i, raw := range schemas {
 		var schema struct {
+			Required   []string `json:"required"`
 			Properties map[string]struct {
 				Enum []string `json:"enum"`
 			} `json:"properties"`
@@ -130,6 +127,9 @@ func discriminatorValues(schemas []json.RawMessage, field string) ([]string, map
 		if !ok || len(property.Enum) != 1 || property.Enum[0] == "" {
 			return nil, nil, fmt.Errorf("branch %d must constrain %s to exactly one enum value", i+1, field)
 		}
+		if !slices.Contains(schema.Required, field) {
+			return nil, nil, fmt.Errorf("branch %d must require discriminator %s", i+1, field)
+		}
 		if _, dup := byValue[property.Enum[0]]; dup {
 			return nil, nil, fmt.Errorf("branches share %s value %q", field, property.Enum[0])
 		}
@@ -139,31 +139,40 @@ func discriminatorValues(schemas []json.RawMessage, field string) ([]string, map
 	return values, byValue, nil
 }
 
-// discriminatedSchema flattens the branches into one object schema keyed by
-// the discriminator; see ComposeBy.
+// discriminatedSchema preserves every branch constraint. RawMessage keeps
+// integer bounds exact while adding top-level hints and discriminator values.
 func discriminatedSchema(schemas []json.RawMessage, field string, values []string) (json.RawMessage, error) {
 	hints, err := compositionHints(schemas, values, "Only when "+field+" is ")
 	if err != nil {
 		return nil, err
 	}
-	var schema map[string]any
+	var schema struct {
+		Type       string                     `json:"type"`
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+		OneOf      []json.RawMessage          `json:"oneOf"`
+	}
 	if err := json.Unmarshal(hints, &schema); err != nil {
 		return nil, err
 	}
-	properties, _ := schema["properties"].(map[string]any)
-	if properties == nil {
-		properties = map[string]any{}
+	if schema.Properties == nil {
+		schema.Properties = make(map[string]json.RawMessage)
 	}
-	properties[field] = map[string]any{"type": "string", "enum": values, "description": "Selects the operation; which other fields apply depends on it."}
-	schema["type"] = "object"
-	schema["properties"] = properties
-	required := []string{field}
+	schema.Properties[field], err = json.Marshal(struct {
+		Type string   `json:"type"`
+		Enum []string `json:"enum"`
+	}{Type: "string", Enum: values})
+	if err != nil {
+		return nil, err
+	}
+	schema.Type = "object"
+	schema.Required = []string{field}
 	for _, name := range requiredByAll(schemas) {
 		if name != field {
-			required = append(required, name)
+			schema.Required = append(schema.Required, name)
 		}
 	}
-	schema["required"] = required
+	schema.OneOf = schemas
 	return json.Marshal(schema)
 }
 

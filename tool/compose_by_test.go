@@ -10,73 +10,59 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-// A discriminated composition advertises one flat object: the discriminator
-// as a required enum, every branch property with a note about which values
-// accept it, and no oneOf for a tool parser to flatten or drop.
-func TestDiscriminatedSchemaIsOneFlatObject(t *testing.T) {
-	op := AssignWork(func(context.Context, Call, work.AssignmentRequest) (Result, error) { return Text("ok"), nil })
+// A discriminated composition retains every branch constraint in oneOf while
+// keeping the discriminator and common properties visible at the top level.
+func TestDiscriminatedSchemaRetainsExactBranches(t *testing.T) {
+	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { return Text("ok"), nil })
 	var schema struct {
-		Type       string   `json:"type"`
-		Required   []string `json:"required"`
+		Type       string            `json:"type"`
+		Required   []string          `json:"required"`
+		OneOf      []json.RawMessage `json:"oneOf"`
 		Properties map[string]struct {
-			Enum        []string `json:"enum"`
-			Description string   `json:"description"`
+			Enum []string `json:"enum"`
 		} `json:"properties"`
 	}
 	raw := op.Definition().Parameters
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "oneOf") || schema.Type != "object" {
-		t.Fatalf("not a flat object: %s", raw)
+	if len(schema.OneOf) != 2 || schema.Type != "object" {
+		t.Fatalf("lost audit branch constraints: %s", raw)
 	}
-	if got := schema.Properties["kind"].Enum; strings.Join(got, ",") != "implementation,audit,repair,research" {
-		t.Fatalf("kind enum %v", got)
+	if got := schema.Properties["verdict"].Enum; strings.Join(got, ",") != "pass,fail" {
+		t.Fatalf("verdict enum %v", got)
 	}
-	if strings.Join(schema.Required, ",") != "kind,assignee" {
+	if strings.Join(schema.Required, ",") != "verdict,expected_revision,submission_id,summary,work_id" {
 		t.Fatalf("required %v", schema.Required)
-	}
-	for field, want := range map[string]string{
-		"work_id":       "Only when kind is audit or repair",
-		"audit_id":      "Only when kind is repair",
-		"submission_id": "Only when kind is audit",
-		"scope":         "Only when kind is implementation",
-		"assignee":      "",
-	} {
-		if got := schema.Properties[field].Description; !strings.Contains(got, want) {
-			t.Fatalf("%s: %q lacks %q", field, got, want)
-		}
 	}
 }
 
 // Dispatch reads the discriminator and reports one form's rule: a missing or
 // unknown value names the allowed values, and a wrong field names the form.
 func TestDiscriminatedDispatchReportsOneForm(t *testing.T) {
-	var got work.AssignmentRequest
-	op := AssignWork(func(_ context.Context, _ Call, r work.AssignmentRequest) (Result, error) {
+	var got work.AuditRequest
+	op := SubmitAudit(func(_ context.Context, _ Call, r work.AuditRequest) (Result, error) {
 		got = r
 		return Text("ok"), nil
 	})
 	call := func(raw string) error {
-		_, err := op.Call(context.Background(), Call{Actor: "root", Arguments: []byte(raw)})
+		_, err := op.Call(context.Background(), Call{Actor: "auditor", Arguments: []byte(raw)})
 		return err
 	}
-	if err := call(`{"assignee":"agent-2","task":"implement it","context":"c","expected_output":"e"}`); err == nil || !strings.Contains(err.Error(), "requires kind: one of implementation, audit, repair, research") {
-		t.Fatalf("missing kind: %v", err)
+	if err := call(`{"work_id":"w","expected_revision":1,"submission_id":"s","summary":"ok"}`); err == nil || !strings.Contains(err.Error(), "requires verdict: one of pass, fail") {
+		t.Fatalf("missing verdict: %v", err)
 	}
-	if err := call(`{"kind":"review","assignee":"agent-2"}`); err == nil || !strings.Contains(err.Error(), `kind must be one of implementation, audit, repair, research, not "review"`) {
-		t.Fatalf("unknown kind: %v", err)
+	if err := call(`{"verdict":"maybe","work_id":"w","expected_revision":1,"submission_id":"s","summary":"ok"}`); err == nil || !strings.Contains(err.Error(), `verdict must be one of pass, fail, not "maybe"`) {
+		t.Fatalf("unknown verdict: %v", err)
 	}
-	err := call(`{"kind":"audit","assignee":"agent-3","work_id":"w","expected_revision":2,"submission_id":"s","task":"extra"}`)
-	if err == nil || !strings.HasPrefix(err.Error(), "assign_work with kind audit: ") || !strings.Contains(err.Error(), "task is not an allowed field") || strings.Contains(err.Error(), "form 1") {
-		t.Fatalf("wrong field for the audit form: %v", err)
+	err := call(`{"verdict":"pass","work_id":"w","expected_revision":1,"submission_id":"s","summary":"ok","task":"extra"}`)
+	if err == nil || !strings.HasPrefix(err.Error(), "submit_audit with verdict pass: ") || !strings.Contains(err.Error(), "task is not an allowed field") || strings.Contains(err.Error(), "form 1") {
+		t.Fatalf("wrong field for the pass form: %v", err)
 	}
-	if err := call(`{"kind":"implementation","assignee":"agent-2","task":"implement it"}`); err != nil || got.Kind != work.Implementation || got.Assignee != "agent-2" {
-		t.Fatalf("valid implementation: %v %+v", err, got)
+	if err := call(`{"verdict":"pass","work_id":"w","expected_revision":1,"submission_id":"s","summary":"checked"}`); err != nil || got.Verdict != work.Verdict("pass") || got.Summary != "checked" {
+		t.Fatalf("valid audit: %v %+v", err, got)
 	}
-	audit := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { return Text("ok"), nil })
-	_, err = audit.Call(context.Background(), Call{Actor: "auditor", Arguments: []byte(`{"verdict":"fail","work_id":"w","expected_revision":1,"submission_id":"s","summary":"broken"}`)})
-	if err == nil || !strings.HasPrefix(err.Error(), "submit_audit with verdict fail: ") || !strings.Contains(err.Error(), "findings") {
+	if err := call(`{"verdict":"fail","work_id":"w","expected_revision":1,"submission_id":"s","summary":"broken"}`); err == nil || !strings.HasPrefix(err.Error(), "submit_audit with verdict fail: ") || !strings.Contains(err.Error(), "findings") {
 		t.Fatalf("fail without findings: %v", err)
 	}
 }
@@ -98,6 +84,13 @@ func TestDiscriminatedCompositionRejectsUnpinnedBranches(t *testing.T) {
 	}
 	if _, err := ComposeBy("", provider.ToolDefinition{Name: "t"}, one); err == nil {
 		t.Fatal("unnamed discriminator accepted")
+	}
+	type optional struct {
+		Kind string `json:"kind,omitempty"`
+	}
+	optionalBranch := builtin("optional", "", func(context.Context, Call, optional) (Result, error) { return Text("ok"), nil }, Enum("kind", "optional"))
+	if _, err := ComposeBy("kind", provider.ToolDefinition{Name: "t"}, optionalBranch); err == nil {
+		t.Fatal("optional discriminator accepted despite required dispatch")
 	}
 }
 

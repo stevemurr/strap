@@ -155,11 +155,11 @@ func (s *Session) RootTools() []tool.Tool {
 		v, e := s.UpdatePlan(ctx, c.Actor, u)
 		return result(v, e)
 	})...)
+	tools = append(tools, tool.AssignmentTools(func(ctx context.Context, c tool.Call, r work.AssignmentRequest) (tool.Result, error) {
+		v, err := s.AssignWork(ctx, c.Actor, r)
+		return result(v, err)
+	})...)
 	return append(tools,
-		tool.AssignWork(func(ctx context.Context, c tool.Call, r tool.AssignWorkArgs) (tool.Result, error) {
-			v, err := s.AssignWork(ctx, c.Actor, r)
-			return result(v, err)
-		}),
 		tool.CancelWork(func(ctx context.Context, c tool.Call, r work.CancelRequest) (tool.Result, error) {
 			v, e := s.CancelWork(ctx, c.Actor, r)
 			return result(v, e)

@@ -192,8 +192,8 @@ func TestAgentDiscoveryLive(t *testing.T) {
 					}
 					created = true
 				}
-				if activity.Call.Name == "assign_work" {
-					r, e := tool.DecodeAssignment(activity.Call.Arguments)
+				if activity.Call.Name == "assign_implementation" || activity.Call.Name == "assign_audit" || activity.Call.Name == "assign_repair" || activity.Call.Name == "assign_research" {
+					r, e := tool.DecodeAssignment(activity.Call.Name, activity.Call.Arguments)
 					if e != nil {
 						t.Fatal(e)
 					}
