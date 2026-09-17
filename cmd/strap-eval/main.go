@@ -25,16 +25,19 @@ import (
 )
 
 const usage = `usage:
-  strap-eval run       [-ladder DIR] [-out DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N] [-ui auto|tui|plain] [model flags]
+  strap-eval run       [-ladder DIR] [-out DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N] [-ui auto|tui|plain|quiet] [-q] [model flags]
   strap-eval selfcheck [-ladder DIR] [-tier easy,medium,hard] [-task ID,...] [-parallel N]
   strap-eval list      [-ladder DIR] [-tier easy,medium,hard] [-task ID,...]
   strap-eval report    RUN_DIR
+  strap-eval interaction list|run|report [options]
 
 run records each task under RUN_DIR/<task>/ (trace.jsonl, workspace/, result.json)
 and appends RUN_DIR/results.jsonl; rerun with the same -out to resume.
 run shows live progress in a terminal and writes reports on completion (-report=false disables).
+Use -ui quiet (or -q) for scripts: no TUI or progress logs, only the final summary and report paths.
 selfcheck proves every hidden test fails on the stub and passes on the reference.
 report reads a run directory and writes report.md and report.json beside it.
+interaction evaluates bounded coordination decisions; use interaction -help for options.
 `
 
 func main() {
@@ -63,6 +66,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return listCmd(args[1:], stdout, stderr)
 	case "report":
 		return reportCmd(ctx, args[1:], stdout, stderr)
+	case "interaction":
+		return interactionCmd(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return nil
@@ -146,7 +151,8 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	sel.flags(fs)
 	out := fs.String("out", "", "Run directory (default eval/results/<commit>_<profile>_<timestamp>)")
 	parallel := fs.Int("parallel", 1, "Concurrent sessions")
-	ui := fs.String("ui", "auto", "Progress display: auto, tui, or plain")
+	ui := fs.String("ui", "auto", "Progress display: auto, tui, plain, or quiet")
+	quietMode := fs.Bool("q", false, "Disable the TUI and progress logs (overrides -ui with quiet)")
 	report := fs.Bool("report", true, "Write report.md and report.json on completion")
 	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
@@ -166,7 +172,11 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if *parallel < 1 {
 		return errors.New("parallel must be at least 1")
 	}
-	interactive, err := useTUI(*ui, os.Stdin, stdout)
+	displayMode := *ui
+	if *quietMode {
+		displayMode = "quiet"
+	}
+	interactive, err := useTUI(displayMode, os.Stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -189,8 +199,12 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if *out == "" {
 		*out = filepath.Join("eval", "results", eval.RunName(commit, profileName, time.Now()))
 	}
-	fmt.Fprintf(stderr, "model %s at %s; results in %s\n", cfg.Model.Model, cfg.Model.BaseURL, *out)
-	opts := eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: stderr, Quiet: *quiet, Idle: *idle, Scratch: *scratch, Commit: commit, Profile: profileName}
+	log := stderr
+	if displayMode == "quiet" {
+		log = io.Discard
+	}
+	fmt.Fprintf(log, "model %s at %s; results in %s\n", cfg.Model.Model, cfg.Model.BaseURL, *out)
+	opts := eval.Options{Config: cfg, Ladder: sel.ladder, Output: *out, Parallel: *parallel, Filter: sel.filter(), Log: log, Quiet: *quiet, Idle: *idle, Scratch: *scratch, Commit: commit, Profile: profileName}
 	var results []eval.Result
 	if interactive {
 		results, err = tui.RunEval(ctx, opts, os.Stdin, stdout)
@@ -211,7 +225,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 		}
 	}
 	if err == nil && *report {
-		fmt.Fprintln(stderr, "writing reports…")
+		fmt.Fprintln(log, "writing reports…")
 		rep, reportErr := eval.Analyze(ctx, *out)
 		if reportErr == nil {
 			reportErr = eval.WriteReport(rep)
@@ -230,7 +244,7 @@ func useTUI(mode string, input io.Reader, output io.Writer) (bool, error) {
 	case "auto":
 		ci := os.Getenv("CI")
 		return isTerminal(input) && isTerminal(output) && os.Getenv("TERM") != "dumb" && (ci == "" || ci == "false" || ci == "0"), nil
-	case "plain":
+	case "plain", "quiet":
 		return false, nil
 	case "tui":
 		if !isTerminal(input) || !isTerminal(output) {
@@ -238,7 +252,7 @@ func useTUI(mode string, input io.Reader, output io.Writer) (bool, error) {
 		}
 		return true, nil
 	default:
-		return false, fmt.Errorf("invalid ui %q: use auto, tui, or plain", mode)
+		return false, fmt.Errorf("invalid ui %q: use auto, tui, plain, or quiet", mode)
 	}
 }
 

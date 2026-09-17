@@ -74,7 +74,7 @@ func (p *script) delegate(r provider.Request, n int32) (provider.Response, error
 			}
 			break
 		}
-		return call("assign_work", fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"Implement Answer in probe.go"}`, assignee)), nil
+		return call("assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"Implement Answer in probe.go"}`, assignee)), nil
 	default:
 		return provider.Response{Content: "Waiting for the implementor.", ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("wait-%d", n), Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
 	}

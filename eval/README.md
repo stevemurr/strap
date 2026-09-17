@@ -9,6 +9,13 @@ engineering request: a small Go module with a stub, a README that states the
 contract, and a user message asking for the implementation. The agent never
 sees the hidden tests, so it has to read the repository and verify its own work.
 
+For precise tool and state-transition checks, use the separate
+[interaction suite](interaction/README.md). Its five audit-assignment cases and
+eight schema regressions run scripted providers or one live model actor against
+the production session. Reports separate harness invariants, eventual outcomes,
+first-operation tool selection, and argument validity; recovery cannot hide an
+invalid first attempt. `strap-eval interaction list` shows the available cases.
+
 ## Commands
 
 ```sh
@@ -18,6 +25,7 @@ go build -o strap-eval ./cmd/strap-eval
 ./strap-eval selfcheck                              # hidden tests fail on the stub, pass on the reference
 ./strap-eval run -tier easy -parallel 2             # record eval/results/<timestamp>/
 ./strap-eval run -tier easy,medium,hard -parallel 2 -profile PROFILE -out eval/results/RUN
+./strap-eval run -q -tier easy -out eval/results/RUN # quiet mode for automation
 ./strap-eval run -out eval/results/<dir>            # rerun the same directory to resume
 ./strap-eval report eval/results/<dir>              # write report.md and report.json
 ```
@@ -28,8 +36,9 @@ go build -o strap-eval ./cmd/strap-eval
 and duplicate tiers are accepted; unknown or empty tier names are errors.
 `-parallel N` runs N sessions at once within a tier. Tiers always run in
 easy → medium → hard order, with each tier finishing before the next starts.
-`-quiet` sets how long the session must stay silent after the root's
+`-quiet DURATION` sets how long the session must stay silent after the root's
 final reply before the attempt is considered finished (default 3s).
+This completion delay is independent of the quiet display mode (`-q`).
 
 `run` writes `report.md` and `report.json` after successful completion; use
 `-report=false` to skip report generation. The multi-tier command above replaces
@@ -65,6 +74,14 @@ Use `-ui plain` for the original line-oriented output. `-ui auto` is the default
 and selects plain output for pipes, CI, or `TERM=dumb`. `-ui tui` explicitly
 requires terminal input and output. Interrupted runs retain completed results;
 reports can be generated explicitly with `strap-eval report RUN_DIR`.
+
+For automation and CLI scripts, use `-ui quiet` or `-q`. Quiet mode never opens
+the TUI and suppresses startup and per-task progress logs. It keeps the final
+summary and report paths on stdout, and command errors on stderr. `-q` overrides
+`-ui` regardless of flag order. Results, traces, resume behavior, and automatic
+reports are unchanged; scripts can read `results.jsonl` or `report.json` for
+structured results. A completed run exits successfully even if some tasks fail
+grading; command errors and interruptions exit nonzero, as in other display modes.
 
 ## Run layout
 
