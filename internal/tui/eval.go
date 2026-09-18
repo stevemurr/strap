@@ -228,6 +228,9 @@ func (m *evalModel) observe(e eval.Progress) {
 	}
 	if p.activity != nil {
 		p.activity.observe(e.Event)
+		if _, ok := e.Event.(conversation.WorkEvent); ok {
+			m.resizeActivity(p)
+		}
 		trimEvalActivity(p.activity)
 	}
 }
@@ -282,6 +285,14 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a != nil {
 			a.badges.peek = nil
+		}
+		if a != nil && (key == "p" || a.planKey(key)) {
+			if key == "p" {
+				a.togglePlan()
+			}
+			m.resizeActivity(p)
+			m.followActive = false
+			return m, nil
 		}
 		if a != nil && a.foldKey(key) {
 			m.followActive = false
@@ -350,7 +361,11 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if left > 0 {
 				x += left + 3
 			}
-			if p.activity.badgeMouse(v, x, 15, m.width, m.height-2) {
+			if p.activity.badgeMouse(v, x, 15, m.width, 15+p.activity.viewport.Height) {
+				return m, nil
+			}
+			if p.activity.planMouse(v, x, 15+p.activity.viewport.Height, m.detailWidth(), m.evalPlanBudget()) {
+				m.resizeActivity(p)
 				return m, nil
 			}
 		}
@@ -393,19 +408,31 @@ func (m *evalModel) listWidth() int {
 	}
 	return 32
 }
-func (m *evalModel) detailWidth() int { return max(1, m.width-m.listWidth()-4) }
-func (m *evalModel) resizeActivity(p *evalProblem) {
-	if p.activity != nil {
-		p.activity.badges.peek = nil
+func (m *evalModel) detailWidth() int {
+	width := m.width - 2
+	if left := m.listWidth(); left > 0 {
+		width -= left + 3
 	}
+	return max(1, width)
+}
+func (m *evalModel) evalPlanBudget() int { return max(0, min(12, m.height-24)) }
+func (m *evalModel) resizeActivity(p *evalProblem) {
 	if p.activity == nil {
 		return
 	}
 	a := p.activity
-	a.width = m.detailWidth()
-	a.viewport.Width = a.width
-	a.viewport.Height = max(1, m.height-18)
+	width := m.detailWidth()
+	height := max(1, m.height-18-len(a.planLines(width, m.evalPlanBudget())))
+	if a.viewport.Width == width && a.viewport.Height == height {
+		return
+	}
+	position := a.streamPosition()
+	a.badges.peek = nil
+	a.width = width
+	a.viewport.Width = width
+	a.viewport.Height = height
 	a.renderTranscript(false)
+	a.restoreStreamPosition(position)
 }
 
 func (m *evalModel) View() string {
@@ -484,6 +511,12 @@ func (m *evalModel) View() string {
 	}
 	if m.width < 55 {
 		footer = "↑↓ select · ^T output · ^C stop"
+	}
+	if p := m.current(); p != nil && p.activity != nil && p.activity.currentPlan() != nil {
+		footer = "↑↓ problems · ^P plan · F8 steps · ^T output · ^C stop"
+		if p.activity.plans.focused {
+			footer = "↑↓ steps · Enter details · [/] plans · Esc problems · ^C stop"
+		}
 	}
 	if p := m.current(); p != nil && p.activity != nil && p.activity.folds.focused {
 		footer = "↑/↓ activity · Enter expand · Esc problems · PgUp/Dn scroll · Ctrl+C stop run"
@@ -617,6 +650,7 @@ func (m *evalModel) detailLines(height int) []string {
 		rows = append(rows, "Activity / "+safeText(stream)+" · "+follow, "")
 		if p.activity != nil {
 			rows = append(rows, strings.Split(p.activity.viewport.View(), "\n")...)
+			rows = append(rows, planText(p.activity.planLines(m.detailWidth(), m.evalPlanBudget()))...)
 		} else {
 			rows = append(rows, dimStyle.Render("Waiting for an available worker."))
 		}

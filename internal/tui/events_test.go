@@ -23,7 +23,7 @@ func TestWorkEventsAndAssignmentsDisplayContext(t *testing.T) {
 		event conversation.Event
 		want  string
 	}{
-		{conversation.WorkEvent{Event: work.Event{Kind: work.PlanChanged, Plan: &work.Plan{ID: "plan", Title: "My plan", Steps: []work.Step{{Title: "first", Status: work.Pending}}}}}, "pending · first"},
+		{conversation.WorkEvent{Event: work.Event{Kind: work.PlanChanged, Plan: &work.Plan{ID: "plan", Title: "My plan", Steps: []work.Step{{Title: "first", Status: work.Pending}}}}}, "My plan"},
 		{conversation.WorkEvent{Event: work.Event{Kind: work.ProgressChanged, Work: work.Work{ID: "work", Task: "task", State: work.Active, Blocker: "missing data"}}}, "Blocked: missing data"},
 		{conversation.MessageEvent{Message: message.Message{From: "root", To: "child", Kind: message.Instruction, Work: &work.Work{Task: "task", Context: "context", ExpectedOutput: "report"}}}, "Expected output: report"},
 		{conversation.MessageEvent{Message: message.Message{From: "child", To: message.User, Kind: message.Failure, Content: "failed"}}, "failed"},

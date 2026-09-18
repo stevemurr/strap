@@ -22,7 +22,7 @@ func (m *model) renderBodyWidth(e *entry, width int) string {
 	if e.agents != nil {
 		body = e.agents.render(width)
 	}
-	if e.label == "Strap" || e.label == "Message" || e.label == "You" {
+	if e.label == "Strap" || e.label == "Message" || e.label == "You" || e.label == "Progress" || e.label == "Research" {
 		if m.markdown == nil || m.markdownWidth != width {
 			renderer, err := newMarkdownRenderer(width, lipgloss.HasDarkBackground(), lipgloss.ColorProfile())
 			if err == nil {

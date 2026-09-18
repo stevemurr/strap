@@ -20,7 +20,7 @@ func (m *model) composerInset() int {
 func (m *model) transcriptTop() int { return m.stackBarHeight() }
 
 func (m *model) composerTop() int {
-	return 1 + m.stackBarHeight() + m.viewport.Height + m.streamChrome() + m.completionHeight()
+	return 1 + m.stackBarHeight() + m.viewport.Height + m.streamChrome() + m.completionHeight() + m.planHeight()
 }
 
 func (m *model) composerActivity() string {
@@ -93,6 +93,9 @@ func (m *model) composerHint() string {
 	if m.selecting {
 		return m.footer()
 	}
+	if m.plans.focused {
+		return "↑/↓ steps · Enter details · [/] plans · Esc compose"
+	}
 	if m.streamUI.rosterFocused {
 		return "←/→ preview · Enter open · Esc compose · c completed"
 	}
@@ -104,6 +107,9 @@ func (m *model) composerHint() string {
 	}
 	if m.input.Focused() && m.input.Value() != "" {
 		return "/ commands · Enter send · Alt+Enter newline"
+	}
+	if m.currentPlan() != nil {
+		return "Ctrl+P plan · F8 steps"
 	}
 	return ""
 }

@@ -176,12 +176,14 @@ func (m *model) toggleSelection() {
 		m.selecting = false
 		m.frozenView = ""
 		m.frozenEntries = nil
+		m.plans.frozen = nil
 		m.streamUI.frozenRoster = nil
 		m.streamUI.frozenStacks = nil
 		m.streamUI.frozenPeek = nil
 		m.streamUI.frozenFollow = ""
 		m.renderTranscript(false)
 	} else {
+		m.plans.frozen = m.planLines(m.viewport.Width, m.planBudget())
 		m.streamUI.frozenStacks = m.stackBar()
 		m.streamUI.frozenPeek = m.stackPeek()
 		m.streamUI.frozenRoster = m.rosterLines(m.rosterHeight(), rosterColumns)

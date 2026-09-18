@@ -274,7 +274,7 @@ func (m *model) stackPeek() *stackPreview {
 	}
 	width := min(62, m.width-4)
 	inner := width - 4
-	available := m.composerTop() - m.stackBarHeight()
+	available := m.planTop() - m.stackBarHeight()
 	// Reserve two border rows and the footer. Never obscure the composer.
 	if available < 5 {
 		return nil

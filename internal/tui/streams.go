@@ -190,8 +190,10 @@ func (m *model) clearStreams() {
 }
 
 func (m *model) focusRoster(focus bool) {
+	m.plans.focused = false
 	m.streamUI.hovering = false
 	if focus {
+		m.plans.focused = false
 		m.folds.focused = false
 		if !m.streamUI.rosterFocused {
 			m.streamUI.focusID = m.streamUI.selected
@@ -316,6 +318,7 @@ func (m *model) rememberWork(w work.Work) {
 		m.streamUI.workOrder = append(m.streamUI.workOrder, w.ID)
 	}
 	m.streamUI.works[w.ID] = w.Clone()
+	m.plans.generation++
 	if w.Assignee != "" {
 		m.ensureStream(w.Assignee)
 	}
@@ -439,6 +442,7 @@ func (m *model) observeStreamEvent(event conversation.Event) {
 			m.rememberWork(*e.Message.Work)
 		}
 	case conversation.WorkEvent:
+		m.observePlanEvent(e.Event)
 		m.rememberWork(e.Event.Work)
 		if e.Event.Change != nil {
 			for _, w := range e.Event.Change.Works {

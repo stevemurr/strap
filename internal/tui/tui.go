@@ -89,6 +89,8 @@ type entry struct {
 }
 
 type model struct {
+	plans             planDock
+	embedded          bool
 	interrupting      bool
 	folds             foldState
 	badges            badgeState
@@ -239,13 +241,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.transcript != nil && m.transcript.copying {
 			return m, nil
 		}
-		if m.transcript == nil && m.badgeMouse(msg, 1, m.transcriptTop(), m.width, m.composerTop()) {
+		if m.transcript == nil && m.badgeMouse(msg, 1, m.transcriptTop(), m.width, m.planTop()) {
 			return m, nil
 		}
 		if m.transcript == nil && m.streamMouse(msg) {
 			return m, nil
 		}
 		if m.transcript == nil {
+			if m.planMouse(msg, 1, m.planTop(), m.viewport.Width, m.planBudget()) {
+				return m, nil
+			}
 			if handled, cmd := m.composerMouse(msg); handled {
 				return m, cmd
 			}
@@ -295,6 +300,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.transcript != nil {
 			return m.transcriptKey(msg)
+		}
+		if !m.selecting && m.planKey(msg.String()) {
+			return m, textarea.Blink
 		}
 		if !m.selecting && m.streamKey(msg) {
 			return m, textarea.Blink
@@ -403,7 +411,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n/plan [id]    Focus the persistent plan; Ctrl+P folds it, F8 focuses steps. Up/down selects steps; Enter opens updates; [/] switches plans; Esc returns to input.\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages render Markdown. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -459,6 +467,8 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 			} else {
 				m.add("Agent", fmt.Sprintf("%s · %s · parent %s", info.ID, info.State, info.Parent), true)
 			}
+		case "/plan":
+			m.planCommand(fields)
 		case "/agents":
 			return m, m.showAgents()
 		default:
@@ -518,6 +528,9 @@ func (m *model) observe(event conversation.Event) {
 		}
 		m.addAttributed(label, string(e.Agent)+" · progress", e.Content, false, e.Agent)
 	case conversation.WorkEvent:
+		if !m.embedded {
+			defer m.syncCompletion()
+		}
 		if e.Event.Kind == work.WorkProgressReported {
 			m.addAttributed("Progress", string(e.Event.Work.Assignee), progressBody(e.Event), false, e.Event.Work.Assignee)
 			return
@@ -535,10 +548,16 @@ func (m *model) observe(event conversation.Event) {
 			actors = append(actors, change.Plan.Owner)
 			meta = string(change.Plan.ID)
 			body = change.Plan.Title
-			change.Steps = change.Plan.Steps
+			// The current steps live in the persistent dock.
+			title = "Plan updated"
+			if change.Plan.Revision <= 1 {
+				title = "Plan created"
+			}
 		}
-		for _, step := range change.Steps {
-			body += "\n" + string(step.Status) + " · " + step.Title
+		if change.Plan == nil {
+			for _, step := range change.Steps {
+				body += "\n" + string(step.Status) + " · " + step.Title
+			}
 		}
 		if change.Work.Blocker != "" {
 			body += "\nBlocked: " + change.Work.Blocker
@@ -829,6 +848,7 @@ func (m *model) renderView() string {
 	for _, suggestion := range m.completionView() {
 		lines = append(lines, suggestion)
 	}
+	lines = append(lines, planText(m.planLines(m.viewport.Width, m.planBudget()))...)
 	lines = append(lines, m.renderComposer()...)
 	lines = append(m.stackBar(), lines...)
 	for i, row := range lines {

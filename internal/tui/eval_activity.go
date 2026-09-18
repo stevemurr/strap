@@ -41,6 +41,7 @@ func (s evalSession) StopAgent(message.ActorID) (conversation.AgentInfo, error) 
 
 func newEvalActivity(ctx context.Context, root message.ActorID) *model {
 	a := newModel(ctx, func() {}, evalSession{root: root}, Options{})
+	a.embedded = true
 	a.entries = nil // The eval host supplies the task, not the conversational welcome.
 	a.input.Blur()
 	a.selectStream("")

@@ -21,6 +21,7 @@ var slashCommands = []slashCommand{
 	{"/help", "Show commands"},
 	{"/inspect", "Inspect an agent · [id]"},
 	{"/pause", "Pause an agent · [id]"},
+	{"/plan", "Focus the persistent plan · [plan-id]"},
 	{"/quit", "Exit Strap"},
 	{"/resume", "Resume an agent · [id]"},
 	{"/stop", "Stop current work; keep the conversation"},
@@ -36,7 +37,7 @@ type completionState struct {
 
 func (m *model) completionMatches() []slashCommand {
 	text := m.input.Value()
-	if m.streamUI.rosterFocused || m.completion.dismissed || !strings.HasPrefix(text, "/") ||
+	if m.plans.focused || m.streamUI.rosterFocused || m.completion.dismissed || !strings.HasPrefix(text, "/") ||
 		strings.ContainsFunc(text, unicode.IsSpace) || m.input.LineInfo().StartColumn+m.input.LineInfo().ColumnOffset != utf8.RuneCountInString(text) {
 		return nil
 	}
@@ -59,7 +60,7 @@ func (m *model) syncCompletion() {
 	}
 	m.completion.selected = min(m.completion.selected, max(0, len(m.completionMatches())-1))
 	m.syncInputHeight()
-	height := max(1, m.height-4-m.input.Height()-m.completionHeight()-m.streamChrome()-m.stackBarHeight())
+	height := max(1, m.height-4-m.input.Height()-m.completionHeight()-m.streamChrome()-m.stackBarHeight()-m.planHeight())
 	if m.viewport.Height != height {
 		position := m.streamPosition()
 		m.viewport.Height = height

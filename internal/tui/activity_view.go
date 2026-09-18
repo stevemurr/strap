@@ -243,6 +243,7 @@ func (m *model) foldKey(key string) bool {
 	if key == "f7" {
 		m.folds.focused = !m.folds.focused
 		if m.folds.focused {
+			m.plans.focused = false
 			m.focusRoster(false)
 			m.input.Blur()
 			if len(m.folds.targets) > 0 {

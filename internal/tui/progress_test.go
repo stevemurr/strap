@@ -1,16 +1,105 @@
 package tui
 
 import (
-	"github.com/charmbracelet/x/ansi"
-	"github.com/stevemurr/strap/agent"
-	"github.com/stevemurr/strap/conversation"
-	"github.com/stevemurr/strap/identity"
-	"github.com/stevemurr/strap/provider"
-	"github.com/stevemurr/strap/work"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
+	"github.com/stevemurr/strap/agent"
+	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/eval"
+	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/work"
 )
+
+func TestProgressMarkdownInConversationAndEval(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		for _, profile := range []termenv.Profile{termenv.TrueColor, termenv.Ascii} {
+			t.Run(fmt.Sprintf("dark=%t/profile=%v", dark, profile), func(t *testing.T) {
+				withTerminalTheme(t, dark, profile)
+				m, _ := setup(t)
+				m.resize(140, 100)
+				m.entries = nil
+				e, task := evalSetup(t)
+				e.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
+				report := work.Event{Kind: work.WorkProgressReported,
+					Work: work.Work{ID: "work-tags", Owner: "root", Assignee: "worker", State: work.Active},
+					Change: &work.Change{ProgressReports: []work.WorkProgressReport{{
+						ID: "report-tags", WorkID: "work-tags", WorkRevision: 2, AssignedAtRevision: 1,
+						Position: &work.WorkPosition{
+							Objective: "Group **equivalent tags**.",
+							Activity:  "Writing the implementation.",
+							Note:      "- Sort the bytes\n- Group matching keys\n\nKeep *output deterministic*.",
+							NextStep:  "Run `go vet ./...`.",
+						},
+						Findings: []work.ProgressFinding{{ID: "finding-tags", Basis: work.Inferred,
+							Claim:      "## Approach\n\nUse a **canonical key**.\n\n```go\nreturn groups\n```",
+							Limitation: "Design only; **not verified**.",
+						}},
+					}}},
+				}
+				m.observe(conversation.WorkEvent{Event: report})
+				e.Update(eval.Progress{Task: task, Event: conversation.WorkEvent{Event: report}})
+				for host, view := range map[string]string{"conversation": m.View(), "eval": e.View()} {
+					plain := ansi.Strip(view)
+					for _, want := range []string{"report-tags", "worker", "Objective: Group equivalent tags.", "Activity: Writing the implementation.", "• Sort the bytes", "• Group matching keys", "Keep output deterministic.", "Next:", "go vet ./...", "inferred · finding-tags:", "▎ Approach", "return groups", "Limitation: Design only; not verified."} {
+						if !strings.Contains(plain, want) {
+							t.Fatalf("%s missing %q:\n%s", host, want, plain)
+						}
+					}
+					for _, raw := range []string{"**", "## Approach", "```go", "*output deterministic*"} {
+						if strings.Contains(plain, raw) {
+							t.Fatalf("%s contains unrendered Markdown %q", host, raw)
+						}
+					}
+					for _, line := range strings.Split(plain, "\n") {
+						if strings.Contains(line, "Objective:") && strings.Contains(line, "Activity:") {
+							t.Fatal("report fields merged onto one line", line)
+						}
+					}
+				}
+				// Resizing reflows the formatted report within each host's bounds.
+				for _, width := range []int{80, 40, 20} {
+					m.Update(tea.WindowSizeMsg{Width: width, Height: 35})
+					e.Update(tea.WindowSizeMsg{Width: width, Height: 35})
+					for _, view := range []string{m.View(), e.View()} {
+						for _, line := range strings.Split(view, "\n") {
+							if ansi.StringWidth(line) > width {
+								t.Fatalf("report overflow at width %d", width)
+							}
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestResearchDeliveryRendersMarkdown(t *testing.T) {
+	m, _ := setup(t)
+	m.resize(120, 60)
+	m.entries = nil
+	m.observe(conversation.WorkEvent{Event: work.Event{
+		Kind: work.ResearchDelivered,
+		Work: work.Work{ID: "research", Owner: "root", Assignee: "worker", State: work.Delivered},
+		Change: &work.Change{ResearchBriefs: []work.ResearchBrief{{
+			ID: "brief", Summary: "## Findings\n\nThe behavior is **documented**.",
+			Recommendation: "Use the **supported API**.",
+			OpenQuestions:  []string{"- Check compatibility\n- Confirm performance"},
+		}}},
+	}})
+	view := ansi.Strip(m.viewport.View())
+	for _, want := range []string{"Research delivered · brief", "▎ Findings", "The behavior is documented.", "Recommendation: Use the supported API.", "• Check compatibility", "• Confirm performance"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("missing %q:\n%s", want, view)
+		}
+	}
+}
 
 func TestResearchProgressShowsAttributedFindingsAndDistinctDelivery(t *testing.T) {
 	m, s := setup(t)
