@@ -295,7 +295,11 @@ func TestServiceOptionsValidation(t *testing.T) {
 // rather than queueing them behind a slow one.
 func TestServiceShedsLoadBeyondItsRequestLimit(t *testing.T) {
 	ctx := context.Background()
-	holding, release := make(chan struct{}), make(chan struct{})
+	// Buffered: the signal must not depend on the test goroutine already
+	// waiting. An unbuffered send here takes the default branch when the
+	// request arrives first, the request then completes without holding the
+	// slot, and the receive below waits forever.
+	holding, release := make(chan struct{}, 1), make(chan struct{})
 	service, err := httpapi.New(ctx, httpapi.Options{MaxRequests: 1, DefaultConfig: config(), Authorize: func(*http.Request, httpapi.Capability, string) error {
 		select {
 		case holding <- struct{}{}:

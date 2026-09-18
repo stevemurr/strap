@@ -22,6 +22,9 @@ jobs:
         run: |
           unformatted=$(gofmt -l $(git ls-files '*.go'))
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      # read_pdf rasterizes through Poppler; without it the PDF example skips
+      # and stops covering the path it exists to cover.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: go vet ./...
       - run: go build ./...
       # Live tests reach a model server and skip unless STRAP_LIVE_BASE_URL is

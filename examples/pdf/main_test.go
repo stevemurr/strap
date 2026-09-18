@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -56,7 +57,21 @@ func pdfServer(t *testing.T, mode string) *httptest.Server {
 	t.Cleanup(func() { close(release) })
 	return server
 }
+
+// read_pdf rasterizes through Poppler, so without it the example cannot
+// produce the page images it exists to demonstrate. That is a missing tool on
+// the machine, not a defect in the example.
+func requirePoppler(t *testing.T) {
+	t.Helper()
+	for _, program := range []string{"pdfinfo", "pdftoppm"} {
+		if _, err := exec.LookPath(program); err != nil {
+			t.Skipf("%s is not installed; install Poppler to run this example", program)
+		}
+	}
+}
+
 func TestPDFExampleReadsImagesThroughHTTP(t *testing.T) {
+	requirePoppler(t)
 	server := pdfServer(t, "images")
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	defer func() { flag.CommandLine = oldFlags; os.Args = oldArgs }()
