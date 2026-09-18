@@ -698,23 +698,31 @@ does not stop its children; conversation close cancels and joins every agent.
 
 ## Web research
 
-`web_search` searches DuckDuckGo through **wkrender**, the native macOS WebKit
-renderer. It returns ranked titles, destination URLs and snippets. `open_url`
-uses **agent-browser** to load a page in its own headless Chrome session
-and read the rendered DOM. It returns readable text and a separate list of link
-destinations. Both use ordinary tool activity and agent commentary in the console.
+`web_search` queries the [Tavily](https://tavily.com) search API and returns
+ranked titles, destination URLs and snippets. `open_url` uses **agent-browser**
+to load a page in its own headless Chrome session and read the rendered DOM,
+returning readable text and a separate list of link destinations. Both appear as
+ordinary tool activity and agent commentary in the console.
 
-Install wkrender from the neighboring checkout on macOS (Swift/Xcode required):
+Set the key in the environment; it is never written to a config file, logged, or
+quoted in an error:
 
 ```sh
-make -C ../wkrender install
+export TAVILY_API_KEY=tvly-...
 ```
 
-The default location is `~/.harness/bin/wkrender`. Strap requires worker protocol
-1, four concurrent slots, and search readiness. It keeps the worker warm and
-cancels individual searches independently. Search challenges and unknown result
-markup are errors; only an explicit no-results page produces an empty list.
-There is no HTTP search fallback.
+Search works on every platform this builds for. Scraping a public results page
+does not: a search engine rate limits per address, so the first query in a quiet
+window returns results and an immediate second one gets a challenge page. That
+is why search is an API call rather than a browser driving a search engine.
+
+The previous backend, **wkrender**, drives macOS WebKit and is still used when no
+API key is set. It is macOS-only and subject to the same rate limiting, so treat
+it as a fallback rather than the supported path:
+
+```sh
+make -C ../wkrender install   # macOS, Swift/Xcode required
+```
 
 Install agent-browser in an isolated directory:
 

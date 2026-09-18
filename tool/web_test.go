@@ -21,10 +21,22 @@ func (f pageFunc) Read(ctx context.Context, url string) (agentbrowser.Page, erro
 	return f(ctx, url)
 }
 
+// searchFunc fakes the page fetch underneath the wkrender backend, so these
+// tests still exercise the endpoint it builds and the scraping it does.
 type searchFunc func(context.Context, string) (webkit.Page, error)
 
-func (f searchFunc) Search(ctx context.Context, url string) (webkit.Page, error) { return f(ctx, url) }
-func (searchFunc) Close(context.Context) error                                   { return nil }
+func (f searchFunc) fetch(ctx context.Context, url string) (webkit.Page, error) { return f(ctx, url) }
+func (f searchFunc) Search(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	return (&wkrenderSearch{worker: fetcherFunc(f.fetch)}).Search(ctx, query, limit)
+}
+func (searchFunc) Close(context.Context) error { return nil }
+
+type fetcherFunc func(context.Context, string) (webkit.Page, error)
+
+func (f fetcherFunc) Search(ctx context.Context, url string) (webkit.Page, error) {
+	return f(ctx, url)
+}
+func (fetcherFunc) Close(context.Context) error { return nil }
 
 func testWeb(t *testing.T, config WebConfig) *Web {
 	t.Helper()

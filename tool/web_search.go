@@ -32,31 +32,23 @@ func (w *Web) search(ctx context.Context, _ Call, args searchArgs) (Result, erro
 		return Result{}, errors.New("query must contain 1..8192 bytes of nonblank text")
 	}
 	if w.searchErr != nil {
-		return Result{}, fmt.Errorf("web_search requires wkrender: %w", w.searchErr)
+		return Result{}, fmt.Errorf("web_search requires a backend: set TAVILY_API_KEY for the search API, or install wkrender: %w", w.searchErr)
 	}
 	ctx, done, err := w.begin(ctx, w.config.SearchTimeout)
 	if err != nil {
 		return Result{}, err
 	}
 	defer done()
-	endpoint := "https://html.duckduckgo.com/html/?" + url.Values{"q": {query}, "kl": {"us-en"}}.Encode()
-	page, err := w.worker.Search(ctx, endpoint)
-	if err != nil {
-		return Result{}, fmt.Errorf("web_search: %w", err)
-	}
-	if len(page.HTML) > 5<<20 {
-		return Result{}, errors.New("search HTML exceeded 5 MiB")
-	}
-	hits, err := searchResults(page.HTML)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return Result{}, err
-	}
 	limit := 8
 	if args.MaxResults != nil {
 		limit = *args.MaxResults
+	}
+	hits, err := w.worker.Search(ctx, query, limit)
+	if err != nil {
+		return Result{}, fmt.Errorf("web_search: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 	return JSON(WebSearchResult{Query: query, Results: hits[:min(limit, len(hits))]})
 }
