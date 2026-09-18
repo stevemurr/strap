@@ -18,7 +18,7 @@ easy enough that none triggered a rejection.
 
 | Component | Execution |
 | --- | --- |
-| Root agent | Real model requests to the configured server at `http://192.168.1.237:8360`, using the chat-completions API |
+| Root agent | Real model requests to the configured server at `http://model.internal:8360`, using the chat-completions API |
 | Model | Server advertised `qwen3.8-27b`; profile `qwen3.8-27b-nothink` |
 | Prompts and tools | Production root prompt, coordination tool schemas, decoding, dispatch, and workflow operations |
 | State | A real harness session, with a scoped arithmetic implementation, failed first audit, repair, and replacement submission seeded through public APIs |

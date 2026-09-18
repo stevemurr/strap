@@ -27,7 +27,7 @@ import (
 
 // Opt-in: all commands and observations use real HTTP, and the service uses its
 // real provider factory. Ordinary tests skip this external model dependency.
-// STRAP_LIVE_BASE_URL=http://192.168.1.237:8355 go test -race ./harness/httpapi -run TestLiveModelHTTP -count=1 -v
+// STRAP_LIVE_BASE_URL=http://127.0.0.1:8000 go test -race ./harness/httpapi -run TestLiveModelHTTP -count=1 -v
 func TestLiveModelHTTP(t *testing.T) {
 	base := os.Getenv("STRAP_LIVE_BASE_URL")
 	if base == "" {

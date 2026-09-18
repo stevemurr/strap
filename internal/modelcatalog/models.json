@@ -3,7 +3,7 @@
   "models": {
     "nemotron-lightning": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8364",
+      "base_url": "http://127.0.0.1:8000",
       "model": "nemotron-lightning",
       "timeout": "60m",
       "generation": {
@@ -15,7 +15,7 @@
     },
     "qwen3.6": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8355",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.6",
       "timeout": "60m",
       "generation": {
@@ -27,12 +27,14 @@
         "repetition_penalty": 1.1,
         "max_tokens": 81920,
         "enable_thinking": true,
-        "strict_tools": ["create_plan"]
+        "strict_tools": [
+          "create_plan"
+        ]
       }
     },
     "qwen3.6-nothink": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8355",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.6",
       "timeout": "60m",
       "generation": {
@@ -43,13 +45,12 @@
         "presence_penalty": 0.0,
         "repetition_penalty": 1.0,
         "max_tokens": 131072,
-        "enable_thinking": false,
-        "strict_tools": ["create_plan"]
+        "enable_thinking": false
       }
     },
     "qwen3.8-flash-next-nothink": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8365",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.8-flash-next-mtp3",
       "timeout": "60m",
       "generation": {
@@ -61,7 +62,7 @@
     },
     "qwen3.8-flash-next-thinking": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8365",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.8-flash-next-mtp3",
       "timeout": "60m",
       "generation": {
@@ -74,7 +75,7 @@
     },
     "qwen3.8-flash-next-stream": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8365",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.8-flash-next-mtp3",
       "timeout": "60m",
       "generation": {
@@ -84,7 +85,7 @@
     },
     "qwen3.8-27b": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8360",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.8-27b",
       "timeout": "60m",
       "generation": {
@@ -101,7 +102,7 @@
     },
     "qwen3.8-27b-nothink": {
       "backend": "vllm",
-      "base_url": "http://192.168.1.237:8360",
+      "base_url": "http://127.0.0.1:8000",
       "model": "qwen3.8-27b",
       "timeout": "60m",
       "generation": {

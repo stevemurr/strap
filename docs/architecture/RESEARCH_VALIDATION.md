@@ -60,7 +60,7 @@ STRAP_RESEARCH_EVAL_OUTPUT=/private/tmp/strap-research-eval \
 go test ./harness -run '^TestResearchLivePlanComparison$' -v -count=1
 ```
 
-Availability checks on `192.168.1.237:8364` and `192.168.1.237:8355` both failed to
+Availability checks on `model.internal:8364` and `model.internal:8355` both failed to
 connect. No real-model comparison completed, so latency, extra root calls and live
 summary fidelity remain unmeasured. A working endpoint/model alias is required to
 close area 15. No production prompt changes were derived from these fixtures.

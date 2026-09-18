@@ -20,7 +20,7 @@ error; the other seven produced argument-validation errors. The 131 assertion
 instances include the existing scenarios, and are not 131 distinct contracts.
 
 The live run used the configured Qwen3.8-27B server at
-`http://192.168.1.237:8360`, profile `qwen3.8-27b`, with thinking enabled and
+`http://model.internal:8360`, profile `qwen3.8-27b`, with thinking enabled and
 reasoning effort `xhigh`. It made 15 model requests and 18 tool calls, including
 read-only discovery. All eight first operations used the correct tool and valid
 arguments. No rejection or recovery was needed. These are one trial per case,

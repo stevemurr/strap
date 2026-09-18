@@ -27,7 +27,7 @@ import (
 )
 
 // Run explicitly against a real server; ordinary go test never uses the network:
-// STRAP_LIVE_BASE_URL=http://192.168.1.237:8355 go test -race ./cmd/strap -run TestLiveTokenUsage -count=1 -v
+// STRAP_LIVE_BASE_URL=http://127.0.0.1:8000 go test -race ./cmd/strap -run TestLiveTokenUsage -count=1 -v
 // STRAP_LIVE_MODEL optionally overrides qwen3.6.
 func TestLiveTokenUsage(t *testing.T) {
 	baseURL := os.Getenv("STRAP_LIVE_BASE_URL")

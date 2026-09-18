@@ -91,7 +91,7 @@ current result.
 
 ## Reproduction and implementation checks
 
-The live server was the configured Qwen endpoint at `http://192.168.1.237:8360`,
+The live server was the configured Qwen endpoint at `http://model.internal:8360`,
 using profile `qwen3.8-27b-nothink`. Thinking was disabled, temperature 0.7, top-p
 0.8, top-k 20, min-p 0, presence penalty 1.5, repetition penalty 1, and output
 limit 4,096 tokens. The trial budget was eight model requests and three minutes;

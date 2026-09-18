@@ -49,7 +49,7 @@ use ordinary inbox handoffs. Research diagnostics have their own shell selectors
 - A temporary live runner attempted a conversational control, an ordinary Go
   implementation request without delegation/audit instructions, and a research
   request. The first control failed before model output because
-  `http://192.168.1.237:8364/v1/chat/completions` refused the connection. The runner
+  `http://model.internal:8364/v1/chat/completions` refused the connection. The runner
   was stopped; implementation and research trials did not run.
 
 Static review and deterministic tests do not prove model adherence. A live

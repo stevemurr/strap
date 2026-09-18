@@ -166,7 +166,7 @@ See [HTTP routes and errors](httpapi/README.md),
 Run the opt-in TUI path against a thinking-capable endpoint:
 
 ```sh
-STRAP_LIVE_BASE_URL=http://192.168.1.237:8355 \
+STRAP_LIVE_BASE_URL=http://model.internal:8355 \
   go test -race ./internal/tui -run '^TestLiveReasoningTUI$' -count=1 -timeout 3m -v
 ```
 

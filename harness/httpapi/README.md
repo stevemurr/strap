@@ -118,7 +118,7 @@ authorization, revision, paging and real connection disconnect/reconnect tests.
 Run the opt-in smoke test against a live vLLM model with:
 
 ```sh
-STRAP_LIVE_BASE_URL=http://192.168.1.237:8355 \
+STRAP_LIVE_BASE_URL=http://model.internal:8355 \
   go test -race ./harness/httpapi -run '^TestLiveModelHTTP$' -count=1 -timeout 3m -v
 ```
 

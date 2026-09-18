@@ -14,13 +14,13 @@ func TestBundledProfilesCarryTheirGenerationSettings(t *testing.T) {
 		thinking       bool
 		effort         string
 	}{
-		"qwen3.6":                     {"qwen3.6", "http://192.168.1.237:8355", 81920, true, ""},
-		"qwen3.6-nothink":             {"qwen3.6", "http://192.168.1.237:8355", 131072, false, ""},
-		"qwen3.8-flash-next-nothink":  {"qwen3.8-flash-next-mtp3", "http://192.168.1.237:8365", 32000, false, ""},
-		"qwen3.8-flash-next-thinking": {"qwen3.8-flash-next-mtp3", "http://192.168.1.237:8365", 32000, true, "medium"},
-		"qwen3.8-flash-next-stream":   {"qwen3.8-flash-next-mtp3", "http://192.168.1.237:8365", 400, false, ""},
-		"qwen3.8-27b":                 {"qwen3.8-27b", "http://192.168.1.237:8360", 32000, true, "xhigh"},
-		"qwen3.8-27b-nothink":         {"qwen3.8-27b", "http://192.168.1.237:8360", 131072, false, ""},
+		"qwen3.6":                     {"qwen3.6", "http://127.0.0.1:8000", 81920, true, ""},
+		"qwen3.6-nothink":             {"qwen3.6", "http://127.0.0.1:8000", 131072, false, ""},
+		"qwen3.8-flash-next-nothink":  {"qwen3.8-flash-next-mtp3", "http://127.0.0.1:8000", 32000, false, ""},
+		"qwen3.8-flash-next-thinking": {"qwen3.8-flash-next-mtp3", "http://127.0.0.1:8000", 32000, true, "medium"},
+		"qwen3.8-flash-next-stream":   {"qwen3.8-flash-next-mtp3", "http://127.0.0.1:8000", 400, false, ""},
+		"qwen3.8-27b":                 {"qwen3.8-27b", "http://127.0.0.1:8000", 32000, true, "xhigh"},
+		"qwen3.8-27b-nothink":         {"qwen3.8-27b", "http://127.0.0.1:8000", 131072, false, ""},
 	}
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {
