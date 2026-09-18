@@ -4,29 +4,60 @@ A small Go core for a persistent root agent, delegated agents, routed messages,
 and model interaction, with shared plans and an implementation/audit/repair cycle.
 The same agent loop serves the root and every child.
 
-## Developer console
-
-With your local model server running:
+## Install
 
 ```sh
-go run ./cmd/strap
+curl -fsSL https://raw.githubusercontent.com/stevemurr/strap/main/install.sh | sh
 ```
 
-Model endpoints and defaults live in [`internal/modelcatalog/models.json`](internal/modelcatalog/models.json).
-The bundled default is `qwen3.6`; select the saved Qwen endpoint with
-`-profile qwen3.6`. A profile pairs a server's model alias with its endpoint,
-request timeout, and generation settings.
+That fetches the latest release for this machine (linux/amd64, macOS arm64 or
+amd64) and installs `strap` and `strap-eval` into the first writable of
+`~/.local/bin` or `/usr/local/bin`. `STRAP_VERSION=v1.2.3` pins a tag and
+`STRAP_BIN=/somewhere/bin` chooses the directory. With a Go toolchain,
+`go install github.com/stevemurr/strap/cmd/strap@latest` does the same job.
 
-For personal settings, copy that catalog to `~/.config/strap/models.json`
-(or `$XDG_CONFIG_HOME/strap/models.json`). Strap automatically loads it when present;
-otherwise it uses the bundled catalog. Use `-config /path/to/models.json` to select
-another file. A personal file replaces the entire catalog. Edit `default` to choose
-which profile runs without flags, and add entries under `models` to save more models.
-Changes to a personal file take effect on the next invocation without rebuilding.
+## Pointing it at a model
+
+Strap ships no endpoints. It reads `~/.config/strap/models.json` (or
+`$XDG_CONFIG_HOME/strap/models.json`), and falls back to a bundled catalog whose
+profiles all point at `http://127.0.0.1:8000`, which is useful only if you serve
+a model locally. Keeping your own file out of the repository is the point: it
+holds host names you may not want to publish, and it takes effect on the next
+invocation without rebuilding.
+
+```jsonc
+{
+  "default": "qwen3.6",
+  "models": {
+    "qwen3.6": {
+      "backend": "vllm",                 // vllm or chatcompletions
+      "base_url": "https://model.example:8443",
+      "model": "qwen3.6",                // the alias the server advertises
+      "timeout": "60m",
+      "generation": { "temperature": 1.0, "top_p": 0.95, "max_tokens": 81920 }
+    }
+  }
+}
+```
+
+A personal file replaces the whole catalog: `default` picks the profile that
+runs without flags, and each entry under `models` pairs a server's model alias
+with its endpoint, request timeout, and generation settings. `-config
+/path/to/models.json` selects a different file, and `-profile <name>` a
+different entry. [`internal/modelcatalog/models.json`](internal/modelcatalog/models.json)
+is a starting template to copy.
+
+## Developer console
+
+With your model server reachable:
+
+```sh
+strap                      # or: go run ./cmd/strap
+```
 
 ```sh
 go run ./cmd/strap -profile qwen3.6
-go run ./cmd/strap -config internal/modelcatalog/models.json -profile nemotron-lightning
+go run ./cmd/strap -config ~/.config/strap/models.json -profile nemotron-lightning
 go run ./cmd/strap -temperature 0.8 -max-tokens 16384
 ```
 
@@ -79,7 +110,7 @@ generation policy stated in the catalog:
 All Strap requests already stream, including the first two profiles. The stream
 profile keeps the short output budget and unspecified sampling from the example.
 
-Two profiles target the dense **Qwen3.8-27B** at `http://192.168.1.237:8360` with
+Two profiles target the dense **Qwen3.8-27B** at `http://model.internal:8360` with
 the sampling its [model card](https://huggingface.co/Qwen/Qwen3.8-27B) recommends
 (checked September 16, 2026):
 
@@ -173,6 +204,19 @@ focused stacks or list, to expand or collapse it.
 Clicking its disclosure does the same. `/focus [id]` selects
 a live stream, `/focus root` returns to root, and `/focus all` shows All activity.
 Viewing a stream never pauses an agent, changes its context, or redirects input.
+
+Plans stay in a dock above the composer while the conversation scrolls. The dock
+shows the current plan, completed-step count, and pending, working, review,
+blocked, completed, or cancelled steps. Agent icons identify assigned work;
+completion reflects accepted workflow state, not an agent saying it is done.
+Click the plan header or press Ctrl+P to collapse it. Click a step for its latest
+note, or press F8 and use Up/Down and Enter; Escape returns to the composer.
+The wheel over the dock browses steps in long plans. Use `[` / `]` while the
+plan is focused, the Next plan control, or `/plan [plan-id]` to select another
+plan. Completed plans remain available, including after `/clear`; this is view
+state, not a new persistence or execution mechanism. Short terminals reduce the
+dock to a summary so the composer and conversation remain usable.
+`strap-eval` uses the same dock per problem, with Ctrl+P (or `p`) and F8 controls.
 
 Each stream remembers its own scroll position. Output arriving above the text you
 are reading preserves the current message anchor. Unread counts track changed
@@ -993,3 +1037,7 @@ researcher must be sent explicitly to that researcher through `send_message`.
 
 Implementation checkpoints and validation are tracked in
 [RESEARCH_IMPLEMENTATION.md](docs/architecture/RESEARCH_IMPLEMENTATION.md).
+
+## License
+
+[MIT](LICENSE). Keep the copyright notice with copies and substantial portions.

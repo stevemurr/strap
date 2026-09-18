@@ -40,7 +40,17 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	return tui.Run(ctx, session, tui.Options{Model: cfg.Model.Model, Endpoint: cfg.Model.BaseURL})
 }
 
+// version is stamped by the release build; a source build reports "dev" so a
+// bug report can say which binary produced it.
+var version = "dev"
+
 func main() {
+	for _, a := range os.Args[1:] {
+		if a == "-version" || a == "--version" {
+			fmt.Println("strap " + version)
+			return
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stderr); err != nil {

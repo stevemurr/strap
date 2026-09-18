@@ -40,7 +40,17 @@ report reads a run directory and writes report.md and report.json beside it.
 interaction evaluates bounded coordination decisions; use interaction -help for options.
 `
 
+// version is stamped by the release build; a source build reports "dev" so a
+// bug report can say which binary produced it.
+var version = "dev"
+
 func main() {
+	for _, a := range os.Args[1:] {
+		if a == "-version" || a == "--version" {
+			fmt.Println("strap-eval " + version)
+			return
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
