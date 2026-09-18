@@ -4,7 +4,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/stevemurr/strap/content"
 	"github.com/stevemurr/strap/message"
@@ -47,12 +46,6 @@ type ToolCall struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
 }
-
-// ErrStreamStalled marks a model call abandoned because its response delivered
-// nothing for longer than the configured budget. The call committed nothing, so
-// a caller may repeat the request; see chatwire.StallPolicy for why silence is
-// the signal rather than the work the server is doing.
-var ErrStreamStalled = errors.New("model stream stalled")
 
 type ToolDefinition struct {
 	Name        string          `json:"name"`
