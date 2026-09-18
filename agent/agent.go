@@ -37,6 +37,12 @@ var ErrReasoningLimit = errors.New("reasoning limit exceeded")
 
 const maxReasoningRetries = 1
 
+// maxStallRetries bounds repeats of a call whose response delivered nothing.
+// The attempt committed nothing and the model never saw it, so the repeat is
+// the same request rather than a correction, and each one is an independent
+// chance at a server that only occasionally fails to produce output.
+const maxStallRetries = 2
+
 // Clone snapshots the prompt and tool list. Provider and tool implementations
 // remain shared collaborators and must support concurrent use.
 func (s Spec) Clone() Spec {
@@ -287,6 +293,7 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 	admitted := false
 	malformed := 0
 	overrun := 0
+	stalled := 0
 	for {
 		if err := a.checkpoint(ctx); err != nil {
 			return err
@@ -332,6 +339,12 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 			}
 			continue
 		}
+		// A stalled response left nothing in history and told the model
+		// nothing, so there is no notice to add: the exchange simply repeats.
+		if errors.Is(err, provider.ErrStreamStalled) && ctx.Err() == nil && stalled < maxStallRetries {
+			stalled++
+			continue
+		}
 		if errors.Is(err, ErrReasoningLimit) && ctx.Err() == nil && overrun < maxReasoningRetries {
 			overrun++
 			notice := fmt.Sprintf("Your previous response was cut off after %d KB of reasoning without a tool call or reply, and nothing ran. Act now: emit the next tool call or the final reply directly, without further deliberation.", a.config.Spec.ReasoningLimit>>10)
@@ -345,6 +358,7 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 		}
 		malformed = 0
 		overrun = 0
+		stalled = 0
 		if err := a.checkpoint(ctx); err != nil {
 			return err
 		}

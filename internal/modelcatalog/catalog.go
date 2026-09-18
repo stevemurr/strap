@@ -103,6 +103,8 @@ func Flags(flags *flag.FlagSet, model *harness.ModelConfig) {
 	flags.StringVar(&model.BaseURL, "base-url", model.BaseURL, "Local server root or API prefix")
 	flags.StringVar(&model.Model, "model", model.Model, "Model served by the endpoint (does not select a profile)")
 	flags.DurationVar(&model.Timeout, "timeout", model.Timeout, "Timeout for each model HTTP request")
+	flags.DurationVar(&model.StallFirstChunk, "stall-first-chunk", model.StallFirstChunk, "Abandon a model call that sends nothing at all within this long (negative disables)")
+	flags.DurationVar(&model.StallIdle, "stall-idle", model.StallIdle, "Abandon a model call whose stream then pauses this long (negative disables)")
 	flags.StringVar(&model.Backend, "backend", model.Backend, "Model backend: vllm or chatcompletions")
 	flags.Func("reasoning-effort", "Override Qwen template reasoning effort: low, medium, or xhigh", func(raw string) error {
 		model.Generation.ReasoningEffort = &raw

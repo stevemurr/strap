@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,11 @@ import (
 type Client struct {
 	endpoint string
 	http     *http.Client
+	stall    StallPolicy
 }
+
+// WithStallPolicy bounds how long a streaming response may deliver nothing.
+func (c *Client) WithStallPolicy(p StallPolicy) *Client { c.stall = p; return c }
 
 func New(baseURL string, client *http.Client) (*Client, error) {
 	u, err := url.Parse(baseURL)
@@ -53,7 +58,10 @@ func (e *HTTPError) Error() string {
 // Submit accepts an adapter-owned wire struct, including its typed extensions.
 // It never retries or rewrites options after an HTTP rejection.
 func (c *Client) Submit(ctx context.Context, wire any, observer provider.Observer) (provider.Response, error) {
-
+	// The cause survives cancellation, so a stall is reported as itself rather
+	// than as the context.Canceled it necessarily produces.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	data, err := json.Marshal(wire)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("encode request: %w", err)
@@ -74,7 +82,13 @@ func (c *Client) Submit(ctx context.Context, wire any, observer provider.Observe
 		return provider.Response{}, &HTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		return readStream(resp.Body, observer)
+		body, stop := watchStall(ctx, resp.Body, c.stall, cancel)
+		defer stop()
+		response, err := readStream(body, observer)
+		if stalled := context.Cause(ctx); err != nil && stalled != nil && !errors.Is(stalled, context.Canceled) {
+			return response, stalled
+		}
+		return response, err
 	}
 	// Some compatible servers return a complete JSON response to streaming requests.
 	var result completion

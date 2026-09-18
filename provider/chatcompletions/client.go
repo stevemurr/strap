@@ -20,7 +20,14 @@ type Config struct {
 	Model   string
 	// HTTPClient is optional. Submit uses its context for cancellation/deadlines.
 	HTTPClient *http.Client
+	// Stall bounds how long a streaming response may deliver nothing before
+	// the request is abandoned as unproductive. The zero value disables it.
+	Stall StallPolicy
 }
+
+// StallPolicy is chatwire.StallPolicy, re-exported so adapters configure the
+// watchdog without importing an internal package.
+type StallPolicy = chatwire.StallPolicy
 
 // Client is immutable after construction and may be shared by concurrent agents.
 type Client struct {
@@ -35,6 +42,7 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("chatcompletions: %w", err)
 	}
+	wire = wire.WithStallPolicy(config.Stall)
 	if strings.TrimSpace(config.Model) == "" {
 		return nil, fmt.Errorf("chatcompletions: model is required")
 	}

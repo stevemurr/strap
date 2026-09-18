@@ -22,7 +22,14 @@ type Config struct {
 	Model      string
 	HTTPClient *http.Client
 	Generation Generation
+	// Stall bounds how long a streaming response may deliver nothing before
+	// the request is abandoned as unproductive. The zero value disables it.
+	Stall StallPolicy
 }
+
+// StallPolicy is chatwire.StallPolicy, re-exported so adapters configure the
+// watchdog without importing an internal package.
+type StallPolicy = chatwire.StallPolicy
 
 // Client snapshots generation settings at construction and is safe to share
 // across agents. The injected HTTPClient remains a shared collaborator.
@@ -63,6 +70,7 @@ func New(config Config) (*Client, error) {
 	u, _ := url.Parse(config.BaseURL)
 	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1") + "/tokenize"
 	u.RawPath = ""
+	wire = wire.WithStallPolicy(config.Stall)
 	strict := map[string]bool{}
 	for _, name := range config.Generation.StrictTools {
 		if strings.TrimSpace(name) == "" {
