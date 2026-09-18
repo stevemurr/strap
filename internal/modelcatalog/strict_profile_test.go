@@ -22,6 +22,9 @@ func TestBundledStrictToolsReachTheirToolAndNoOther(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := model.Generation.StrictTools
+			if model.Generation.StrictAllTools {
+				want = []string{"create_plan", "report_work_progress", "shell"}
+			}
 			if len(want) == 0 {
 				t.Skip("profile constrains no tool")
 			}

@@ -20,16 +20,12 @@ type Generation struct {
 	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
 	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
 	ReasoningEffort      *string  `json:"reasoning_effort,omitempty"`       // Qwen template: low, medium, or xhigh.
-	// StrictTools names the tools vLLM must constrain to their own schema
-	// (structural tags) instead of extracting calls from free text. It is not
-	// a sampling field; it is applied to the named tool definitions of each
-	// request, and a name no agent advertises is simply never applied.
-	//
-	// Constraining is per tool because it is a remedy, not an improvement:
-	// models emit trailing characters after a long nested array, and the
-	// server's parser then passes the raw text through as a string. Tools
-	// without that shape gain nothing and still pay the observed cost of
-	// occasional empty arguments under constrained decoding.
+	// StrictAllTools marks every advertised tool, including dynamically added
+	// tools. Enable only for a model profile backed by a validated server.
+	// It takes precedence over StrictTools and defaults to false. Tool selection
+	// stays automatic and application-side argument validation still applies.
+	StrictAllTools bool `json:"strict_all_tools,omitempty"`
+	// StrictTools selectively constrains named tools when StrictAllTools is false.
 	StrictTools []string `json:"strict_tools,omitempty"`
 }
 

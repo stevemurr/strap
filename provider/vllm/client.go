@@ -31,6 +31,7 @@ type Client struct {
 	wire             *chatwire.Client
 	generation       generationFields
 	strictTools      map[string]bool
+	strictAllTools   bool
 	tokenizeEndpoint string
 }
 
@@ -70,7 +71,7 @@ func New(config Config) (*Client, error) {
 		}
 		strict[name] = true
 	}
-	return &Client{model: config.Model, wire: wire, generation: generation, strictTools: strict, tokenizeEndpoint: u.String()}, nil
+	return &Client{model: config.Model, wire: wire, generation: generation, strictTools: strict, strictAllTools: config.Generation.StrictAllTools, tokenizeEndpoint: u.String()}, nil
 }
 
 // HTTPError preserves rejected options and other bounded server diagnostics.
@@ -92,17 +93,22 @@ func (c *Client) Submit(ctx context.Context, input provider.Request, observer pr
 	// Match by name: a request advertises the tools of one agent's role, and
 	// the configured names cover every role.
 	for i := range base.Tools {
-		if c.strictTools[base.Tools[i].Function.Name] {
+		if c.strictAllTools || c.strictTools[base.Tools[i].Function.Name] {
 			yes := true
 			base.Tools[i].Function.Strict = &yes
 		}
 	}
 	// Embed typed fields at the root. extra_body is an SDK convention, not a
 	// vLLM wire field. Only chat template options have a nested JSON object.
+	toolChoice := ""
+	if len(base.Tools) > 0 {
+		toolChoice = "auto"
+	}
 	wire := struct {
 		chatwire.Request
 		generationFields
-	}{base, c.generation}
+		ToolChoice string `json:"tool_choice,omitempty"`
+	}{base, c.generation, toolChoice}
 	result, err := c.wire.Submit(ctx, wire, observer)
 	if err != nil {
 		var responseError *chatwire.HTTPError

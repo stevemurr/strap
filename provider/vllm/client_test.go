@@ -50,7 +50,7 @@ func TestGenerationSnapshotAndConcurrentIsolation(t *testing.T) {
 		}
 		// Only protocol fields and typed generation options may cross the wire.
 		for name := range body {
-			if _, ok := want[name]; !ok && name != "model" && name != "messages" && name != "tools" && name != "stream" && name != "stream_options" {
+			if _, ok := want[name]; !ok && name != "model" && name != "messages" && name != "tools" && name != "stream" && name != "stream_options" && name != "tool_choice" {
 				t.Errorf("unexpected wire field %s", name)
 			}
 		}
