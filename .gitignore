@@ -2,3 +2,7 @@
 /strap-eval
 /eval/results/
 .claude/
+.env
+.env.*
+!.env.example
+.DS_Store
