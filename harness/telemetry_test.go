@@ -28,7 +28,7 @@ func (p *telemetryScript) Submit(_ context.Context, r provider.Request, observer
 	n := p.steps[string(r.Agent)]
 	p.mu.Unlock()
 	if n == 1 {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "1", Name: "ping", Arguments: json.RawMessage(`{}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "1", Name: "ping", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 	}
 	close(p.finished)
 	return provider.Response{Content: "done"}, nil
@@ -41,8 +41,8 @@ func (p *telemetryScript) CountTokens(context.Context, provider.Request) (int64,
 
 type pingTool struct{}
 
-func (pingTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: "ping", Parameters: json.RawMessage(`{"type":"object"}`)}
+func (t pingTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "ping", Parameters: t.InputContract().Schema()}
 }
 func (pingTool) Call(context.Context, tool.Call) (tool.Result, error) { return tool.Text("pong"), nil }
 func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
@@ -110,6 +110,14 @@ func TestEffectiveModelConfigCopiesGenerationWithoutAliasing(t *testing.T) {
 	}
 	defer s.Dispose(context.Background())
 	info := s.Configuration()
+	if info.ToolContractVersion != tool.InputContractVersion {
+		t.Fatal("missing contract version")
+	}
+	for _, role := range []harness.RoleConfiguration{info.Root, info.Implementor, info.Auditor, info.Researcher} {
+		if len(role.SchemaHash) != 64 {
+			t.Fatal("missing schema hash")
+		}
+	}
 	m := info.Root.Model
 	if m == nil || m.Generation.MaxTokens == nil || *m.Generation.MaxTokens != 131072 || m.BaseURL != "http://localhost:9999/v1" {
 		t.Fatal(m)
@@ -136,7 +144,7 @@ func (p *concurrentTelemetry) Submit(_ context.Context, r provider.Request, obse
 	n := p.steps[string(r.Agent)]
 	p.mu.Unlock()
 	if n == 1 {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "1", Name: "ping", Arguments: json.RawMessage(`{}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "1", Name: "ping", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 	}
 	return provider.Response{Content: "done"}, nil
 }
@@ -226,4 +234,12 @@ func TestAutomaticTelemetryCanBeDisabled(t *testing.T) {
 	if p.counts.Load() != 0 {
 		t.Fatal("disabled telemetry made requests")
 	}
+}
+
+func (t pingTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

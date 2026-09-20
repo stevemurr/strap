@@ -147,10 +147,12 @@ Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
 `-force-nonempty-content=false`. They require the vLLM backend. Explicitly selecting
 `-backend chatcompletions` clears saved generation settings and uses server defaults;
 explicit generation flags are then rejected.
-`-strict-tools` marks every advertised tool `strict`, so vLLM constrains tool-call
-generation to each tool's schema with structural tags instead of extracting calls
-from free text. It is opt-in: the served grammar must accept every schema, so test
-it against each tool before enabling it in a profile, and expect added latency.
+All advertised tools use the same closed `{"input":{...}}` argument envelope
+and strict schemas. Every declared field is required;
+nullable fields use explicit null rather than omission. The provider sends
+function.strict for every tool, including dynamically registered tools. There are
+no selective strictness flags. Validate the full toolset against the serving
+backend before deploying a schema or backend change. See [the input contract](docs/tool-input-contract.md).
 The same immutable provider settings apply to the root, implementors, and auditors.
 
 The vLLM adapter targets the generation fields exposed by vLLM 0.25.0, including
@@ -445,7 +447,7 @@ The CLI exposes tools according to each agent’s role:
 |---|---|
 | `create_plan` | Root creates the shared plan once, with nested initial steps |
 | `add_step` / `edit_step` / `cancel_steps` / `reorder_steps` / `rename_plan` | Root changes one plan or one step per call using the plan revision; step status is never set here |
-| `report_work_progress` | Current worker reports a full position, findings, or eligible scoped steps using work and assignment revisions |
+| `report_work_progress` | Current worker reports a full position, findings, or eligible scoped steps using an explicit work ID |
 | `create_agent` | Root creates an idle registered `researcher`, `implementor`, or `auditor`; no task starts |
 | `assign_implementation` / `assign_research` | Assign a bounded task to an existing eligible `assignee`; only implementation accepts optional plan scope |
 | `assign_audit` / `assign_repair` | Assign review using the original work/revision/submission, or repair using the original work/revision/failed audit |
@@ -556,8 +558,8 @@ work through the store, then deliver its snapshot. `message.Message` and
 Runtime `tool.Call.Actor` supplies the caller identity. Neither model arguments nor
 forwarded work snapshots grant write permissions.
 
-Tool constructors take application callbacks; for example, `tool.UpdatePlan`
-takes separate plan-edit and work-progress handlers. `work.Store` owns validation,
+Tool constructors take application callbacks; `tool.CreatePlan` and
+`tool.ReportWorkProgress` take plan-edit and work-progress handlers respectively. `work.Store` owns validation,
 revisions, scope reservations, and immutable outcomes. It never creates agents or
 sends messages. The application's dispatcher handles its pending events and
 configures auditors independently from implementors.
@@ -568,8 +570,8 @@ accepted session log for delivery observations, so work continues without a UI r
 `conversation.Deliver` is a trusted host operation; model-facing messaging still
 uses the runtime-bound `Sender`.
 
-Tracked delegation uses `create_agent({role:"implementor"})`, followed by
-`assign_implementation({assignee:agent_id,task:"..."})`. Choose `auditor`
+Tracked delegation uses `create_agent({input:{role:"implementor"}})`, followed by
+`assign_implementation({input:{assignee:agent_id,task:"...",context:null,expected_output:null,scope:null}})`. Choose `auditor`
 for independent review; implementors also handle repairs. Roles are immutable.
 `harness.Session.CreateAgent(ctx, actor, roster.CreateRequest)` uses the same path.
 The controller's raw `CreateAgent(parent, spec)` remains a work-independent runtime
@@ -610,7 +612,7 @@ func(context.Context, tool.Call, message.ActorID) (tool.Result, error)
 
 `InspectAgent` accepts
 `func(context.Context, tool.Call, tool.InspectAgentArgs) (tool.Result, error)`.
-Its arguments are `agent_id`, optional `limit` (1–100, default 20), and optional
+Its arguments are `agent_id`, nullable `limit` (1–100, default 20), and nullable
 `before` (exclusive, one-based message position). The CLI returns state and a
 chronological transcript projection with message positions and `has_earlier`.
 To page backwards, pass the first returned position as `before`. Model-facing
@@ -904,8 +906,8 @@ agents using the same directory; its adapters serialize direct file operations.
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `shell` | `command`, optional `timeout_ms` | Combined output, exit code, timeout and truncation flags |
-| `read_file` | `path`, optional `offset`, `limit` | Numbered text, total lines, more/truncation flags |
+| `shell` | `command`, nullable `timeout_ms` | Combined output, exit code, timeout and truncation flags |
+| `read_file` | `path`, nullable `offset`, `limit` | Numbered text, total lines, more/truncation flags |
 | `write_file` | `path`, `content` | Path and bytes written |
 | `edit_file` | `path`, `old`, `new` | Path and one replacement |
 
@@ -972,10 +974,12 @@ constraints once; schema generation and runtime decoding use that one contract.
 See [the tool contract design](DESIGN.md#typed-tool-contracts) and
 [the executable example](tool/example_test.go).
 
-Worker progress uses `report_work_progress` with `work_id` and `expected_revision`.
-Legacy worker `update_plan`, `update_work`, and Go/HTTP `UpdateProgress` mutations
-are rejected without changing work. A supplied position replaces all its fields;
-omit it for finding-only or step-only reports. HTTP uses `POST /sessions/{id}/work/report-progress`.
+Worker progress uses `report_work_progress` with explicit `work_id`.
+The obsolete progress-mutation Go API and HTTP route are removed. A supplied position replaces all its fields;
+set it to null in tool calls for finding-only or step-only reports. HTTP uses `POST /sessions/{id}/work/report-progress` with
+`{"actor":"agent-id","request":{"input":{...}}}`. Model-command HTTP adapters
+share tool validation and domain conversion. Host controls and stored results
+keep their own formats.
 
 
 ## Research and recorded progress
@@ -998,13 +1002,11 @@ still use `submit_work` and require independent audit for acceptance.
 | File editing | Yes | — | Yes | — |
 | Messaging and configured file/PDF/web reads | Yes | Yes | Yes | Yes |
 
-Worker progress requires `work_id` and the current `expected_revision`, exactly
-as every other work mutation does; the assignment binding recorded on the report
-is read from the work. A supplied `position` replaces the entire prior position;
-omitting it preserves that position. Findings are immutable, with observed or
+Worker progress requires explicit `work_id`; its assignment binding is read from
+the work. Other work mutations also require the current `expected_revision`. A supplied `position` replaces the entire prior position;
+setting it to null in tool calls preserves that position. Findings are immutable, with observed or
 inferred basis, evidence, limitations and explicit supersession. Step progress
-updates the authoritative scoped plan immediately. The legacy worker `update_work`
-mutation rejects requests without changing state.
+updates the authoritative scoped plan immediately. The removed worker `update_work` tool is unavailable.
 
 The dispatcher records every report. Activity-only reports stay in inspection;
 finding notices batch for two seconds and normally occur at most once per owner

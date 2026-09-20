@@ -32,19 +32,6 @@ func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work
 	return s.Store.UpdatePlan(actor, u)
 }
 
-func (s *Session) UpdateProgress(ctx context.Context, actor identity.ActorID, u work.ProgressUpdate) (work.Work, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.Work{}, admitErr
-	}
-	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.Work{}, err
-	}
-	return s.Store.UpdateProgress(actor, u)
-}
-
 func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
 	run, done, admitErr := s.begin(ctx)
 	if admitErr != nil {

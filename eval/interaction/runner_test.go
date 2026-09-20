@@ -45,7 +45,7 @@ func fixtureFromManifest(t *testing.T, dir string) fixture {
 	return manifest.Fixture
 }
 func responseCall(name string, value any) provider.Response {
-	args, _ := json.Marshal(value)
+	args, _ := tool.MarshalInput(value)
 	return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call", Name: name, Arguments: args}}}
 }
 func trialResult(t *testing.T, opts Options) Result {
@@ -189,7 +189,7 @@ func TestCallAndToolBudgets(t *testing.T) {
 				f := fixtureFromManifest(t, opts.Output)
 				r := responseCall("get_work", map[string]any{"work_id": f.Original.ID})
 				if kind == "tool" {
-					r.ToolCalls = append(r.ToolCalls, provider.ToolCall{ID: "second", Name: "list_agents", Arguments: json.RawMessage(`{}`)})
+					r.ToolCalls = append(r.ToolCalls, provider.ToolCall{ID: "second", Name: "list_agents", Arguments: json.RawMessage(`{"input":{}}`)})
 				}
 				return r, nil
 			})

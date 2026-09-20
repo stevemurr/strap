@@ -388,10 +388,6 @@ func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work
 	return w.Clone(), nil
 }
 
-// UpdateProgress is retained only to reject obsolete callers without mutation.
-func (s *Store) UpdateProgress(actor identity.ActorID, u ProgressUpdate) (Work, error) {
-	return Work{}, invalid("legacy progress mutation removed; use ReportWorkProgress with an explicit assigned_at_revision and full position")
-}
 func (s *Store) GetWork(actor identity.ActorID, id ID) (Work, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -33,7 +33,7 @@ func TestDelegatedPromptAndAssignmentReachHTTPServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	assignment := work.Work{Task: "Compute a result", Context: "Quoted \"context\"\nsecond line", ExpectedOutput: "A report"}
-	args, err := json.Marshal(map[string]string{"task": assignment.Task, "context": assignment.Context, "expected_output": assignment.ExpectedOutput})
+	args, err := tool.MarshalInput(map[string]string{"task": assignment.Task, "context": assignment.Context, "expected_output": assignment.ExpectedOutput})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -133,7 +133,7 @@ func TestRootPersistsAcrossMessagesAndAcknowledgesConsumption(t *testing.T) {
 func TestDelegationDoesNotBlockRootAndChildReplyReturnsThroughInbox(t *testing.T) {
 	c, m := setup(t)
 	_, _ = c.Send(c.Root(), "delegate this")
-	m.next(t).tool("create_test_agent", `{"task":"child task","context":"Background","expected_output":"A result"}`)
+	m.next(t).tool("create_test_agent", `{"input":{"task":"child task","context":"Background","expected_output":"A result"}}`)
 	var root, child call
 	for range 2 {
 		got := m.next(t)
@@ -195,7 +195,7 @@ func TestSteeringQueuesDuringModelCallAndIsConsumedAfterToolBatch(t *testing.T) 
 	if got, _ := c.Receipt(steer.MessageID); got.Status != message.Queued {
 		t.Fatalf("premature ack: %+v", got)
 	}
-	first.tool("echo", `{}`)
+	first.tool("echo", `{"input":{}}`)
 	next := m.next(t)
 	history := next.request.Messages
 	if history[len(history)-2].Role != "tool" || history[len(history)-2].Content.Text() != "settled" {
@@ -219,7 +219,7 @@ func TestSendMessageBindsSenderAndReportsReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = c.Send(c.Root(), "send a message")
-	args, _ := json.Marshal(map[string]string{"to": string(child), "message": "hello child"})
+	args, _ := tool.MarshalInput(map[string]string{"to": string(child), "message": "hello child"})
 	m.next(t).tool("send_message", string(args))
 	var root call
 	for range 2 {

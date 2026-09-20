@@ -289,28 +289,25 @@ types in one registry. `Func[A]` implements that interface with `Definition[A]`
 and `Handler[A]`. No separate binding operation is needed.
 
 `NewParameters[A]` compiles one immutable contract from a struct and declared
-constraints. JSON fields without `omitempty` are required. Pointers and slices
-preserve omission; explicit null, unknown/duplicate keys, unsupported codecs and
-ambiguous fields are rejected. Supported values are structs, pointers, slices,
-strings, booleans and integers. Numeric bounds include the Go destination range;
-integral JSON decimals/exponents decode exactly without float64 rounding.
+constraints, adding exactly one closed `input` envelope. Go callers use
+`tool.MarshalInput`; handlers receive the typed payload. Every declared property is required and every object is closed.
+`Nullable(path, meaning)` explicitly permits null on a pointer or slice; a pointer
+alone does not permit null. Tool inputs reject JSON tag options such as
+`omitempty`. Separate input structs preserve null until explicit domain mapping.
+Supported values are structs, pointers, slices, strings, booleans and integers.
+Integer decoding remains exact, including integral decimal/exponent notation.
 
-Constraints such as enum membership, string length and configured timeout bounds
-are declared once and used by both the schema and decoder. Invalid definitions
-fail during parameter construction. Agent registration checks typed tools for an
-initialized contract and non-nil handler. Built-ins use typed handlers; direct
-custom implementations of `Tool` remain responsible for their own contracts.
-Definitions and handlers must not be mutated after registration. Parameter
-contracts may be shared concurrently, and exported schema bytes are independent.
+Schema emission, structural decoding, and composition read the same contract.
+Unknown/duplicate keys, omitted fields, wrong types and invalid values are rejected
+before handlers run. Registration requires a typed `InputContract` from every
+custom tool and verifies its advertised schema. Definitions and handlers must not
+be mutated after registration. Domain authorization and state checks still apply.
 
-`Compose` snapshots complete typed tools and advertises their schemas under
-`oneOf`. It validates all branches before invoking exactly one handler; no match
-or ambiguity returns an argument error with no handler effects. To accommodate
-servers that use top-level property types when parsing generated tool arguments,
-composition also derives redundant type hints from the branches. These hints do
-not replace or loosen the `oneOf` constraints. They prevent arrays and numbers
-from being returned as strings by the configured local server. Full alternatives
-remain necessary for provider-side validation; runtime validation always applies.
+`Compose` snapshots complete typed tools and advertises their complete forms under `input.oneOf`.
+`ComposeBy` selects on a required constant discriminator. There are no root parser
+hints or provider schema rewrites. `AtLeastOneNonNull` emits complete `anyOf`
+branches; all fields remain required. All chat tool definitions carry `strict:true`.
+See [the input contract](docs/tool-input-contract.md) for migration and null semantics.
 
 The workflow exposes creation/editing to the root, scoped progress to implementors,
 and work-level reporting to auditors. The work store still enforces ownership,
@@ -402,7 +399,7 @@ assignment tool with an existing eligible assignee. Assignment never creates, st
 failed assignment leaves the selected agent available. Root bootstrap is the only
 root registration path. Only root receives creation, assignment, and recovery tools.
 
-Implementors call `report_work_progress` with a work ID/revision to report progress, then
+Implementors call `report_work_progress` with an explicit work ID to report progress, then
 `submit_work` to capture an immutable outcome. Submission suspends writes and
 emits a review request. The root assigns an auditor through `assign_audit`
 with an existing auditor assignee, original work ID/revision, and exact submission ID.

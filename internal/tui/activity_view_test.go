@@ -42,7 +42,7 @@ func outputForTest(m *model, actor message.ActorID, call uint64, text string) id
 
 func completedToolForTest(m *model, actor message.ActorID, call, path string) {
 	start := time.Date(2026, 9, 14, 14, 15, 0, 0, time.UTC)
-	a := agent.ToolActivity{Call: provider.ToolCall{ID: call, Name: "read_file", Arguments: []byte(fmt.Sprintf(`{"path":%q}`, path))}, StartedAt: start}
+	a := agent.ToolActivity{Call: provider.ToolCall{ID: call, Name: "read_file", Arguments: []byte(fmt.Sprintf(`{"input":{"path":%q}}`, path))}, StartedAt: start}
 	m.observe(conversation.ToolEvent{Agent: actor, Activity: a})
 	a.FinishedAt = start.Add(time.Second)
 	a.Result = tool.Text("contents of " + path)
@@ -93,7 +93,7 @@ func TestActivityBoundariesPreserveMessagesAgentsAndFailures(t *testing.T) {
 	completedToolForTest(m, "root", "c", "second.go")
 	outputForTest(m, "root", 3, "A meaningful progress update")
 	completedToolForTest(m, "root", "d", "third.go")
-	a := agent.ToolActivity{Call: provider.ToolCall{ID: "failed", Name: "shell", Arguments: []byte(`{"command":"go test ./..."}`)}, StartedAt: time.Now()}
+	a := agent.ToolActivity{Call: provider.ToolCall{ID: "failed", Name: "shell", Arguments: []byte(`{"input":{"command":"go test ./..."}}`)}, StartedAt: time.Now()}
 	m.observe(conversation.ToolEvent{Agent: "root", Activity: a})
 	a.FinishedAt = time.Now()
 	a.Err = errors.New("tests failed")
@@ -122,7 +122,7 @@ func TestFoldCompletionAndResultRemainFrozenUntilResume(t *testing.T) {
 	m, _ := setup(t)
 	m.entries = nil
 	m.resize(130, 60)
-	a := agent.ToolActivity{Call: provider.ToolCall{ID: "read", Name: "read_file", Arguments: []byte(`{"path":"notes.md"}`)}, StartedAt: time.Now()}
+	a := agent.ToolActivity{Call: provider.ToolCall{ID: "read", Name: "read_file", Arguments: []byte(`{"input":{"path":"notes.md"}}`)}, StartedAt: time.Now()}
 	m.observe(conversation.ToolEvent{Agent: "root", Activity: a})
 	expandActivityForTest(m, true)
 	m.Update(tea.KeyMsg{Type: tea.KeyF2})
@@ -171,7 +171,7 @@ func TestActivityMouseAndKeyboardKeepDraftAndScroll(t *testing.T) {
 }
 
 func TestToolDetailsAreSafeBoundedAndKeepUnicode(t *testing.T) {
-	a := agent.ToolActivity{Call: provider.ToolCall{Arguments: []byte(`{"path":"safe\u001b[2J.md"}`)}, Result: tool.Text(strings.Repeat("界", 12000) + "\x1b]52;c;secret\a")}
+	a := agent.ToolActivity{Call: provider.ToolCall{Arguments: []byte(`{"input":{"path":"safe\u001b[2J.md"}}`)}, Result: tool.Text(strings.Repeat("界", 12000) + "\x1b]52;c;secret\a")}
 	d := displayTool(a)
 	if strings.Contains(d.preview, "\x1b") || strings.Contains(d.result, "\x1b") || !utf8.ValidString(d.result) || !strings.Contains(d.result, "output truncated") || len(d.result) > 33000 {
 		t.Fatal("unsafe or unbounded tool display")

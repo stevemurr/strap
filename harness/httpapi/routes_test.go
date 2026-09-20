@@ -206,7 +206,7 @@ func TestHTTPWorkArtifactRoutes(t *testing.T) {
 	_, s := recoverySession(t, true)
 	base := "/sessions/" + s.ID()
 	worker := createHTTPWorker(t, s)
-	w := request(t, s.http, "POST", base+"/work/assign_implementation", httpapi.WorkRequest[tool.AssignImplementationArgs]{Actor: s.Root(), Request: tool.AssignImplementationArgs{Assignee: worker, Task: "task"}})
+	w := request(t, s.http, "POST", base+"/work/assign_implementation", wireRequest(s.Root(), tool.AssignImplementationArgs{Assignee: worker, Task: "task"}))
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -214,7 +214,7 @@ func TestHTTPWorkArtifactRoutes(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	submitted := request(t, s.http, "POST", base+"/work/submit", httpapi.WorkRequest[work.SubmitRequest]{Actor: worker, Request: work.SubmitRequest{WorkTarget: work.WorkTarget{ID: item.ID, ExpectedRevision: item.Revision}, Summary: "done"}})
+	submitted := request(t, s.http, "POST", base+"/work/submit", wireRequest(worker, tool.SubmitInput{WorkTarget: work.WorkTarget{ID: item.ID, ExpectedRevision: item.Revision}, Summary: "done"}))
 	if submitted.Code != 200 {
 		t.Fatal(submitted.Code, submitted.Body.String())
 	}

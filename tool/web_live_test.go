@@ -87,7 +87,7 @@ func TestLiveWeb(t *testing.T) {
 		for _, actor := range []string{"a", "b"} {
 			go func(actor string) {
 				url := server.URL + "/page?actor=" + actor
-				args, _ := json.Marshal(openArgs{URL: url})
+				args, _ := MarshalInput(openArgs{URL: url})
 				r, err := w.Tools()[1].Call(context.Background(), Call{Actor: message.ActorID(actor), Arguments: args})
 				var page OpenURLResult
 				if err == nil {
@@ -128,7 +128,7 @@ func TestLiveWeb(t *testing.T) {
 	t.Run("search", func(t *testing.T) {
 		for range 2 {
 			start := time.Now()
-			r, err := w.Tools()[0].Call(context.Background(), Call{Arguments: []byte(`{"query":"Go context package documentation","max_results":3}`)})
+			r, err := w.Tools()[0].Call(context.Background(), Call{Arguments: []byte(`{"input":{"query":"Go context package documentation","max_results":3}}`)})
 			if err != nil {
 				t.Fatal(err)
 			}

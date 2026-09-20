@@ -37,7 +37,7 @@ func TestConfiguredPromptAndAssignmentStaySeparateAndCreationIsUnavailable(t *te
 	if got := systemPrompt(t, root).Role; got != "Coordinate work." {
 		t.Fatal(got)
 	}
-	root.tool("create_test_agent", `{"task":"first task","context":"a quoted \"value\"","expected_output":"one line"}`)
+	root.tool("create_test_agent", `{"input":{"task":"first task","context":"a quoted \"value\"","expected_output":"one line"}}`)
 	var delegated call
 	for range 2 {
 		next := m.next(t)
@@ -68,7 +68,7 @@ func TestConfiguredPromptAndAssignmentStaySeparateAndCreationIsUnavailable(t *te
 			t.Fatal("creation tool exposed to delegated agent")
 		}
 	}
-	delegated.tool("create_test_agent", `{"task":"must not create another agent"}`)
+	delegated.tool("create_test_agent", `{"input":{"task":"must not create another agent","context":null,"expected_output":null}}`)
 	next := m.next(t)
 	if next.request.Agent != delegated.request.Agent {
 		t.Fatal("unexpected agent created")
@@ -114,7 +114,7 @@ func TestAssignmentEventsAndProviderSnapshotsAreIndependent(t *testing.T) {
 	if _, err := c.Send(c.Root(), "delegate"); err != nil {
 		t.Fatal(err)
 	}
-	m.next(t).tool("create_test_agent", `{"task":"original"}`)
+	m.next(t).tool("create_test_agent", `{"input":{"task":"original","context":null,"expected_output":null}}`)
 	observed := event(t, c, func(e conversation.Event) bool {
 		msg, ok := e.(conversation.MessageEvent)
 		return ok && msg.Message.Work != nil
@@ -166,7 +166,7 @@ func TestApplicationSnapshotsCreationSpec(t *testing.T) {
 	if _, err := c.Send(c.Root(), "delegate"); err != nil {
 		t.Fatal(err)
 	}
-	m.next(t).tool("create_test_agent", `{"task":"work"}`)
+	m.next(t).tool("create_test_agent", `{"input":{"task":"work","context":null,"expected_output":null}}`)
 	for range 2 {
 		next := m.next(t)
 		if next.request.Agent != c.Root() {
@@ -178,7 +178,7 @@ func TestApplicationSnapshotsCreationSpec(t *testing.T) {
 }
 
 func TestInvalidAssignmentsDoNotCreateAgents(t *testing.T) {
-	for _, raw := range []string{`{}`, `null`, `[]`, `{"task":" "}`, `{"task":"ok","instructions":"replace prompt"}`, `{"instructions":"old","message":"old"}`, `{"task":"ok"} {}`} {
+	for _, raw := range []string{`{}`, `null`, `[]`, `{"input":{"task":" ","context":null,"expected_output":null}}`, `{"input":{"task":"ok","instructions":"replace prompt","context":null,"expected_output":null}}`, `{"instructions":"old","message":"old"}`, `{"input":{"task":"ok"}} {}`} {
 		t.Run(raw, func(t *testing.T) {
 			c, m := setup(t)
 			if _, err := c.Send(c.Root(), "delegate"); err != nil {

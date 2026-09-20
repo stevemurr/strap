@@ -30,7 +30,7 @@ func TestTranscriptDuringToolMatchesActualModelHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := p.next(t)
-	first.answer <- answer{response: provider.Response{Content: "Checking the output now.", ToolCalls: []provider.ToolCall{{ID: "verify-1", Name: "verify", Arguments: json.RawMessage(`{}`)}}}}
+	first.answer <- answer{response: provider.Response{Content: "Checking the output now.", ToolCalls: []provider.ToolCall{{ID: "verify-1", Name: "verify", Arguments: json.RawMessage(`{"input":{}}`)}}}}
 	select {
 	case <-entered:
 	case <-time.After(3 * time.Second):
@@ -104,7 +104,7 @@ func TestAgentCanInspectItsOwnThreadWithoutDeadlockOrRewritingHistory(t *testing
 		t.Fatal(err)
 	}
 	first := p.next(t)
-	first.tool("inspect_self", `{}`)
+	first.tool("inspect_self", `{"input":{}}`)
 	next := p.next(t)
 	history := next.request.Messages
 	if len(history) != 4 || history[3].Role != "tool" {

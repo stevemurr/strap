@@ -42,8 +42,8 @@ func TestCountToolBatchUsesExactHistoryAndOwnsSnapshot(t *testing.T) {
 	}
 	_, _ = c.Send(c.Root(), "begin")
 	p.next(t).answer <- answer{response: provider.Response{ToolCalls: []provider.ToolCall{
-		{ID: "one", Name: "echo", Arguments: []byte(`{}`)},
-		{ID: "two", Name: "echo", Arguments: []byte(`{}`)},
+		{ID: "one", Name: "echo", Arguments: []byte(`{"input":{}}`)},
+		{ID: "two", Name: "echo", Arguments: []byte(`{"input":{}}`)},
 	}}}
 	batch := event(t, c, func(e conversation.Event) bool { _, ok := e.(conversation.ToolBatchEvent); return ok }).(conversation.ToolBatchEvent)
 	if batch.Agent != c.Root() || batch.Batch.ContextRevision != 5 || !reflect.DeepEqual(batch.Batch.Calls, []string{"one", "two"}) {

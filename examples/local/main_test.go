@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/stevemurr/strap/tool"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,17 +68,17 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 				case "assign_implementation":
 					if env.Kind == message.Instruction {
 						name = "assign_implementation"
-						args = map[string]any{"assignee": impl, "task": "calculate two plus two"}
+						args = map[string]any{"assignee": impl, "task": "calculate two plus two", "context": nil, "expected_output": nil, "scope": nil}
 					}
 				case "submit_work":
 					if env.Work != nil {
 						name = "submit_work"
-						args = map[string]any{"work_id": env.Work.ID, "expected_revision": env.Work.Revision, "summary": "4"}
+						args = map[string]any{"work_id": env.Work.ID, "expected_revision": env.Work.Revision, "summary": "4", "evidence": nil, "artifacts": nil}
 					}
 				case "submit_audit":
 					if env.Work != nil {
 						name = "submit_audit"
-						args = map[string]any{"work_id": env.Work.ID, "expected_revision": env.Work.Revision, "submission_id": env.Work.SubjectSubmissionID, "summary": "2 + 2 = 4", "verdict": "pass"}
+						args = map[string]any{"work_id": env.Work.ID, "expected_revision": env.Work.Revision, "submission_id": env.Work.SubjectSubmissionID, "summary": "2 + 2 = 4", "verdict": "pass", "findings": nil}
 					}
 				}
 			}
@@ -105,7 +106,7 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 		msg := map[string]any{"role": "assistant", "content": "Waiting for audited work."}
 		reason := "stop"
 		if name != "" {
-			raw, _ := json.Marshal(args)
+			raw, _ := tool.MarshalInput(args)
 			reason = "tool_calls"
 			msg["tool_calls"] = []any{map[string]any{"id": fmt.Sprint(calls.Add(1)), "type": "function", "function": map[string]any{"name": name, "arguments": string(raw)}}}
 		}

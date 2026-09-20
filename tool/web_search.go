@@ -13,7 +13,7 @@ import (
 
 type searchArgs struct {
 	Query      string `json:"query"`
-	MaxResults *int   `json:"max_results,omitempty"`
+	MaxResults *int   `json:"max_results"`
 }
 
 type SearchHit struct {

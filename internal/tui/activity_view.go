@@ -33,8 +33,11 @@ func boundedToolText(text string, limit int) string {
 
 func displayTool(a agent.ToolActivity) *toolDisplay {
 	d := &toolDisplay{name: a.Call.Name, started: a.StartedAt, finished: a.FinishedAt}
-	var args map[string]json.RawMessage
-	if json.Unmarshal(a.Call.Arguments, &args) == nil {
+	var envelope struct {
+		Input map[string]json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(a.Call.Arguments, &envelope) == nil {
+		args := envelope.Input
 		for _, key := range []string{"path", "url", "command", "query", "pattern", "task", "agent_id"} {
 			var value string
 			if json.Unmarshal(args[key], &value) == nil && strings.TrimSpace(value) != "" {

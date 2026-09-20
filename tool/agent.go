@@ -78,8 +78,8 @@ func ResumeAgent(handle func(context.Context, Call, message.ActorID) (Result, er
 
 type InspectAgentArgs struct {
 	AgentID message.ActorID `json:"agent_id"`
-	Limit   *int            `json:"limit,omitempty"`
-	Before  *uint64         `json:"before,omitempty"`
+	Limit   *int            `json:"limit"`
+	Before  *uint64         `json:"before"`
 }
 
 func InspectAgent(handle func(context.Context, Call, InspectAgentArgs) (Result, error)) Tool {
@@ -91,7 +91,7 @@ func InspectAgent(handle func(context.Context, Call, InspectAgentArgs) (Result, 
 			}
 			return handle(ctx, call, args)
 		},
-		MinLength("agent_id", 1), Minimum("limit", 1), Maximum("limit", 100), Minimum("before", 1))
+		Nullable("limit", "use the default page size"), Nullable("before", "read the latest messages"), MinLength("agent_id", 1), Minimum("limit", 1), Maximum("limit", 100), Minimum("before", 1))
 }
 
 func agentOperation(name, description string, handle func(context.Context, Call, message.ActorID) (Result, error)) Tool {

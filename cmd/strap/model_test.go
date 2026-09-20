@@ -69,8 +69,6 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 		{"explicit false content", []string{"-config", bare, "-force-nonempty-content=false"}, map[string]any{
 			"chat_template_kwargs": map[string]any{"force_nonempty_content": false},
 		}, false},
-		// strict-tools marks tools, not the request body, so no sampling field appears.
-		{"strict tools", []string{"-config", bare, "-strict-tools", "create_plan, report_work_progress"}, map[string]any{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

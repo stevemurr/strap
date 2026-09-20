@@ -331,15 +331,3 @@ func (s *Store) reportSnapshot(actor identity.ActorID, r ReportWorkProgressReque
 	}
 	return s.GetWork(actor, r.WorkID)
 }
-
-func TestLegacyProgressCannotMutateOrInferAssignment(t *testing.T) {
-	s, _, w := fixture(t)
-	before, _ := s.GetWork(w.Assignee, w.ID)
-	if _, err := s.UpdateProgress(w.Assignee, ProgressUpdate{WorkTarget: target(w), Blocker: ptr("")}); !errors.Is(err, ErrInvalid) {
-		t.Fatal(err)
-	}
-	after, _ := s.GetWork(w.Assignee, w.ID)
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("legacy request mutated work")
-	}
-}

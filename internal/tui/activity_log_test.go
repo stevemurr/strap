@@ -45,7 +45,7 @@ func (p *responseScript) Submit(_ context.Context, _ provider.Request, observer 
 	}
 	response := provider.Response{Content: text}
 	if p.calls <= 3 {
-		response.ToolCalls = []provider.ToolCall{{ID: fmt.Sprintf("read-%d", p.calls), Name: "read_file", Arguments: json.RawMessage(`{"path":"fixture.txt"}`)}}
+		response.ToolCalls = []provider.ToolCall{{ID: fmt.Sprintf("read-%d", p.calls), Name: "read_file", Arguments: json.RawMessage(`{"input":{"path":"fixture.txt"}}`)}}
 	}
 	return response, nil
 }

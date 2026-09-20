@@ -39,7 +39,7 @@ func TestToolEventsBracketExecutionAndOwnTheirPayload(t *testing.T) {
 	}
 	c, p := setup(t, echo)
 	_, _ = c.Send(c.Root(), "begin")
-	p.next(t).tool("echo", `{"value":"original"}`)
+	p.next(t).tool("echo", `{"input":{"value":"original"}}`)
 	start := toolEvent(t, c, false)
 	if start.Agent != c.Root() || start.Activity.Call.ID != "call-1" || start.Activity.StartedAt.IsZero() {
 		t.Fatal(start)
@@ -49,7 +49,7 @@ func TestToolEventsBracketExecutionAndOwnTheirPayload(t *testing.T) {
 	start.Activity.Call.Arguments[0] = 'x'
 	close(release)
 	finish := toolEvent(t, c, true)
-	if got := <-called; got != `{"value":"original"}` {
+	if got := <-called; got != `{"input":{"value":"original"}}` {
 		t.Fatal(got)
 	}
 	if finish.Activity.Err != nil || finish.Activity.Call.ID != start.Activity.Call.ID || finish.Activity.StartedAt != start.Activity.StartedAt || finish.Activity.FinishedAt.Before(start.Activity.StartedAt) {
@@ -65,7 +65,7 @@ func TestToolEventsBracketExecutionAndOwnTheirPayload(t *testing.T) {
 	if result.Role != "tool" || result.Content.Text() != "result" || result.Content[1].Image.Data[0] != 1 {
 		t.Fatal(result)
 	}
-	if string(next.request.Messages[2].ToolCalls[0].Arguments) != `{"value":"original"}` {
+	if string(next.request.Messages[2].ToolCalls[0].Arguments) != `{"input":{"value":"original"}}` {
 		t.Fatal("start event mutated history")
 	}
 	next.text("done")
@@ -87,7 +87,7 @@ func TestToolEventsReportFailuresAndCancellation(t *testing.T) {
 			if name == "unknown" {
 				requested = "not_registered"
 			}
-			p.next(t).tool(requested, `{}`)
+			p.next(t).tool(requested, `{"input":{}}`)
 			start := toolEvent(t, c, false)
 			if name == "canceled" {
 				if _, err := c.StopAgent(c.Root()); err != nil {

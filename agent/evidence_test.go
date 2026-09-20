@@ -15,8 +15,8 @@ import (
 
 type evidenceTool struct{}
 
-func (evidenceTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: "diagnostic", Parameters: json.RawMessage(`{"type":"object"}`)}
+func (t evidenceTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "diagnostic", Parameters: t.InputContract().Schema()}
 }
 func (evidenceTool) Call(_ context.Context, c tool.Call) (tool.Result, error) {
 	if c.InvocationID == "" {
@@ -35,7 +35,7 @@ func TestEvidenceReceiptRequiresAcceptedFinishAndSurvivesToolError(t *testing.T)
 			c.Spec.Tools = []tool.Tool{evidenceTool{}}
 			c.Spec.Provider = modelFunc(func(_ context.Context, r provider.Request) (provider.Response, error) {
 				if calls.Add(1) == 1 {
-					return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "diagnostic", Arguments: json.RawMessage(`{}`)}}}, nil
+					return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "diagnostic", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 				}
 				var result map[string]any
 				if err := json.Unmarshal([]byte(r.Messages[len(r.Messages)-1].Content.Text()), &result); err != nil || result["evidence_ref"] == nil || result["error"] == nil {
@@ -62,4 +62,12 @@ func TestEvidenceReceiptRequiresAcceptedFinishAndSurvivesToolError(t *testing.T)
 			}
 		})
 	}
+}
+
+func (t evidenceTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

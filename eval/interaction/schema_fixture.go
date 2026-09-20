@@ -206,26 +206,27 @@ func (f fixture) schemaScript(id string) provider.Provider {
 		correct = tool.AssignAuditArgs{Assignee: f.Auditor,
 			WorkTarget: work.WorkTarget{ID: f.Original.ID, ExpectedRevision: f.Original.Revision}, SubmissionID: f.Submission.ID}
 	case roster.Auditor:
-		request := work.AuditRequest{WorkTarget: work.WorkTarget{ID: f.Schema.Target.ID, ExpectedRevision: f.Schema.Target.Revision},
+		request := tool.AuditInput{WorkTarget: work.WorkTarget{ID: f.Schema.Target.ID, ExpectedRevision: f.Schema.Target.Revision},
 			SubmissionID: f.Submission.ID, Verdict: f.Schema.Verdict, Summary: "The answer correctly explains combining two pairs into four objects."}
 		if f.Schema.Verdict == work.Fail {
 			request.Summary = "The submitted answer incorrectly says two plus two equals five."
-			request.Findings = []work.Finding{schemaArithmeticFinding(f.Plan.Steps[0].ID)}
+			finding := schemaArithmeticFinding(f.Plan.Steps[0].ID)
+			request.Findings = []tool.FindingInput{{StepIDs: finding.StepIDs, Description: finding.Description, RequiredChange: finding.RequiredChange, Verification: finding.Verification}}
 		}
 		correct = request
 	case roster.Implementor:
 		position := f.Schema.ExpectedPosition
-		correct = work.ReportWorkProgressRequest{
+		correct = tool.ReportWorkProgressInput{
 			WorkID:   f.Schema.Target.ID,
-			Position: &position,
+			Position: &tool.WorkPositionInput{Objective: position.Objective, Note: &position.Note, NextStep: &position.NextStep},
 		}
 	}
-	valid, err := json.Marshal(correct)
+	valid, err := tool.MarshalInput(correct)
 	if err != nil {
 		panic(err) // Fixtures contain only concrete JSON-safe values.
 	}
 	var invalid map[string]json.RawMessage
-	if err := json.Unmarshal(valid, &invalid); err != nil {
+	if err := json.Unmarshal(schemaPayload(valid), &invalid); err != nil {
 		panic(err)
 	}
 	badOperation := operation
@@ -250,7 +251,7 @@ func (f fixture) schemaScript(id string) provider.Provider {
 		delete(invalid, "position")
 		invalid["objective"], _ = json.Marshal(f.Schema.ExpectedPosition.Objective)
 	}
-	bad, err := json.Marshal(invalid)
+	bad, err := tool.MarshalInput(invalid)
 	if err != nil {
 		panic(err)
 	}
@@ -266,4 +267,12 @@ func schemaArithmeticFinding(step work.StepID) work.Finding {
 		RequiredChange: "Correct the total to four and explain counting the two pairs.",
 		Verification:   "Count the two pairs as 1, 2, 3, 4 and check the answer agrees.",
 	}
+}
+
+func schemaPayload(raw json.RawMessage) json.RawMessage {
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(raw, &envelope) != nil || len(envelope) != 1 {
+		return nil
+	}
+	return envelope["input"]
 }

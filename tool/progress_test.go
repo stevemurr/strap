@@ -15,13 +15,13 @@ func TestProgressReportRequiresTargetAndIntent(t *testing.T) {
 		return Text("recorded"), nil
 	})
 	for _, raw := range []string{
-		`{"position":{"objective":"inspect"}}`,
-		`{"work_id":"w","note":"legacy"}`,
+		`{"input":{"position":{"objective":"inspect","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`,
+		`{"input":{"work_id":"w","note":"legacy"}}`,
 		// The assignment binding is recorded from current work, never sent.
-		`{"work_id":"w","assigned_at_revision":1,"position":{"objective":"inspect"}}`,
-		`{"work_id":"w"}`,
-		`{"work_id":"w","position":null}`,
-		`{"work_id":"w","steps":[{"step_id":"s","status":"completed"}]}`,
+		`{"input":{"work_id":"w","assigned_at_revision":1,"position":{"objective":"inspect","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`,
+		`{"input":{"work_id":"w"}}`,
+		`{"input":{"work_id":"w","position":null,"findings":null,"steps":null}}`,
+		`{"input":{"work_id":"w","steps":[{"step_id":"s","status":"completed","note":null}],"position":null,"findings":null}}`,
 	} {
 		if _, err := op.Call(context.Background(), Call{Arguments: []byte(raw)}); err == nil {
 			t.Fatal("accepted", raw)
@@ -30,7 +30,7 @@ func TestProgressReportRequiresTargetAndIntent(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("invalid request reached handler")
 	}
-	if _, err := op.Call(context.Background(), Call{Arguments: []byte(`{"work_id":"w","position":{"objective":"inspect","blocker":""}}`)}); err != nil {
+	if _, err := op.Call(context.Background(), Call{Arguments: []byte(`{"input":{"work_id":"w","position":{"objective":"inspect","blocker":"","activity":null,"note":null,"next_step":null,"uncertainty":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`)}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -42,21 +42,21 @@ func TestProgressSchemaAndDecoderConform(t *testing.T) {
 		return Text("recorded"), nil
 	})
 	schema := compileExportedSchema(t, op.Definition().Parameters)
-	seed := `{"work_id":"w","position":{"objective":"inspect"}}`
+	seed := `{"input":{"work_id":"w","position":{"objective":"inspect","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`
 	for _, tc := range []struct {
 		name, raw string
 		valid     bool
 	}{
 		{"position", seed, true},
-		{"findings", `{"work_id":"w","findings":[{"claim":"passes","basis":"observed","evidence":[{"uri":"execution:x"}]}]}`, true},
-		{"step", `{"work_id":"w","steps":[{"step_id":"s","status":"ready_for_review"}]}`, true},
-		{"no intent", `{"work_id":"w"}`, false},
-		{"top level alias", `{"work_id":"w","objective":"inspect"}`, false},
-		{"nested extra", `{"work_id":"w","position":{"objective":"inspect","owner":"forged"}}`, false},
-		{"null optional", `{"work_id":"w","position":{"objective":"inspect","blocker":null}}`, false},
-		{"missing evidence uri", `{"work_id":"w","findings":[{"claim":"passes","basis":"observed","evidence":[{}]}]}`, false},
-		{"unknown finding basis", `{"work_id":"w","findings":[{"claim":"passes","basis":"guessed"}]}`, false},
-		{"invalid step transition", `{"work_id":"w","steps":[{"step_id":"s","status":"completed"}]}`, false},
+		{"findings", `{"input":{"work_id":"w","findings":[{"claim":"passes","basis":"observed","evidence":[{"uri":"execution:x","revision":null,"locator":null,"detail":null}],"limitation":null,"supersedes":null}],"position":null,"steps":null}}`, true},
+		{"step", `{"input":{"work_id":"w","steps":[{"step_id":"s","status":"ready_for_review","note":null}],"position":null,"findings":null}}`, true},
+		{"no intent", `{"input":{"work_id":"w"}}`, false},
+		{"top level alias", `{"input":{"work_id":"w","objective":"inspect","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null}}`, false},
+		{"nested extra", `{"input":{"work_id":"w","position":{"objective":"inspect","owner":"forged","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`, false},
+		{"null optional", `{"input":{"work_id":"w","position":{"objective":"inspect","blocker":null,"activity":null,"note":null,"next_step":null,"uncertainty":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`, true},
+		{"missing evidence uri", `{"input":{"work_id":"w","findings":[{"claim":"passes","basis":"observed","evidence":[{}],"limitation":null,"supersedes":null}],"position":null,"steps":null}}`, false},
+		{"unknown finding basis", `{"input":{"work_id":"w","findings":[{"claim":"passes","basis":"guessed","evidence":null,"limitation":null,"supersedes":null}],"position":null,"steps":null}}`, false},
+		{"invalid step transition", `{"input":{"work_id":"w","steps":[{"step_id":"s","status":"completed","note":null}],"position":null,"findings":null}}`, false},
 		{"too many findings", string(mutateSchemaSeed(t, seed, schemaMutation{path: "findings", replacement: `[` + strings.Repeat(`{"claim":"c","basis":"observed"},`, 16) + `{"claim":"c","basis":"observed"}]`})), false},
 		{"too many evidence refs", string(mutateSchemaSeed(t, seed, schemaMutation{path: "findings", replacement: `[{"claim":"c","basis":"observed","evidence":[` + strings.Repeat(`{"uri":"execution:x"},`, 8) + `{"uri":"execution:x"}]}]`})), false},
 	} {
@@ -85,8 +85,8 @@ func TestProgressRejectsDuplicateKeysBeforeHandler(t *testing.T) {
 		return Text("recorded"), nil
 	})
 	for _, raw := range []string{
-		`{"work_id":"w","work_id":"forged","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"inspect"}}`,
-		`{"work_id":"w","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"inspect","objective":"overwritten"}}`,
+		`{"input":{"work_id":"w","work_id":"forged","position":{"objective":"inspect","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`,
+		`{"input":{"work_id":"w","position":{"objective":"inspect","objective":"overwritten","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`,
 	} {
 		if _, err := DecodeProgressReport([]byte(raw)); err == nil {
 			t.Fatalf("decoder accepted duplicate keys: %s", raw)
@@ -119,7 +119,7 @@ func TestSubmitWorkPreservesExactRevisions(t *testing.T) {
 				got = request
 				return Text("submitted"), nil
 			})
-			raw := json.RawMessage(`{"work_id":"w","expected_revision":` + tc.token + `,"summary":"done"}`)
+			raw := json.RawMessage(`{"input":{"work_id":"w","expected_revision":` + tc.token + `,"summary":"done","evidence":null,"artifacts":null}}`)
 			if err := validateExportedSchema(t, compileExportedSchema(t, op.Definition().Parameters), raw); err != nil {
 				t.Fatal(err)
 			}
@@ -142,11 +142,11 @@ func TestProgressNamesTheFieldAMisplacedValueBelongsTo(t *testing.T) {
 		return Text("recorded"), nil
 	})
 	for _, c := range []struct{ raw, want string }{
-		{`{"work_id":"w","objective":"inspect"}`, "objective belongs to position"},
-		{`{"work_id":"w","claim":"it builds","basis":"observed"}`, "a finding belongs in findings"},
-		{`{"work_id":"w","findings":[{"claim":"c","basis":"observed","e":[{"uri":"file:x"}]}]}`, "the field is evidence"},
-		{`{"work_id":"w","findings":[{"claim":"c","basis":"observed","uri":"file:x"}]}`, "evidence is an array of objects on the finding"},
-		{`{"work_id":"w","findings":[{"claim":"c","basis":"inferred","limit":"only one case"}]}`, "the field is limitation"},
+		{`{"input":{"work_id":"w","objective":"inspect","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null}}`, "objective belongs to position"},
+		{`{"input":{"work_id":"w","claim":"it builds","basis":"observed"}}`, "a finding belongs in findings"},
+		{`{"input":{"work_id":"w","findings":[{"claim":"c","basis":"observed","e":[{"uri":"file:x"}],"evidence":null,"limitation":null,"supersedes":null}],"position":null,"steps":null}}`, "the field is evidence"},
+		{`{"input":{"work_id":"w","findings":[{"claim":"c","basis":"observed","uri":"file:x","evidence":null,"limitation":null,"supersedes":null}],"position":null,"steps":null}}`, "evidence is an array of objects on the finding"},
+		{`{"input":{"work_id":"w","findings":[{"claim":"c","basis":"inferred","limit":"only one case","evidence":null,"limitation":null,"supersedes":null}],"position":null,"steps":null}}`, "the field is limitation"},
 	} {
 		_, err := op.Call(context.Background(), Call{Arguments: []byte(c.raw)})
 		if err == nil || !strings.Contains(err.Error(), c.want) {

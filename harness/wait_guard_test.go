@@ -21,7 +21,7 @@ type waitScript struct{ calls atomic.Int32 }
 
 func (p *waitScript) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	if p.calls.Add(1) == 1 {
-		return provider.Response{Content: "All done, summary follows.", ToolCalls: []provider.ToolCall{{ID: "w", Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+		return provider.Response{Content: "All done, summary follows.", ToolCalls: []provider.ToolCall{{ID: "w", Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 	}
 	return provider.Response{Content: "Final reply."}, nil
 }

@@ -26,9 +26,9 @@ type editScript struct {
 func (p *editScript) Submit(ctx context.Context, r provider.Request, observer provider.Observer) (provider.Response, error) {
 	switch p.step.Add(1) {
 	case 1:
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "reused", Name: "write_file", Arguments: json.RawMessage(`{"path":"file","content":"original"}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "reused", Name: "write_file", Arguments: json.RawMessage(`{"input":{"path":"file","content":"original"}}`)}}}, nil
 	case 2:
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "reused", Name: "edit_file", Arguments: json.RawMessage(`{"path":"file","old":"missing","new":"replacement"}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "reused", Name: "edit_file", Arguments: json.RawMessage(`{"input":{"path":"file","old":"missing","new":"replacement"}}`)}}}, nil
 	default:
 		raw, _ := json.Marshal(r.Messages[len(r.Messages)-1])
 		p.modelError <- string(raw)

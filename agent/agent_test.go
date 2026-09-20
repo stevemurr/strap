@@ -31,11 +31,22 @@ type customTool struct {
 }
 
 func (t customTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: t.name, Parameters: json.RawMessage(`{"type":"object"}`)}
+	return provider.ToolDefinition{Name: t.name, Parameters: t.InputContract().Schema()}
 }
 func (t customTool) Call(context.Context, tool.Call) (tool.Result, error) {
 	return tool.Text("result"), t.err
 }
+
+type rawTool struct{}
+
+func (rawTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "raw", Parameters: json.RawMessage(`{"type":"object"}`)}
+}
+func (rawTool) Call(context.Context, tool.Call) (tool.Result, error) { return tool.Result{}, nil }
+
+type mismatchedTool struct{ customTool }
+
+func (mismatchedTool) Definition() provider.ToolDefinition { return rawTool{}.Definition() }
 
 type invalidTool struct{ customTool }
 
@@ -82,6 +93,8 @@ func TestAgentConfigurationValidation(t *testing.T) {
 		{"provider", func(c *agent.Config) { c.Spec.Provider = nil }, "requires"},
 		{"inbox", func(c *agent.Config) { c.Inbox = nil }, "requires"},
 		{"outbox", func(c *agent.Config) { c.Outbox = nil }, "requires"},
+		{"raw schema", func(c *agent.Config) { c.Spec.Tools = []tool.Tool{rawTool{}} }, "typed InputContract"},
+		{"mismatched schema", func(c *agent.Config) { c.Spec.Tools = []tool.Tool{mismatchedTool{}} }, "differ"},
 		{"nil tool", func(c *agent.Config) { c.Spec.Tools = []tool.Tool{nil} }, "nil tool"},
 		{"invalid tool", func(c *agent.Config) { c.Spec.Tools = []tool.Tool{invalidTool{}} }, "invalid tool"},
 		{"unnamed", func(c *agent.Config) { c.Spec.Tools = []tool.Tool{customTool{}} }, "no name"},
@@ -123,7 +136,7 @@ func TestToolBatchSettlesBeforeSteeringAndPreservesReplyTarget(t *testing.T) {
 			}
 			c.Inbox.Send(message.Message{ID: "steer", Kind: message.Instruction, Content: "steer"})
 			c.Inbox.Send(message.Message{ID: "notification", Kind: message.Notification, Content: "notice"})
-			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "one", Name: "read", Arguments: json.RawMessage(`{}`)}, {ID: "two", Name: "broken", Arguments: json.RawMessage(`{}`)}, {ID: "three", Name: "missing", Arguments: json.RawMessage(`{}`)}}}, nil
+			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "one", Name: "read", Arguments: json.RawMessage(`{"input":{}}`)}, {ID: "two", Name: "broken", Arguments: json.RawMessage(`{"input":{}}`)}, {ID: "three", Name: "missing", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 		}
 		if len(r.Messages) != 9 || r.Messages[4].Content.Text() != "result" || r.Messages[5].Content.Text() != "result\nTool error: disk unavailable" || r.Messages[6].Content.Text() != "Tool error: unknown tool: missing" || r.Messages[7].Envelope.ID != "steer" {
 			t.Errorf("batch history: %+v", r.Messages)
@@ -317,7 +330,7 @@ func TestCountTokensUsesHistoricalSnapshotAndTools(t *testing.T) {
 			t.Fatal(n, err)
 		}
 		r := p.requests[i]
-		if len(r.Messages) != 1 || len(r.Tools) != 1 || r.Tools[0].Name != "read" || string(r.Tools[0].Parameters) != `{"type":"object"}` {
+		if len(r.Messages) != 1 || len(r.Tools) != 1 || r.Tools[0].Name != "read" || string(r.Tools[0].Parameters) != string((customTool{}).InputContract().Schema()) {
 			t.Fatal(r)
 		}
 		r.Tools[0].Parameters[0] = '!'
@@ -352,5 +365,60 @@ func TestUnassignedAgentRemainsIdleWithoutRunningTransition(t *testing.T) {
 	}
 	if a.State() != agent.Idle {
 		t.Fatal(a.State())
+	}
+}
+
+func (t customTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
+}
+
+type uncheckedTool struct{ calls *int }
+
+func (t uncheckedTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct {
+		ID string `json:"id"`
+	}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
+}
+func (t uncheckedTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "unchecked", Parameters: t.InputContract().Schema()}
+}
+func (t uncheckedTool) Call(context.Context, tool.Call) (tool.Result, error) {
+	*t.calls++
+	return tool.Text("ok"), nil
+}
+
+func TestCustomHandlerCannotBypassArgumentValidation(t *testing.T) {
+	c := config()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	invoked, submits := 0, 0
+	c.Spec.Tools = []tool.Tool{uncheckedTool{&invoked}}
+	c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
+		submits++
+		if submits == 1 {
+			return provider.Response{ToolCalls: []provider.ToolCall{
+				{ID: "missing", Name: "unchecked", Arguments: json.RawMessage(`{"input":{}}`)},
+				{ID: "null", Name: "unchecked", Arguments: json.RawMessage(`{"input":{"id":null}}`)},
+				{ID: "duplicate", Name: "unchecked", Arguments: json.RawMessage(`{"input":{"id":"a","id":"b"}}`)},
+				{ID: "extra", Name: "unchecked", Arguments: json.RawMessage(`{"input":{"id":"a","extra":null}}`)},
+				{ID: "valid", Name: "unchecked", Arguments: json.RawMessage(`{"input":{"id":"a"}}`)},
+			}}, nil
+		}
+		return provider.Response{Content: "done"}, nil
+	})
+	c.Outbox = senderFunc(func(context.Context, message.Draft) (message.Receipt, error) { cancel(); return message.Receipt{}, nil })
+	a := mustAgent(t, c)
+	c.Inbox.Send(message.Message{Kind: message.Instruction, Content: "run"})
+	_ = a.Run(ctx)
+	if invoked != 1 || submits != 2 {
+		t.Fatalf("handlers=%d submissions=%d", invoked, submits)
 	}
 }

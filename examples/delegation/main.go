@@ -44,7 +44,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 	defer p.mu.Unlock()
 	p.calls++
 	invoke := func(name string, args any) (provider.Response, error) {
-		raw, e := json.Marshal(args)
+		raw, e := tool.MarshalInput(args)
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("call-%d", p.calls), Name: name, Arguments: raw}}}, e
 	}
 	for _, m := range r.Messages {
@@ -142,12 +142,12 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 	}
 	target := work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}
 	if w.Kind == work.AuditWork {
-		req := work.AuditRequest{WorkTarget: target, SubmissionID: w.SubjectSubmissionID, Verdict: work.Pass, Summary: "All requirements verified"}
+		req := tool.AuditInput{WorkTarget: target, SubmissionID: w.SubjectSubmissionID, Verdict: work.Pass, Summary: "All requirements verified"}
 		if !p.failed {
 			p.failed = true
 			req.Verdict = work.Fail
 			req.Summary = "Missing error handling"
-			req.Findings = []work.Finding{{StepIDs: []work.StepID{p.plan.Steps[0].ID}, Description: "write failure ignored", RequiredChange: "propagate failure", Verification: "test failed write"}}
+			req.Findings = []tool.FindingInput{{StepIDs: []work.StepID{p.plan.Steps[0].ID}, Description: "write failure ignored", RequiredChange: "propagate failure", Verification: "test failed write"}}
 		}
 		return invoke("submit_audit", req)
 	}
@@ -164,9 +164,13 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if len(changes) > 0 {
-		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkID: target.ID, Steps: changes})
+		inputs := make([]tool.StepProgressInput, len(changes))
+		for i, v := range changes {
+			inputs[i] = tool.StepProgressInput{ID: v.ID, Status: v.Status, Note: v.Note}
+		}
+		return invoke("report_work_progress", tool.ReportWorkProgressInput{WorkID: target.ID, Steps: inputs})
 	}
-	return invoke("submit_work", work.SubmitRequest{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
+	return invoke("submit_work", tool.SubmitInput{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }
 func run(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

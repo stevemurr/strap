@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
@@ -34,9 +33,9 @@ func (s *Session) researchDiagnosticTool() tool.Tool {
 			return tool.Result{}, err
 		}
 		binding := &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
-		args, err := json.Marshal(struct {
+		args, err := tool.MarshalInput(struct {
 			Command   string `json:"command"`
-			TimeoutMS *int64 `json:"timeout_ms,omitempty"`
+			TimeoutMS *int64 `json:"timeout_ms"`
 		}{r.Command, r.TimeoutMS})
 		if err != nil {
 			return tool.Result{}, err

@@ -24,7 +24,7 @@ func TestCreateAgentCallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sender := &recordingSender{}
-	invocation := Call{Actor: "agent-7", Sender: sender, Arguments: json.RawMessage(`{"role":"implementor"}`)}
+	invocation := Call{Actor: "agent-7", Sender: sender, Arguments: json.RawMessage(`{"input":{"role":"implementor"}}`)}
 	want := roster.CreateRequest{Role: roster.Implementor}
 	callbackErr := errors.New("creation unavailable")
 	calls := 0
@@ -50,14 +50,14 @@ func TestCreateAgentRejectsInputBeforeCallingHandler(t *testing.T) {
 		calls++
 		return Result{}, nil
 	})
-	for _, raw := range []string{`{}`, `null`, `[]`, `{"task":" "}`, `{"task":"ok","instructions":"override"}`, `{"task":"ok","actor":"forged"}`, `{"task":"ok"} {}`} {
+	for _, raw := range []string{`{}`, `null`, `[]`, `{"input":{"task":" "}}`, `{"input":{"task":"ok","instructions":"override"}}`, `{"input":{"task":"ok","actor":"forged"}}`, `{"input":{"task":"ok"}} {}`} {
 		if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Errorf("accepted %s", raw)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := operation.Call(ctx, Call{Arguments: json.RawMessage(`{"role":"implementor"}`)}); !errors.Is(err, context.Canceled) {
+	if _, err := operation.Call(ctx, Call{Arguments: json.RawMessage(`{"input":{"role":"implementor"}}`)}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled call: %v", err)
 	}
 	if calls != 0 {
@@ -72,7 +72,7 @@ func TestMessageStatusLookup(t *testing.T) {
 		calls++
 		return want, id == want.MessageID
 	})
-	result, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(`{"message_id":"message-3"}`)})
+	result, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"message_id":"message-3"}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,12 +83,12 @@ func TestMessageStatusLookup(t *testing.T) {
 	if got != want {
 		t.Fatalf("receipt changed: %+v", got)
 	}
-	if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(`{"message_id":"unknown"}`)}); err == nil {
+	if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"message_id":"unknown"}}`)}); err == nil {
 		t.Fatal("unknown receipt accepted")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := operation.Call(ctx, Call{Arguments: json.RawMessage(`{"message_id":"message-3"}`)}); !errors.Is(err, context.Canceled) {
+	if _, err := operation.Call(ctx, Call{Arguments: json.RawMessage(`{"input":{"message_id":"message-3"}}`)}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled lookup: %v", err)
 	}
 	if calls != 2 {
@@ -101,7 +101,7 @@ func TestSendMessageUsesInvocationSender(t *testing.T) {
 	sender := &recordingSender{receipt: want}
 	result, err := SendMessage().Call(context.Background(), Call{
 		Actor: "agent-1", Sender: sender,
-		Arguments: json.RawMessage(`{"to":"agent-2","message":"follow up"}`),
+		Arguments: json.RawMessage(`{"input":{"to":"agent-2","message":"follow up"}}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,11 +129,11 @@ func TestManagementCallbacks(t *testing.T) {
 			}
 			return Text("acknowledged"), nil
 		})
-		result, err := operation.Call(context.Background(), Call{Actor: "root", Arguments: json.RawMessage(`{"agent_id":"agent-2"}`)})
+		result, err := operation.Call(context.Background(), Call{Actor: "root", Arguments: json.RawMessage(`{"input":{"agent_id":"agent-2"}}`)})
 		if err != nil || result.Content.Text() != "acknowledged" {
 			t.Fatalf("management call: %+v %v", result, err)
 		}
-		for _, raw := range []string{`{}`, `{"agent_id":" "}`, `{"agent_id":"agent-2","actor":"forged"}`, `{"agent_id":"a","agent_id":"b"}`} {
+		for _, raw := range []string{`{}`, `{"input":{"agent_id":" "}}`, `{"input":{"agent_id":"agent-2","actor":"forged"}}`, `{"input":{"agent_id":"a","agent_id":"b"}}`} {
 			if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 				t.Fatalf("accepted %s", raw)
 			}
@@ -144,10 +144,10 @@ func TestManagementCallbacks(t *testing.T) {
 	}
 	calls := 0
 	list := ListAgents(func(context.Context, Call) (Result, error) { calls++; return JSON([]string{"root"}) })
-	if _, err := list.Call(context.Background(), Call{Arguments: json.RawMessage(`{}`)}); err != nil {
+	if _, err := list.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := list.Call(context.Background(), Call{Arguments: json.RawMessage(`{"unused":true}`)}); err == nil {
+	if _, err := list.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"unused":true}}`)}); err == nil {
 		t.Fatal("accepted unexpected list arguments")
 	}
 	if calls != 1 {
@@ -164,12 +164,12 @@ func TestInspectAgentContract(t *testing.T) {
 		}
 		return JSON(args)
 	})
-	for _, raw := range []string{`{"agent_id":"agent-2"}`, `{"agent_id":"agent-2","limit":100,"before":21}`} {
+	for _, raw := range []string{`{"input":{"agent_id":"agent-2","before":null,"limit":null}}`, `{"input":{"agent_id":"agent-2","limit":100,"before":21}}`} {
 		if _, err := operation.Call(context.Background(), Call{Actor: "root", Arguments: json.RawMessage(raw)}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, raw := range []string{`{}`, `{"agent_id":" "}`, `{"agent_id":"agent-2","limit":0}`, `{"agent_id":"agent-2","limit":101}`, `{"agent_id":"agent-2","before":0}`, `{"agent_id":"agent-2","before":-1}`, `{"agent_id":"agent-2","actor":"forged"}`} {
+	for _, raw := range []string{`{}`, `{"input":{"agent_id":" ","before":null,"limit":null}}`, `{"input":{"agent_id":"agent-2","limit":0,"before":null}}`, `{"input":{"agent_id":"agent-2","limit":101,"before":null}}`, `{"input":{"agent_id":"agent-2","before":0,"limit":null}}`, `{"input":{"agent_id":"agent-2","before":-1,"limit":null}}`, `{"input":{"agent_id":"agent-2","actor":"forged","before":null,"limit":null}}`} {
 		if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}

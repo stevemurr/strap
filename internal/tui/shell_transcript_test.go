@@ -23,7 +23,7 @@ func shellTranscriptFixture(m *model) identity.OutputID {
 	m.observe(conversation.AgentEvent{Agent: id.Agent, Event: agent.OutputStarted{Output: id}})
 	m.observe(conversation.AgentEvent{Agent: id.Agent, Event: agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Text: "private thought"}})
 	progress(m, id.Agent, "Checking cancellation now.")
-	a := agent.ToolActivity{Call: provider.ToolCall{ID: "test", Name: "shell", Arguments: []byte(`{"command":"go test ./internal/tui"}`)}, StartedAt: time.Now()}
+	a := agent.ToolActivity{Call: provider.ToolCall{ID: "test", Name: "shell", Arguments: []byte(`{"input":{"command":"go test ./internal/tui"}}`)}, StartedAt: time.Now()}
 	m.observe(conversation.ToolEvent{Agent: id.Agent, Activity: a})
 	a.FinishedAt = time.Now()
 	code := 1
@@ -151,7 +151,7 @@ func TestOutputNavigationVisitsEachCommandOnce(t *testing.T) {
 }
 
 func TestNativeToolOutputPreservesMalformedResultsAndCommandNewlines(t *testing.T) {
-	a := agent.ToolActivity{Call: provider.ToolCall{Name: "shell", Arguments: []byte(`{"command":"echo first\n# comment\necho second"}`)}, Result: tool.Text(`{"started":true,"output":42}`)}
+	a := agent.ToolActivity{Call: provider.ToolCall{Name: "shell", Arguments: []byte(`{"input":{"command":"echo first\n# comment\necho second"}}`)}, Result: tool.Text(`{"started":true,"output":42}`)}
 	d := displayTool(a)
 	if d.preview != "echo first\n# comment\necho second" || d.result != a.Result.Content.Text() {
 		t.Fatal("changed command semantics or discarded malformed output", d)

@@ -37,11 +37,11 @@ func (p *evidenceScript) Submit(_ context.Context, r provider.Request, _ provide
 		if command == "" {
 			command = "printf '%05000ddecisive-error\\n' 0"
 		}
-		args, _ := json.Marshal(tool.ResearchDiagnosticArgs{WorkID: assigned.ID, Command: command})
+		args, _ := tool.MarshalInput(tool.ResearchDiagnosticArgs{WorkID: assigned.ID, Command: command})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "diagnostic", Name: "shell", Arguments: args}}}, nil
 	}
 	p.receipt <- r.Messages[len(r.Messages)-1].Content.Text()
-	return provider.Response{ToolCalls: []provider.ToolCall{{ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+	return provider.Response{ToolCalls: []provider.ToolCall{{ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 }
 func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

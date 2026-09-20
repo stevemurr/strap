@@ -21,7 +21,7 @@ type rootDies struct{ calls atomic.Int32 }
 
 func (p *rootDies) Submit(_ context.Context, r provider.Request, _ provider.Observer) (provider.Response, error) {
 	if r.Agent != "agent-1" {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "w", Name: "shell", Arguments: json.RawMessage(`{"command":"sleep 1"}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "w", Name: "shell", Arguments: json.RawMessage(`{"input":{"command":"sleep 1","timeout_ms":null}}`)}}}, nil
 	}
 	n := p.calls.Add(1)
 	call := func(name, args string) provider.Response {
@@ -29,7 +29,7 @@ func (p *rootDies) Submit(_ context.Context, r provider.Request, _ provider.Obse
 	}
 	switch n {
 	case 1:
-		return call("create_agent", `{"role":"implementor"}`), nil
+		return call("create_agent", `{"input":{"role":"implementor"}}`), nil
 	case 2:
 		assignee := "agent-2"
 		for i := len(r.Messages) - 1; i >= 0; i-- {
@@ -40,7 +40,7 @@ func (p *rootDies) Submit(_ context.Context, r provider.Request, _ provider.Obse
 				break
 			}
 		}
-		return call("assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"keep busy"}`, assignee)), nil
+		return call("assign_implementation", fmt.Sprintf(`{"input":{"assignee":%q,"task":"keep busy","context":null,"expected_output":null,"scope":null}}`, assignee)), nil
 	default:
 		return provider.Response{}, errors.New("model exploded")
 	}

@@ -37,7 +37,7 @@ func TestSearchFailuresAndDefaultLimit(t *testing.T) {
 				}
 				return webkit.Page{HTML: tc.html}, tc.backendErr
 			})
-			_, err := w.Tools()[0].Call(ctx, Call{Arguments: []byte(`{"query":"test"}`)})
+			_, err := w.Tools()[0].Call(ctx, Call{Arguments: []byte(`{"input":{"query":"test","max_results":null}}`)})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
@@ -54,7 +54,7 @@ func TestSearchFailuresAndDefaultLimit(t *testing.T) {
 		}
 		return webkit.Page{HTML: html.String()}, nil
 	})
-	r, err := w.Tools()[0].Call(context.Background(), Call{Arguments: []byte(`{"query":"  test  "}`)})
+	r, err := w.Tools()[0].Call(context.Background(), Call{Arguments: []byte(`{"input":{"query":"  test  ","max_results":null}}`)})
 	var got WebSearchResult
 	if err != nil {
 		t.Fatal(err)
@@ -89,13 +89,13 @@ func TestOpenRejectsInvalidRequestsAndPageMetadata(t *testing.T) {
 			w.browser = pageFunc(func(context.Context, string) (agentbrowser.Page, error) {
 				return agentbrowser.Page{URL: tc.final, ContentType: tc.contentType}, nil
 			})
-			_, err := w.Tools()[1].Call(context.Background(), Call{Arguments: mustWebJSON(t, map[string]any{"url": tc.url})})
+			_, err := w.Tools()[1].Call(context.Background(), Call{Arguments: mustWebJSON(t, map[string]any{"url": tc.url, "cursor": nil, "max_chars": nil})})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
 		})
 	}
-	for _, raw := range []string{`{"url":"https://example.com","max_chars":199}`, `{"url":"https://example.com","max_chars":50001}`, `{"url":"https://example.com","cursor":""}`, `{"url":"https://example.com","script":"bad"}`} {
+	for _, raw := range []string{`{"input":{"url":"https://example.com","max_chars":199,"cursor":null}}`, `{"input":{"url":"https://example.com","max_chars":50001,"cursor":null}}`, `{"input":{"url":"https://example.com","cursor":"","max_chars":null}}`, `{"input":{"url":"https://example.com","script":"bad","cursor":null,"max_chars":null}}`} {
 		w := testWeb(t, WebConfig{})
 		if _, err := w.Tools()[1].Call(context.Background(), Call{Arguments: []byte(raw)}); err == nil {
 			t.Fatal("accepted", raw)
@@ -105,7 +105,7 @@ func TestOpenRejectsInvalidRequestsAndPageMetadata(t *testing.T) {
 
 func mustWebJSON(t *testing.T, value any) []byte {
 	t.Helper()
-	out, err := json.Marshal(value)
+	out, err := MarshalInput(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestOpenCursorOffsetsAndErrorsThroughTool(t *testing.T) {
 	p := openResult(t, w, "a", "https://example.com", "", 200)
 	id, _, _ := strings.Cut(p.NextCursor, ".")
 	for _, cursor := range []string{"bad", id + ".nope", id + ".-1", id + ".300", id + ".999999999999999999999999999999"} {
-		_, err := w.Tools()[1].Call(context.Background(), Call{Actor: "a", Arguments: mustWebJSON(t, openArgs{URL: "https://example.com", Cursor: cursor})})
+		_, err := w.Tools()[1].Call(context.Background(), Call{Actor: "a", Arguments: mustWebJSON(t, openArgs{URL: "https://example.com", Cursor: &cursor})})
 		if err == nil || !strings.Contains(err.Error(), "cursor unavailable") {
 			t.Fatal(cursor, err)
 		}
@@ -167,7 +167,8 @@ func TestOpenCancellationAtBackendAndSnapshotBoundaries(t *testing.T) {
 			})
 			args := openArgs{URL: "https://example.com", MaxChars: ptrWeb(200)}
 			if mode == "continuation" {
-				args.Cursor = openResult(t, w, "", "https://example.com", "", 200).NextCursor
+				cursor := openResult(t, w, "", "https://example.com", "", 200).NextCursor
+				args.Cursor = &cursor
 			}
 			if mode == "snapshot" || mode == "continuation" {
 				w.now = func() time.Time {
@@ -298,7 +299,7 @@ func TestOpenDefaultAndMaximumChunkSizes(t *testing.T) {
 	w.browser = pageFunc(func(_ context.Context, url string) (agentbrowser.Page, error) {
 		return agentbrowser.Page{URL: url, Content: source}, nil
 	})
-	r, err := w.Tools()[1].Call(context.Background(), Call{Arguments: []byte(`{"url":"https://example.com"}`)})
+	r, err := w.Tools()[1].Call(context.Background(), Call{Arguments: []byte(`{"input":{"url":"https://example.com","cursor":null,"max_chars":null}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

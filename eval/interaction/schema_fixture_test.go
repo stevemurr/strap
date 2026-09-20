@@ -3,7 +3,6 @@ package interaction
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -82,7 +81,7 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 				}
 			case roster.Auditor:
 				var request work.AuditRequest
-				if err := json.Unmarshal(good.Arguments, &request); err != nil {
+				if err := decodeSchemaArgs(good.Arguments, &request); err != nil {
 					t.Fatal(err)
 				}
 				audit, err := s.SubmitAudit(ctx, f.Schema.Actor, request)

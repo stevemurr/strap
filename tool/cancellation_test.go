@@ -41,13 +41,16 @@ func TestFileOperationsRemainAtomicAcrossCancellation(t *testing.T) {
 				_, kit := fileTools(t, FilesConfig{Dir: dir})
 				args := map[string]any{"path": "file"}
 				switch operation {
+				case "read_file":
+					args["offset"] = nil
+					args["limit"] = nil
 				case "write_file":
 					args["content"] = "replacement"
 				case "edit_file":
 					args["old"] = "original"
 					args["new"] = "replacement"
 				}
-				raw, _ := json.Marshal(args)
+				raw, _ := MarshalInput(args)
 				base, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				ctx := &checkpointContext{Context: base, cancel: cancel, remaining: checkpoint}

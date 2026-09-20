@@ -46,10 +46,14 @@ func TestApplicationManagementTools(t *testing.T) {
 	if len(kit) != 5 {
 		t.Fatal("incomplete management tool set")
 	}
-	args, _ := json.Marshal(map[string]any{"agent_id": child.AgentID})
+	args, _ := tool.MarshalInput(map[string]any{"agent_id": child.AgentID})
 	invoke := func(name string) conversation.AgentInfo {
 		t.Helper()
-		result, err := kit[name].Call(ctx, tool.Call{Actor: root.AgentID, Arguments: args})
+		input := args
+		if name == "inspect_agent" {
+			input, _ = tool.MarshalInput(tool.InspectAgentArgs{AgentID: child.AgentID})
+		}
+		result, err := kit[name].Call(ctx, tool.Call{Actor: root.AgentID, Arguments: input})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,10 +87,10 @@ func TestApplicationManagementTools(t *testing.T) {
 	if info := invoke("stop_agent"); info.State != agent.StopRequested && !info.State.Terminal() {
 		t.Fatal(info)
 	}
-	if _, err := kit["inspect_agent"].Call(ctx, tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing"}`)}); err == nil {
+	if _, err := kit["inspect_agent"].Call(ctx, tool.Call{Arguments: json.RawMessage(`{"input":{"agent_id":"missing","before":null,"limit":null}}`)}); err == nil {
 		t.Fatal("unknown target accepted")
 	}
-	result, err := kit["list_agents"].Call(ctx, tool.Call{Arguments: json.RawMessage(`{}`)})
+	result, err := kit["list_agents"].Call(ctx, tool.Call{Arguments: json.RawMessage(`{"input":{}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +107,7 @@ func TestUnknownAgentErrors(t *testing.T) {
 		if op.Definition().Name == "list_agents" {
 			continue
 		}
-		if _, err := op.Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing"}`)}); err == nil {
+		if _, err := op.Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"input":{"agent_id":"missing","before":null,"limit":null}}`)}); err == nil {
 			t.Fatal("unknown agent accepted")
 		}
 	}
@@ -111,7 +115,7 @@ func TestUnknownAgentErrors(t *testing.T) {
 func TestInspectionPagingOptionsReachController(t *testing.T) {
 	c := conversation.New(context.Background())
 	defer c.Close(context.Background())
-	if _, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"agent_id":"missing","limit":3,"before":2}`)}); err == nil {
+	if _, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"input":{"agent_id":"missing","limit":3,"before":2}}`)}); err == nil {
 		t.Fatal("unknown agent accepted")
 	}
 }

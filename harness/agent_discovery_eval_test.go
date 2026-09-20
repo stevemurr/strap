@@ -163,11 +163,11 @@ func TestAgentDiscoveryLive(t *testing.T) {
 				}
 				if scenario == "worker_help" {
 					if record.Agent == string(selected) && activity.Call.Name == "send_message" {
-						var args struct {
+						var args tool.Input[struct {
 							To identity.ActorID `json:"to"`
-						}
+						}]
 						json.Unmarshal(activity.Call.Arguments, &args)
-						if args.To != s.Root() {
+						if args.Value.To != s.Root() {
 							t.Fatal("help addressed to wrong actor")
 						}
 						return
@@ -178,8 +178,10 @@ func TestAgentDiscoveryLive(t *testing.T) {
 					continue
 				}
 				if activity.Call.Name == "create_agent" {
-					var r roster.CreateRequest
-					json.Unmarshal(activity.Call.Arguments, &r)
+					r, err := tool.DecodeAgentCreation(activity.Call.Arguments)
+					if err != nil {
+						t.Fatal(err)
+					}
 					want := roster.Implementor
 					if scenario == "audit" {
 						want = roster.Auditor
@@ -221,8 +223,10 @@ func TestAgentDiscoveryLive(t *testing.T) {
 					return
 				}
 				if activity.Call.Name == "reassign_work" && scenario == "replace" {
-					var r work.ReassignRequest
-					json.Unmarshal(activity.Call.Arguments, &r)
+					r, err := tool.DecodeReassignment(activity.Call.Arguments)
+					if err != nil {
+						t.Fatal(err)
+					}
 					if !created || r.ID != original.ID || r.Assignee == selected || r.Assignee == "" {
 						t.Fatal("invalid replacement", r)
 					}

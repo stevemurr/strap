@@ -16,7 +16,7 @@ import (
 )
 
 func callAs(s *Session, ctx context.Context, actor message.ActorID, name string, args any) (tool.Result, error) {
-	raw, err := json.Marshal(args)
+	raw, err := tool.MarshalInput(args)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -29,7 +29,7 @@ func callAs(s *Session, ctx context.Context, actor message.ActorID, name string,
 }
 func TestWorkInspectionIncludesScopedStepsSubmissionAndAudit(t *testing.T) {
 	_, s := recoverySession(t)
-	created := invokeRoot(t, s, "create_plan", map[string]any{"title": "plan", "steps": []any{map[string]any{"title": "first"}, map[string]any{"title": "second"}}})
+	created := invokeRoot(t, s, "create_plan", map[string]any{"title": "plan", "steps": []any{map[string]any{"title": "first", "acceptance_criteria": nil}, map[string]any{"title": "second", "acceptance_criteria": nil}}})
 	var p work.Plan
 	if err := json.Unmarshal([]byte(created.Content.Text()), &p); err != nil {
 		t.Fatal(err)
@@ -102,17 +102,17 @@ func TestAssignmentAndReassignmentRejectInvalidRequests(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"assign_implementation", map[string]any{"assignee": w.Assignee, "task": "task", "work_id": "unexpected"}},
+		{"assign_implementation", map[string]any{"assignee": w.Assignee, "task": "task", "work_id": "unexpected", "context": nil, "expected_output": nil, "scope": nil}},
 		{"assign_audit", map[string]any{"assignee": w.Assignee, "task": "unexpected", "work_id": w.ID, "expected_revision": w.Revision, "submission_id": "sub"}},
-		{"assign_implementation", map[string]any{"task": "task", "assignee": "missing"}},
-		{"assign_implementation", map[string]any{"assignee": w.Assignee, "task": "task", "scope": map[string]any{"plan_id": "missing", "step_ids": []string{"missing"}}}},
+		{"assign_implementation", map[string]any{"task": "task", "assignee": "missing", "context": nil, "expected_output": nil, "scope": nil}},
+		{"assign_implementation", map[string]any{"assignee": w.Assignee, "task": "task", "scope": map[string]any{"plan_id": "missing", "step_ids": []string{"missing"}}, "context": nil, "expected_output": nil}},
 		{"assign_audit", map[string]any{"assignee": w.Assignee, "work_id": w.ID, "expected_revision": w.Revision, "submission_id": "missing"}},
 	} {
 		if _, err := callAs(s, ctx, s.Root(), tc.name, tc.args); err == nil {
 			t.Fatal("accepted", tc)
 		}
 	}
-	if _, err := callAs(s, ctx, w.Assignee, "assign_implementation", map[string]any{"assignee": w.Assignee, "task": "no delegation"}); !errors.Is(err, work.ErrForbidden) {
+	if _, err := callAs(s, ctx, w.Assignee, "assign_implementation", map[string]any{"assignee": w.Assignee, "task": "no delegation", "context": nil, "expected_output": nil, "scope": nil}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -196,8 +196,8 @@ func TestCanceledAuditCannotInspectRevokedSubmission(t *testing.T) {
 type cancelOnRegistration struct{ cancel context.CancelFunc }
 
 func (t cancelOnRegistration) Validate() error { t.cancel(); return nil }
-func (cancelOnRegistration) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: "external", Parameters: json.RawMessage(`{"type":"object"}`)}
+func (t cancelOnRegistration) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "external", Parameters: t.InputContract().Schema()}
 }
 func (cancelOnRegistration) Call(context.Context, tool.Call) (tool.Result, error) {
 	return tool.Text("ok"), nil
@@ -228,4 +228,12 @@ func TestCreationCancellationStopsUnregisteredAgent(t *testing.T) {
 			t.Fatal("canceled assignment was recorded", event)
 		}
 	}
+}
+
+func (t cancelOnRegistration) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

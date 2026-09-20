@@ -39,7 +39,7 @@ var _ Tool = (*Shell)(nil)
 
 type shellArgs struct {
 	Command   string `json:"command"`
-	TimeoutMS *int64 `json:"timeout_ms,omitempty"`
+	TimeoutMS *int64 `json:"timeout_ms"`
 }
 
 type ShellResult struct {
@@ -99,9 +99,9 @@ func NewShell(config ShellConfig) (*Shell, error) {
 	s := &Shell{config: config, stop: stopProcessGroup}
 	// The researcher's diagnostic shell binds its run to an assignment, so
 	// models reach for the same fields here, where nothing records execution.
-	params, err := NewParameters[shellArgs](MinLength("command", 1), Minimum("timeout_ms", 1), Maximum("timeout_ms", config.MaxTimeout.Milliseconds()),
-		Reject("", "work_id", "this shell is not bound to work; it takes command and optional timeout_ms"),
-		Reject("", "assigned_at_revision", "this shell is not bound to work; it takes command and optional timeout_ms"),
+	params, err := NewParameters[shellArgs](Nullable("timeout_ms", "use the configured timeout"), MinLength("command", 1), Minimum("timeout_ms", 1), Maximum("timeout_ms", config.MaxTimeout.Milliseconds()),
+		Reject("", "work_id", "this shell is not bound to work; it takes command and nullable timeout_ms"),
+		Reject("", "assigned_at_revision", "this shell is not bound to work; it takes command and nullable timeout_ms"),
 		Reject("", "timeout", "the field is timeout_ms, in milliseconds"))
 	if err != nil {
 		return nil, err
@@ -230,3 +230,5 @@ func (s *Shell) prepare(ctx context.Context, call Call) (func() (Result, error),
 	return s.bound.prepare(ctx, call)
 }
 func (s *Shell) snapshot() preparedTool { return s.bound.snapshot() }
+
+func (s *Shell) contract() *parameterNode { return s.bound.contract() }

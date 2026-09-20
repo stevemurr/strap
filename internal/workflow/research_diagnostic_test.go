@@ -23,9 +23,10 @@ func (*diagnosticShell) Definition() provider.ToolDefinition {
 }
 func (d *diagnosticShell) Call(_ context.Context, c tool.Call) (tool.Result, error) {
 	d.calls.Add(1)
-	var m map[string]any
-	json.Unmarshal(c.Arguments, &m)
-	if len(m) != 1 || m["command"] != "inspect" {
+	var envelope tool.Input[map[string]any]
+	json.Unmarshal(c.Arguments, &envelope)
+	m := envelope.Value
+	if len(m) != 2 || m["command"] != "inspect" {
 		panic("leaked selectors")
 	}
 	d.during()
@@ -45,12 +46,12 @@ func TestDiagnosticCapturesExplicitWorkBeforeExecution(t *testing.T) {
 		}
 	}
 	op := s.researchDiagnosticTool()
-	args, _ := json.Marshal(tool.ResearchDiagnosticArgs{WorkID: a.ID, Command: "inspect"})
+	args, _ := tool.MarshalInput(tool.ResearchDiagnosticArgs{WorkID: a.ID, Command: "inspect"})
 	result, err := op.Call(context.Background(), tool.Call{Actor: "r", Arguments: args, InvocationID: "r/tool-1"})
 	if err != nil || result.Execution == nil || result.Execution.WorkID != string(a.ID) || result.Execution.Actor != "r" {
 		t.Fatal(result, err)
 	}
-	for _, bad := range []json.RawMessage{args, json.RawMessage(`{"command":"inspect"}`)} {
+	for _, bad := range []json.RawMessage{args, json.RawMessage(`{"input":{"command":"inspect","timeout_ms":null}}`)} {
 		if _, err = op.Call(context.Background(), tool.Call{Actor: "r", Arguments: bad}); err == nil {
 			t.Fatal("unauthorized command ran")
 		}

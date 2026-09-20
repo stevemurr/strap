@@ -118,7 +118,7 @@ func TestTranscriptDisplaysArgumentsErrorsAndImageMetadataSafely(t *testing.T) {
 	m, _ := transcriptSetup(t)
 	m.openTranscript("agent-7")
 	m.transcript.inspection.Transcript = &agent.TranscriptPage{Entries: []agent.TranscriptEntry{
-		{Position: 1, Message: provider.Message{Role: "assistant", Content: content.Text("Checking now.\x1b]0;evil\x07"), ToolCalls: []provider.ToolCall{{ID: "c1", Name: "shell", Arguments: json.RawMessage(`{"broken":`)}}}},
+		{Position: 1, Message: provider.Message{Role: "assistant", Content: content.Text("Checking now.\x1b]0;evil\x07"), ToolCalls: []provider.ToolCall{{ID: "c1", Name: "shell", Arguments: json.RawMessage(`{"input":{"broken":}`)}}}},
 		{Position: 2, Message: provider.Message{Role: "tool", ToolCallID: "c1", Content: content.Content{{Text: "Tool error: invalid JSON"}, {Image: &content.Image{MIMEType: "image/png", Data: []byte{1, 2, 3}}}}}},
 	}}
 	m.renderAgentTranscript()

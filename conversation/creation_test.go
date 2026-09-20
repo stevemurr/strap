@@ -31,7 +31,7 @@ type cancelOnDefinition struct{ cancel context.CancelFunc }
 
 func (t cancelOnDefinition) Definition() provider.ToolDefinition {
 	t.cancel()
-	return provider.ToolDefinition{Name: "cancel_on_definition", Parameters: json.RawMessage(`{"type":"object"}`)}
+	return provider.ToolDefinition{Name: "cancel_on_definition", Parameters: t.InputContract().Schema()}
 }
 func (cancelOnDefinition) Call(context.Context, tool.Call) (tool.Result, error) {
 	return tool.Result{}, nil
@@ -56,7 +56,7 @@ func TestAssignmentDeliveryFailureStopsNewAgent(t *testing.T) {
 	// tool's context check but before it sends the assignment.
 	spec := agent.Spec{Provider: p, Tools: []tool.Tool{cancelOnDefinition{cancel}}}
 	create := creationTool(c, spec)
-	_, err := create.Call(ctx, tool.Call{Actor: c.Root(), Sender: canceledSender{}, Arguments: json.RawMessage(`{"task":"work"}`)})
+	_, err := create.Call(ctx, tool.Call{Actor: c.Root(), Sender: canceledSender{}, Arguments: json.RawMessage(`{"input":{"context":null,"expected_output":null,"task":"work"}}`)})
 	agents := c.Agents()
 	if len(agents) != 2 {
 		t.Fatalf("expected creation before delivery failure: %+v", agents)
@@ -107,11 +107,11 @@ func (canceledSender) Send(ctx context.Context, _ message.Draft) (message.Receip
 func creationTool(c *conversation.Controller, spec agent.Spec) tool.Tool {
 	spec = spec.Clone()
 	type args struct {
-		Task           string `json:"task"`
-		Context        string `json:"context,omitempty"`
-		ExpectedOutput string `json:"expected_output,omitempty"`
+		Task           string  `json:"task"`
+		Context        *string `json:"context"`
+		ExpectedOutput *string `json:"expected_output"`
 	}
-	params, err := tool.NewParameters[args](tool.MinLength("task", 1))
+	params, err := tool.NewParameters[args](tool.MinLength("task", 1), tool.Nullable("context", "no context"), tool.Nullable("expected_output", "no output requirement"))
 	if err != nil {
 		panic(err)
 	}
@@ -119,7 +119,13 @@ func creationTool(c *conversation.Controller, spec agent.Spec) tool.Tool {
 		if strings.TrimSpace(a.Task) == "" {
 			return tool.Result{}, errors.New("task is required")
 		}
-		assignment := work.Work{Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput}
+		assignment := work.Work{Task: a.Task}
+		if a.Context != nil {
+			assignment.Context = *a.Context
+		}
+		if a.ExpectedOutput != nil {
+			assignment.ExpectedOutput = *a.ExpectedOutput
+		}
 		created, err := c.CreateAgent(call.Actor, spec)
 		if err != nil {
 			return tool.Result{}, err
@@ -154,4 +160,12 @@ func TestInvalidTypedToolRejectedBeforeAgentRegistration(t *testing.T) {
 	if len(c.Agents()) != 0 || p.calls.Load() != 0 {
 		t.Fatal("invalid tool registered")
 	}
+}
+
+func (t cancelOnDefinition) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

@@ -365,7 +365,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
+	s.effective = EffectiveConfig{ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err
@@ -533,7 +533,6 @@ func cloneModel(m ModelConfig) ModelConfig {
 	g.EnableThinking = copyPtr(g.EnableThinking)
 	g.ReasoningEffort = copyPtr(g.ReasoningEffort)
 	g.ForceNonemptyContent = copyPtr(g.ForceNonemptyContent)
-	g.StrictTools = slices.Clone(g.StrictTools)
 	return m
 }
 

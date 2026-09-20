@@ -35,10 +35,10 @@ func runSteps(ctx context.Context, shell tool.Tool) error {
 		label string
 		args  json.RawMessage
 	}{
-		{"Run a command and combine stdout/stderr", json.RawMessage(`{"command":"printf 'hello from stdout\n'; printf 'and stderr\n' >&2"}`)},
-		{"Inspect a nonzero exit (a normal tool result)", json.RawMessage(`{"command":"printf 'check failed\n'; exit 7"}`)},
-		{"Keep both ends of long output", json.RawMessage(`{"command":"printf 'START-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-END\n'"}`)},
-		{"Override the timeout for one call", json.RawMessage(`{"command":"printf 'started\n'; sleep 2","timeout_ms":100}`)},
+		{"Run a command and combine stdout/stderr", json.RawMessage(`{"input":{"command":"printf 'hello from stdout\n'; printf 'and stderr\n' >&2","timeout_ms":null}}`)},
+		{"Inspect a nonzero exit (a normal tool result)", json.RawMessage(`{"input":{"command":"printf 'check failed\n'; exit 7","timeout_ms":null}}`)},
+		{"Keep both ends of long output", json.RawMessage(`{"input":{"command":"printf 'START-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-END\n'","timeout_ms":null}}`)},
+		{"Override the timeout for one call", json.RawMessage(`{"input":{"command":"printf 'started\n'; sleep 2","timeout_ms":100}}`)},
 	}
 	for _, step := range steps {
 		fmt.Printf("\n%s\nshell %s\n", step.label, step.args)

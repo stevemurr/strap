@@ -43,7 +43,7 @@ func TestToolQueriesPinStateAndMatchArchiveAndHTTP(t *testing.T) {
 	}
 	appendEvent(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "agent", State: agent.Idle, StateRevision: 1}})
 	now := time.Now()
-	a := agent.ToolActivity{InvocationID: "agent/tool-1", Call: provider.ToolCall{ID: "reused", Name: "shell", Arguments: json.RawMessage(`{}`)}, StartedAt: now}
+	a := agent.ToolActivity{InvocationID: "agent/tool-1", Call: provider.ToolCall{ID: "reused", Name: "shell", Arguments: json.RawMessage(`{"input":{}}`)}, StartedAt: now}
 	start := appendEvent(conversation.ToolEvent{Agent: "agent", Activity: a})
 	reader, err := inspection.New(ctx, store)
 	if err != nil {

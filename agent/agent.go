@@ -112,10 +112,8 @@ func New(config Config) (*Agent, error) {
 		if t == nil {
 			return nil, errors.New("nil tool")
 		}
-		if checked, ok := t.(interface{ Validate() error }); ok {
-			if err := checked.Validate(); err != nil {
-				return nil, fmt.Errorf("invalid tool: %w", err)
-			}
+		if err := tool.ValidateTool(t); err != nil {
+			return nil, fmt.Errorf("invalid tool: %w", err)
 		}
 		definition := t.Definition()
 		if definition.Name == "" {
@@ -174,7 +172,7 @@ func (a *Agent) repeatKey(call provider.ToolCall, result tool.Result, err error)
 	var b strings.Builder
 	b.WriteString(call.Name)
 	b.WriteByte(0)
-	b.WriteString(normalizeJSON(call.Arguments, a.bookkeeping[call.Name]))
+	b.WriteString(normalizeArguments(call.Arguments, a.bookkeeping[call.Name]))
 	b.WriteByte(0)
 	if err != nil {
 		b.WriteString("error:" + err.Error())
@@ -187,6 +185,20 @@ func (a *Agent) repeatKey(call provider.ToolCall, result tool.Result, err error)
 // revisionFields are the receipt counters harness tools return; they change
 // on every successful call whether or not anything else did.
 var revisionFields = map[string]bool{"revision": true, "work_revision": true, "state_revision": true}
+
+// normalizeArguments ignores bookkeeping only in the canonical input object.
+func normalizeArguments(raw []byte, ignored map[string]bool) string {
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(raw, &envelope) != nil || envelope["input"] == nil {
+		return string(raw)
+	}
+	envelope["input"] = json.RawMessage(normalizeJSON(envelope["input"], ignored))
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
+}
 
 // normalizeJSON re-encodes a JSON object with the ignored top-level keys
 // removed and the remaining keys sorted; anything else is returned as is.
@@ -504,6 +516,9 @@ func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected
 	t, ok := a.tools[call.Name]
 	if !ok {
 		return tool.Result{}, fmt.Errorf("unknown tool: %s", call.Name)
+	}
+	if err := tool.ValidateArguments(t, call.Arguments); err != nil {
+		return tool.Result{}, err
 	}
 	return t.Call(ctx, tool.Call{
 		InvocationID: invocation, Arguments: append(json.RawMessage(nil), call.Arguments...),

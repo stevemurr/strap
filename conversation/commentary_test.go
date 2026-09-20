@@ -12,7 +12,7 @@ func TestWorkerCommentaryReachesHostWithoutEnteringParentInbox(t *testing.T) {
 	if _, err := c.Send(c.Root(), "delegate"); err != nil {
 		t.Fatal(err)
 	}
-	p.next(t).tool("create_test_agent", `{"task":"inspect files","expected_output":"findings"}`)
+	p.next(t).tool("create_test_agent", `{"input":{"task":"inspect files","expected_output":"findings","context":null}}`)
 	var root, child call
 	for range 2 {
 		next := p.next(t)
@@ -26,7 +26,7 @@ func TestWorkerCommentaryReachesHostWithoutEnteringParentInbox(t *testing.T) {
 	userReply(t, c, "Delegated.")
 	child.answer <- answer{response: provider.Response{
 		Content:   "Let me inspect the files.",
-		ToolCalls: []provider.ToolCall{{ID: "inspect", Name: "unknown", Arguments: []byte(`{}`)}},
+		ToolCalls: []provider.ToolCall{{ID: "inspect", Name: "unknown", Arguments: []byte(`{"input":{}}`)}},
 	}}
 	seen := false
 	event(t, c, func(e conversation.Event) bool {

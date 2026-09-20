@@ -61,7 +61,7 @@ the plan. It does not maintain a second independently editable step table.
 
 Before this revision an implementor called `update_plan` with a work ID and revision. The operation
 already writes statuses/notes directly to its scoped plan steps through
-[Store.UpdateProgress](../../work/store.go). The root does not copy that report
+[Store.ReportWorkProgress](../../work/progress.go). The root does not copy that report
 into the plan. Auditors previously reported notes/blockers through `update_work`, reaching the
 same domain operation with narrower capabilities. A passing
 [audit](../../work/review.go) marks implementation accepted and scoped steps completed.

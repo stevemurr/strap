@@ -2,8 +2,8 @@ package httpapi_test
 
 import (
 	"encoding/json"
-	"github.com/stevemurr/strap/harness/httpapi"
 	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 	"testing"
 )
@@ -19,8 +19,9 @@ func TestResearchProgressHTTPRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "/sessions/" + s.ID()
-	r := work.ReportWorkProgressRequest{WorkID: w.ID, Position: &work.WorkPosition{Objective: "Compare requirements"}, Findings: []work.ProgressFindingDraft{{Claim: "unverified concern", Basis: work.Inferred, Limitation: "not executed"}}}
-	response := request(t, s.http, "POST", base+"/work/report-progress", httpapi.WorkRequest[work.ReportWorkProgressRequest]{Actor: reg.AgentID, Request: r})
+	limitation := "not executed"
+	r := tool.ReportWorkProgressInput{WorkID: w.ID, Position: &tool.WorkPositionInput{Objective: "Compare requirements"}, Findings: []tool.ProgressFindingDraftInput{{Claim: "unverified concern", Basis: work.Inferred, Limitation: &limitation}}}
+	response := request(t, s.http, "POST", base+"/work/report-progress", wireRequest(reg.AgentID, r))
 	var receipt work.ReportWorkProgressResult
 	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &receipt) != nil {
 		t.Fatal(response.Code, response.Body.String())
@@ -37,13 +38,13 @@ func TestResearchProgressHTTPRoundTrip(t *testing.T) {
 	}
 	// A report names only its work, so repeating one records a second report
 	// rather than colliding with a revision the caller no longer carries.
-	repeat := request(t, s.http, "POST", base+"/work/report-progress", httpapi.WorkRequest[work.ReportWorkProgressRequest]{Actor: reg.AgentID, Request: r})
+	repeat := request(t, s.http, "POST", base+"/work/report-progress", wireRequest(reg.AgentID, r))
 	var second work.ReportWorkProgressResult
 	if repeat.Code != 200 || json.Unmarshal(repeat.Body.Bytes(), &second) != nil || second.ReportID == receipt.ReportID {
 		t.Fatal(repeat.Code, repeat.Body.String())
 	}
-	brief := work.SubmitResearchRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: second.WorkRevision}, Summary: "Need a runtime check", FindingIDs: receipt.FindingIDs}
-	delivered := request(t, s.http, "POST", base+"/work/research", httpapi.WorkRequest[work.SubmitResearchRequest]{Actor: reg.AgentID, Request: brief})
+	brief := tool.SubmitResearchInput{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: second.WorkRevision}, Summary: "Need a runtime check", FindingIDs: receipt.FindingIDs}
+	delivered := request(t, s.http, "POST", base+"/work/research", wireRequest(reg.AgentID, brief))
 	var b work.SubmitResearchResult
 	if delivered.Code != 200 || json.Unmarshal(delivered.Body.Bytes(), &b) != nil {
 		t.Fatal(delivered.Code, delivered.Body.String())

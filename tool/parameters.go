@@ -18,8 +18,8 @@ import (
 // Parameters is an immutable, compiled input contract. Its zero value is invalid.
 // Schema and Decode use the same contract; callers cannot replace either half.
 // Supported inputs are structs, pointers, slices, strings, booleans and integers.
-// JSON fields without omitempty are required. Optional fields may be omitted;
-// explicit null values are rejected, matching their non-null schema types.
+// Every JSON field is required. Nullable explicitly permits null for pointers
+// and slices; omission is never an alternative spelling for null.
 // Custom JSON/text codecs, maps, interfaces, recursive types and ambiguous fields
 // are rejected at construction instead of silently weakening the schema.
 type Parameters[A any] struct {
@@ -32,14 +32,16 @@ type Parameters[A any] struct {
 type parameterNode struct {
 	kind                          string
 	description                   string
+	nullMeaning                   string
 	fields                        map[string]*parameterNode
-	required                      []string
 	item                          *parameterNode
 	minimum, maximum              *big.Int
 	minLength, minItems, maxItems *int
-	unique                        bool
 	enum                          []string
-	anyRequired                   []string
+	anyNonNull                    []string
+	nullable, canNull             bool
+	alternatives                  []*parameterNode
+	exclusive                     bool
 	rejects                       map[string]string // fields models tend to send, with guidance
 }
 
@@ -114,15 +116,6 @@ func Enum(path string, values ...string) Constraint {
 		return nil
 	}}
 }
-func UniqueItems(path string) Constraint {
-	return Constraint{path, func(p *parameterNode) error {
-		if p.kind != "array" {
-			return fmt.Errorf("uniqueItems requires an array")
-		}
-		p.unique = true
-		return nil
-	}}
-}
 
 // Reject documents a field the contract does not accept and the guidance to
 // return when a model sends it. The field must not exist on the object; the
@@ -140,20 +133,38 @@ func Reject(path, field, hint string) Constraint {
 	}}
 }
 
-// AtLeastOne requires at least one named property of an object. It is used for
-// structural patches that identify an existing step or supply a new step title.
-func AtLeastOne(path string, fields ...string) Constraint {
+// Nullable permits explicit null and documents its meaning. The Go field must
+// retain null separately from a concrete zero/empty value.
+func Nullable(path, meaning string) Constraint {
+	return Constraint{path, func(p *parameterNode) error {
+		if !p.canNull || strings.TrimSpace(meaning) == "" {
+			return fmt.Errorf("nullable requires a pointer or slice and a null meaning")
+		}
+		p.nullable = true
+		p.nullMeaning = meaning
+		return nil
+	}}
+}
+
+// AtLeastOneNonNull requires a value in at least one named field. All fields
+// still have to be present; null does not satisfy the value requirement.
+func AtLeastOneNonNull(path string, fields ...string) Constraint {
 	fields = slices.Clone(fields)
 	return Constraint{path, func(p *parameterNode) error {
-		if p.kind != "object" || len(fields) == 0 {
-			return fmt.Errorf("at least one property is required")
+		if p.kind != "object" || len(fields) == 0 || len(p.anyNonNull) > 0 {
+			return fmt.Errorf("requires one nonempty non-null group per object")
 		}
 		for _, field := range fields {
-			if _, ok := p.fields[field]; !ok {
+			if p.fields[field] == nil {
 				return fmt.Errorf("unknown property %q", field)
 			}
 		}
-		p.anyRequired = slices.Clone(fields)
+		p.anyNonNull = slices.Clone(fields)
+		slices.Sort(p.anyNonNull)
+		p.anyNonNull = slices.Compact(p.anyNonNull)
+		if len(p.anyNonNull) > 32 {
+			return fmt.Errorf("at most 32 alternatives are supported")
+		}
 		return nil
 	}}
 }
@@ -181,6 +192,10 @@ func NewParameters[A any](constraints ...Constraint) (Parameters[A], error) {
 		}
 	}
 	if err := root.check(); err != nil {
+		return zero, err
+	}
+	root = inputObjectNode(root)
+	if _, err := root.schemaNodes(4096); err != nil {
 		return zero, err
 	}
 	return Parameters[A]{root: root}, nil
@@ -225,7 +240,11 @@ func compileParameter(t reflect.Type, visiting map[reflect.Type]bool) (*paramete
 		}
 	}
 	if t.Kind() == reflect.Pointer {
-		return compileParameter(t.Elem(), visiting)
+		child, err := compileParameter(t.Elem(), visiting)
+		if err == nil {
+			child.canNull = true
+		}
+		return child, err
 	}
 	p := &parameterNode{}
 	switch t.Kind() {
@@ -241,19 +260,15 @@ func compileParameter(t reflect.Type, visiting map[reflect.Type]bool) (*paramete
 			if field.PkgPath != "" {
 				return nil, fmt.Errorf("unexported parameter field %s.%s", t, field.Name)
 			}
-			optional := false
-			for _, opt := range tag[1:] {
-				if opt != "omitempty" {
-					return nil, fmt.Errorf("unsupported JSON option %q on %s", opt, field.Name)
-				}
-				optional = true
+			if len(tag) > 1 {
+				return nil, fmt.Errorf("tool input %s.%s must not use JSON options; declare Nullable explicitly", t, field.Name)
 			}
 			child, err := compileParameter(field.Type, visiting)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", field.Name, err)
 			}
 			if field.Anonymous && tag[0] == "" {
-				if field.Type.Kind() != reflect.Struct || optional {
+				if field.Type.Kind() != reflect.Struct {
 					return nil, fmt.Errorf("embedded parameters must be required value structs")
 				}
 				for name, n := range child.fields {
@@ -265,7 +280,6 @@ func compileParameter(t reflect.Type, visiting map[reflect.Type]bool) (*paramete
 					}
 					p.fields[name] = n
 				}
-				p.required = append(p.required, child.required...)
 				continue
 			}
 			name := tag[0]
@@ -279,13 +293,10 @@ func compileParameter(t reflect.Type, visiting map[reflect.Type]bool) (*paramete
 				return nil, fmt.Errorf("ambiguous parameter field %s", name)
 			}
 			p.fields[name] = child
-			if !optional {
-				p.required = append(p.required, name)
-			}
 		}
-		slices.Sort(p.required)
 	case reflect.Slice:
 		p.kind = "array"
+		p.canNull = true
 		// encoding/json encodes byte slices as strings, unlike ordinary slices.
 		if t.Elem().Kind() == reflect.Uint8 {
 			return nil, fmt.Errorf("byte slices are unsupported; use a string or integer slice")
@@ -355,7 +366,62 @@ func (p *parameterNode) check() error {
 	}
 	return nil
 }
+
+// schema is the only emitter, including composed and value-dependent forms.
 func (p *parameterNode) schema() map[string]any {
+	var s map[string]any
+	switch {
+	case len(p.alternatives) > 0:
+		branches := make([]any, 0, len(p.alternatives))
+		for _, branch := range p.alternatives {
+			branches = append(branches, branch.schema())
+		}
+		keyword := "anyOf"
+		if p.exclusive {
+			keyword = "oneOf"
+		}
+		s = map[string]any{keyword: branches}
+	case len(p.anyNonNull) > 0:
+		branches := make([]any, 0, len(p.anyNonNull))
+		for _, name := range p.anyNonNull {
+			branch := *p
+			branch.anyNonNull = nil
+			branch.nullable = false
+			branch.fields = maps.Clone(p.fields)
+			field := *p.fields[name]
+			field.nullable = false
+			branch.fields[name] = &field
+			branches = append(branches, branch.schema())
+		}
+		s = map[string]any{"anyOf": branches}
+	default:
+		s = p.objectOrValueSchema()
+	}
+	if p.nullable {
+		if _, ok := s["type"]; ok {
+			s["type"] = []string{p.kind, "null"}
+			if p.enum != nil {
+				values := make([]any, 0, len(p.enum)+1)
+				for _, v := range p.enum {
+					values = append(values, v)
+				}
+				s["enum"] = append(values, nil)
+			}
+		} else {
+			s = map[string]any{"anyOf": []any{s, map[string]any{"type": "null"}}}
+		}
+	}
+	description := p.description
+	if p.nullable && p.nullMeaning != "" {
+		description = strings.TrimSpace(description + " Null: " + p.nullMeaning)
+	}
+	if description != "" {
+		s["description"] = description
+	}
+	return s
+}
+
+func (p *parameterNode) objectOrValueSchema() map[string]any {
 	s := map[string]any{"type": p.kind}
 	if p.description != "" {
 		s["description"] = p.description
@@ -368,14 +434,8 @@ func (p *parameterNode) schema() map[string]any {
 		s["properties"] = fields
 		s["additionalProperties"] = false
 		// Emit [] even for empty objects, never null.
-		s["required"] = append([]string{}, p.required...)
-		if len(p.anyRequired) > 0 {
-			alternatives := []any{}
-			for _, field := range p.anyRequired {
-				alternatives = append(alternatives, map[string]any{"required": []string{field}})
-			}
-			s["anyOf"] = alternatives
-		}
+		s["required"] = append([]string{}, slices.Sorted(maps.Keys(p.fields))...)
+
 	}
 	if p.item != nil {
 		s["items"] = p.item.schema()
@@ -393,9 +453,6 @@ func (p *parameterNode) schema() map[string]any {
 	if p.maxItems != nil {
 		s["maxItems"] = *p.maxItems
 	}
-	if p.unique {
-		s["uniqueItems"] = true
-	}
 	if p.enum != nil {
 		s["enum"] = slices.Clone(p.enum)
 	}
@@ -412,35 +469,17 @@ func (p Parameters[A]) Schema() json.RawMessage {
 }
 func (p Parameters[A]) Decode(raw json.RawMessage) (A, error) {
 	var args A
-	if p.root == nil {
-		return args, fmt.Errorf("uninitialized parameters")
-	}
-	if !utf8.Valid(raw) {
-		return args, fmt.Errorf("arguments must be UTF-8")
-	}
-	if err := validateValues(raw); err != nil {
-		return args, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return args, err
-	}
-	if value == nil {
-		return args, fmt.Errorf("arguments must be a JSON object, not null")
-	}
-	normalized, err := p.root.validate(value, "arguments")
+	normalized, err := decodeParameterValue(p.root, raw)
 	if err != nil {
 		return args, err
 	}
 	// Normalize integral JSON numbers (1.0 / 1e0) to Go integer syntax without
 	// float64 roundoff. JSON Schema defines these as integers too.
-	canonical, err := json.Marshal(normalized)
+	canonical, err := json.Marshal(normalized.(map[string]any)["input"])
 	if err != nil {
 		return args, err
 	}
-	decoder = json.NewDecoder(bytes.NewReader(canonical))
+	decoder := json.NewDecoder(bytes.NewReader(canonical))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&args); err != nil {
 		return args, fmt.Errorf("decode validated arguments: %w", err)
@@ -448,6 +487,30 @@ func (p Parameters[A]) Decode(raw json.RawMessage) (A, error) {
 	return args, nil
 }
 func (p *parameterNode) validate(value any, path string) (any, error) {
+	if value == nil && p.nullable {
+		return nil, nil
+	}
+	if len(p.alternatives) > 0 {
+		var selected any
+		matches := 0
+		var failures []string
+		for _, branch := range p.alternatives {
+			v, err := branch.validate(value, path)
+			if err == nil {
+				matches++
+				selected = v
+			} else {
+				failures = append(failures, err.Error())
+			}
+		}
+		if matches == 0 {
+			return nil, fmt.Errorf("%s must match a declared form: %s", path, strings.Join(failures, "; "))
+		}
+		if p.exclusive && matches != 1 {
+			return nil, fmt.Errorf("%s must match exactly one declared form", path)
+		}
+		return selected, nil
+	}
 	bad := func() (any, error) {
 		// A string where an array or object belongs is the signature of a
 		// server tool parser that could not parse the emitted value and passed
@@ -493,7 +556,7 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 			return nil, errors.New(msg)
 		}
 		var missing []string
-		for _, name := range p.required {
+		for _, name := range slices.Sorted(maps.Keys(p.fields)) {
 			if _, ok := obj[name]; !ok {
 				missing = append(missing, name)
 			}
@@ -505,15 +568,15 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 			}
 			return nil, errors.New(msg)
 		}
-		if len(p.anyRequired) > 0 {
+		if len(p.anyNonNull) > 0 {
 			found := false
-			for _, name := range p.anyRequired {
-				if _, ok := obj[name]; ok {
+			for _, name := range p.anyNonNull {
+				if v, ok := obj[name]; ok && v != nil {
 					found = true
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("%s requires at least one of %s", path, strings.Join(p.anyRequired, ", "))
+				return nil, fmt.Errorf("%s requires at least one non-null value among %s", path, strings.Join(p.anyNonNull, ", "))
 			}
 		}
 		for _, name := range names {
@@ -540,7 +603,6 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 		// what the message names, so naming one element produces a retry per
 		// element. A plan whose second and third steps both omit a title takes
 		// two rejections to fix when only the second is named.
-		seen := map[string]bool{}
 		var failures []string
 		for i, item := range items {
 			v, err := p.item.validate(item, fmt.Sprintf("%s[%d]", path, i))
@@ -549,14 +611,6 @@ func (p *parameterNode) validate(value any, path string) (any, error) {
 				continue
 			}
 			items[i] = v
-			if p.unique {
-				raw, _ := json.Marshal(v)
-				key := string(raw)
-				if seen[key] {
-					return nil, fmt.Errorf("%s contains duplicate items", path)
-				}
-				seen[key] = true
-			}
 		}
 		if len(failures) > 0 {
 			msg := failures[0]
@@ -646,4 +700,74 @@ func validParameterName(name string) bool {
 		return false
 	}
 	return true
+}
+
+func decodeParameterValue(root *parameterNode, raw json.RawMessage) (any, error) {
+	if root == nil {
+		return nil, fmt.Errorf("uninitialized parameters")
+	}
+	if !utf8.Valid(raw) {
+		return nil, fmt.Errorf("arguments must be UTF-8")
+	}
+	if err := validateValues(raw); err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if value == nil {
+		return nil, fmt.Errorf("arguments must be a JSON object, not null")
+	}
+	normalized, err := root.validate(value, "arguments")
+	if err != nil {
+		return nil, err
+	}
+
+	return normalized, nil
+}
+
+// Bound expansion before allocating a wire schema. Counts emitted nodes, including
+// duplicated complete forms, rather than just the shared in-memory graph.
+func (p *parameterNode) schemaNodes(limit int) (int, error) {
+	total := 1
+	for _, child := range p.fields {
+		n, err := child.schemaNodes(limit)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+		if total > limit {
+			return 0, fmt.Errorf("schema expansion exceeds %d nodes", limit)
+		}
+	}
+	if p.item != nil {
+		n, err := p.item.schemaNodes(limit)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+	for _, child := range p.alternatives {
+		n, err := child.schemaNodes(limit)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+		if total > limit {
+			return 0, fmt.Errorf("schema expansion exceeds %d nodes", limit)
+		}
+	}
+	if len(p.anyNonNull) > 0 {
+		if total > limit/len(p.anyNonNull) {
+			return 0, fmt.Errorf("schema expansion exceeds %d nodes", limit)
+		}
+		total = 1 + total*len(p.anyNonNull)
+	}
+	if total > limit {
+		return 0, fmt.Errorf("schema expansion exceeds %d nodes", limit)
+	}
+	return total, nil
 }

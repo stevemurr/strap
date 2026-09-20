@@ -420,15 +420,6 @@ func serveAgent(w http.ResponseWriter, r *http.Request, s *harness.Session, path
 	}
 	respond(w, v, err)
 }
-func workCall[T, R any](w http.ResponseWriter, r *http.Request, fn func(context.Context, identity.ActorID, T) (R, error)) {
-	req, err := decodeBody[WorkRequest[T]](w, r)
-	if err != nil {
-		respond(w, nil, err)
-		return
-	}
-	v, err := fn(r.Context(), req.Actor, req.Request)
-	respond(w, v, err)
-}
 func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, action string) {
 	switch action {
 	case "assign_implementation", "assign_audit", "assign_repair", "assign_research":
@@ -438,19 +429,23 @@ func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, actio
 	case "reassign":
 		decodedCall(w, r, tool.DecodeReassignment, s.ReassignWork)
 	case "cancel":
-		workCall(w, r, s.CancelWork)
+		decodedCall(w, r, tool.DecodeCancellation, s.CancelWork)
 	case "report-progress":
 		decodedCall(w, r, tool.DecodeProgressReport, s.ReportWorkProgress)
-	case "progress":
-		workCall(w, r, s.UpdateProgress)
 	case "plan":
-		workCall(w, r, s.UpdatePlan)
+		req, err := decodeBody[WorkRequest[work.PlanUpdate]](w, r)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		value, err := s.UpdatePlan(r.Context(), req.Actor, req.Request)
+		respond(w, value, err)
 	case "submit":
-		workCall(w, r, s.SubmitWork)
+		decodedCall(w, r, tool.DecodeSubmission, s.SubmitWork)
 	case "research":
-		workCall(w, r, s.SubmitResearch)
+		decodedCall(w, r, tool.DecodeResearchSubmission, s.SubmitResearch)
 	case "audit":
-		workCall(w, r, s.SubmitAudit)
+		decodedCall(w, r, tool.DecodeAuditSubmission, s.SubmitAudit)
 	default:
 		http.NotFound(w, r)
 	}

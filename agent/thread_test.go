@@ -13,7 +13,7 @@ import (
 )
 
 func TestThreadSnapshotsOwnNestedData(t *testing.T) {
-	original := provider.Message{Role: "assistant", Content: content.Content{{Text: "checking"}, {Image: &content.Image{MIMEType: "image/png", Data: []byte{1, 2}}}}, Envelope: &message.Message{Content: "assignment"}, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "shell", Arguments: json.RawMessage(`{"command":"pwd"}`)}}}
+	original := provider.Message{Role: "assistant", Content: content.Content{{Text: "checking"}, {Image: &content.Image{MIMEType: "image/png", Data: []byte{1, 2}}}}, Envelope: &message.Message{Content: "assignment"}, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "shell", Arguments: json.RawMessage(`{"input":{"command":"pwd"}}`)}}}
 	var thread thread
 	thread.append(original)
 	original.Content[0].Text = "changed"

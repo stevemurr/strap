@@ -58,7 +58,7 @@ func TestWakeContextIsAppendedOncePerExchange(t *testing.T) {
 			if err := json.Unmarshal([]byte(last.Content.Text()), &decoded); err != nil || decoded.State == nil || decoded.State.Assigned[0].Revision != 1 {
 				t.Errorf("state is not in the model-visible text: %s", last.Content.Text())
 			}
-			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "one", Name: "read", Arguments: json.RawMessage(`{}`)}}}, nil
+			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "one", Name: "read", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 		case 2:
 			// The tool loop continues the same exchange: no second wake context.
 			if last.Role != "tool" || wakes != 1 {

@@ -33,7 +33,7 @@ func TestRepeatedIdenticalCallsAreNoticedThenStopped(t *testing.T) {
 		return nil
 	})
 	c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "effect", Arguments: json.RawMessage(`{"steps":[]}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "effect", Arguments: json.RawMessage(`{"input":{"steps":[]}}`)}}}, nil
 	})
 	_ = c.Inbox.Send(message.Message{ID: "start", Kind: message.Instruction, Content: "begin"})
 	err := mustAgent(t, c).Run(context.Background())
@@ -58,8 +58,8 @@ func TestRepeatedIdenticalCallsAreNoticedThenStopped(t *testing.T) {
 // whose revision counter has moved on, while expected_revision is bookkeeping.
 type revisionTool struct{ calls *atomic.Int32 }
 
-func (revisionTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: "edit_step", Parameters: json.RawMessage(`{"type":"object"}`)}
+func (t revisionTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "edit_step", Parameters: t.InputContract().Schema()}
 }
 func (revisionTool) BookkeepingParameters() []string { return []string{"expected_revision"} }
 func (t revisionTool) Call(_ context.Context, c tool.Call) (tool.Result, error) {
@@ -75,7 +75,7 @@ func TestSuccessfulNoProgressLoopIsStopped(t *testing.T) {
 	c.Spec.Tools = []tool.Tool{revisionTool{calls: &calls}}
 	rev := 1
 	c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
-		args, _ := json.Marshal(map[string]any{"plan_id": "plan-x", "step_id": "s", "title": "Implement", "expected_revision": rev})
+		args, _ := tool.MarshalInput(map[string]any{"plan_id": "plan-x", "step_id": "s", "title": "Implement", "expected_revision": rev})
 		rev++
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "edit_step", Arguments: args}}}, nil
 	})
@@ -90,8 +90,8 @@ func TestSuccessfulNoProgressLoopIsStopped(t *testing.T) {
 // current revision, then succeeds with a fresh result each time.
 type outcomeTool struct{ calls *atomic.Int32 }
 
-func (outcomeTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: "effect", Parameters: json.RawMessage(`{"type":"object"}`)}
+func (t outcomeTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "effect", Parameters: t.InputContract().Schema()}
 }
 func (outcomeTool) BookkeepingParameters() []string { return []string{"expected_revision"} }
 func (t outcomeTool) Call(_ context.Context, c tool.Call) (tool.Result, error) {
@@ -128,7 +128,7 @@ func TestChangedOutcomeResetsRepeatCount(t *testing.T) {
 		if calls.Load() >= 10 {
 			return provider.Response{Content: "done"}, nil
 		}
-		args, _ := json.Marshal(map[string]any{"step_id": "s", "expected_revision": calls.Load() + 1})
+		args, _ := tool.MarshalInput(map[string]any{"step_id": "s", "expected_revision": calls.Load() + 1})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "effect", Arguments: args}}}, nil
 	})
 	_ = c.Inbox.Send(message.Message{ID: "start", Kind: message.Instruction, Content: "begin"})
@@ -168,7 +168,7 @@ func TestChangedArgumentsResetRepeatCount(t *testing.T) {
 		if calls > 30 {
 			return provider.Response{Content: "gave up"}, nil
 		}
-		args, _ := json.Marshal(map[string]int{"attempt": calls % 2})
+		args, _ := tool.MarshalInput(map[string]int{"attempt": calls % 2})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "effect", Arguments: args}}}, nil
 	})
 	_ = c.Inbox.Send(message.Message{ID: "start", Kind: message.Instruction, Content: "begin"})
@@ -183,4 +183,28 @@ func TestChangedArgumentsResetRepeatCount(t *testing.T) {
 	if err := await(t, done); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
+}
+
+func (t revisionTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct {
+		PlanID   string `json:"plan_id"`
+		StepID   string `json:"step_id"`
+		Title    string `json:"title"`
+		Revision int    `json:"expected_revision"`
+	}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
+}
+
+func (t outcomeTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct {
+		StepID   string `json:"step_id"`
+		Revision int    `json:"expected_revision"`
+	}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

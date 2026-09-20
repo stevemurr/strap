@@ -96,10 +96,10 @@ func operationResult[T any](t *testing.T, s *testSession, viaHTTP bool, actor id
 		return v
 	}
 	action := map[string]string{"assign_implementation": "assign_implementation", "assign_audit": "assign_audit", "assign_repair": "assign_repair", "assign_research": "assign_research", "reassign_work": "reassign", "cancel_work": "cancel", "create_plan": "plan", "submit_work": "submit", "submit_audit": "audit", "report_work_progress": "report-progress"}[name]
-	if _, ok := params.(work.ProgressUpdate); ok {
-		action = "progress"
+	method, path, body := "POST", "/sessions/"+s.ID()+"/work/"+action, any(httpapi.WorkRequest[any]{Actor: actor, Request: tool.Input[any]{Value: params}})
+	if name == "create_plan" {
+		body = httpapi.WorkRequest[any]{Actor: actor, Request: params}
 	}
-	method, path, body := "POST", "/sessions/"+s.ID()+"/work/"+action, any(httpapi.WorkRequest[any]{Actor: actor, Request: params})
 	if name == "create_agent" {
 		path = "/sessions/" + s.ID() + "/agents"
 	}
@@ -149,19 +149,19 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
 	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
-	implementation := operationResult(t, s, viaHTTP, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: assignment.Context, ExpectedOutput: assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
+	implementation := operationResult(t, s, viaHTTP, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
 		progress := work.ReportWorkProgressRequest{WorkID: implementation.ID, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
-		receipt := operationResult(t, s, viaHTTP, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
+		receipt := operationResult(t, s, viaHTTP, implementation.Assignee, "report_work_progress", tool.ReportWorkProgressInput{WorkID: progress.WorkID, Steps: []tool.StepProgressInput{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}, func() (work.ReportWorkProgressResult, error) {
 			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})
 		implementation.Revision = receipt.WorkRevision
 		submissionRequest := work.SubmitRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Summary: "implemented", Evidence: []string{"checked"}}
-		submission := operationResult(t, s, viaHTTP, implementation.Assignee, "submit_work", submissionRequest, func() (work.SubmitReceipt, error) {
+		submission := operationResult(t, s, viaHTTP, implementation.Assignee, "submit_work", tool.SubmitInput{WorkTarget: submissionRequest.WorkTarget, Summary: submissionRequest.Summary, Evidence: submissionRequest.Evidence}, func() (work.SubmitReceipt, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)
 		})
 		originalView := operationResult(t, s, viaHTTP, root, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) { return s.InspectWork(ctx, root, implementationID) })
@@ -180,7 +180,11 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 		if verdict == work.Fail {
 			verdictRequest.Findings = []work.Finding{{StepIDs: []work.StepID{plan.Steps[0].ID}, Description: "missing check", RequiredChange: "handle error", Verification: "test failure"}}
 		}
-		lastAudit = operationResult(t, s, viaHTTP, auditing.Assignee, "submit_audit", verdictRequest, func() (work.Audit, error) {
+		verdictInput := tool.AuditInput{WorkTarget: verdictRequest.WorkTarget, SubmissionID: verdictRequest.SubmissionID, Verdict: verdictRequest.Verdict, Summary: verdictRequest.Summary}
+		for _, f := range verdictRequest.Findings {
+			verdictInput.Findings = append(verdictInput.Findings, tool.FindingInput{StepIDs: f.StepIDs, Description: f.Description, RequiredChange: f.RequiredChange, Verification: f.Verification})
+		}
+		lastAudit = operationResult(t, s, viaHTTP, auditing.Assignee, "submit_audit", verdictInput, func() (work.Audit, error) {
 			return s.SubmitAudit(ctx, auditing.Assignee, verdictRequest)
 		})
 		if verdict == work.Fail {
@@ -212,7 +216,7 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 		t.Fatalf("unexpected audit/repair outcome: %+v, %+v, %+v", final, plan, audit)
 	}
 	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "reassign then cancel"}
-	extra := operationResult(t, s, viaHTTP, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: assignment.Context, ExpectedOutput: assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
+	extra := operationResult(t, s, viaHTTP, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	oldAssignee := extra.Assignee
@@ -277,7 +281,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 		{"GET", base + "/events?limit=0", nil, 400},
 		{"GET", base + "/agents/missing", nil, 404},
 		{"POST", base + "/messages", map[string]any{"to": s.Root(), "unexpected": true}, 400},
-		{"POST", base + "/work/assign_implementation", httpapi.WorkRequest[tool.AssignImplementationArgs]{Actor: "intruder", Request: tool.AssignImplementationArgs{Assignee: "worker", Task: "forbidden"}}, 403},
+		{"POST", base + "/work/assign_implementation", wireRequest("intruder", tool.AssignImplementationArgs{Assignee: "worker", Task: "forbidden"}), 403},
 	}
 	for _, tc := range cases {
 		w := request(t, s.http, tc.method, tc.path, tc.body)
@@ -285,7 +289,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 			t.Fatal(tc.path, w.Code, w.Body.String())
 		}
 	}
-	w := request(t, s.http, "POST", base+"/work/assign_implementation", httpapi.WorkRequest[tool.AssignImplementationArgs]{Actor: s.Root(), Request: tool.AssignImplementationArgs{Assignee: createHTTPWorker(t, s), Task: "task"}})
+	w := request(t, s.http, "POST", base+"/work/assign_implementation", wireRequest(s.Root(), tool.AssignImplementationArgs{Assignee: createHTTPWorker(t, s), Task: "task"}))
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -293,7 +297,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	w = request(t, s.http, "POST", base+"/work/cancel", httpapi.WorkRequest[work.CancelRequest]{Actor: s.Root(), Request: work.CancelRequest{WorkTarget: work.WorkTarget{ID: item.ID, ExpectedRevision: item.Revision + 1}}})
+	w = request(t, s.http, "POST", base+"/work/cancel", wireRequest(s.Root(), work.CancelRequest{WorkTarget: work.WorkTarget{ID: item.ID, ExpectedRevision: item.Revision + 1}, Reason: "withdrawn"}))
 	if w.Code != 409 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -320,4 +324,10 @@ func createHTTPWorker(t *testing.T, s *testSession) identity.ActorID {
 	r := roster.CreateRequest{Role: roster.Implementor}
 	v := operationResult(t, s, true, s.Root(), "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(context.Background(), s.Root(), r) })
 	return v.AgentID
+}
+
+// wireRequest is the model-command HTTP envelope. Host-only plan updates use
+// WorkRequest[work.PlanUpdate] directly and do not pass through this helper.
+func wireRequest[A any](actor identity.ActorID, input A) httpapi.WorkRequest[tool.Input[A]] {
+	return httpapi.WorkRequest[tool.Input[A]]{Actor: actor, Request: tool.Input[A]{Value: input}}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 	"strings"
 	"sync/atomic"
@@ -23,7 +24,7 @@ type researchAcceptance struct {
 }
 
 func operation(name string, args any) (provider.Response, error) {
-	raw, err := json.Marshal(args)
+	raw, err := tool.MarshalInput(args)
 	return provider.Response{ToolCalls: []provider.ToolCall{{ID: name, Name: name, Arguments: raw}}}, err
 }
 func lastResult(r provider.Request) string {
@@ -48,13 +49,13 @@ func (f acceptanceRoot) Submit(_ context.Context, r provider.Request, _ provider
 		if err := json.Unmarshal([]byte(lastResult(r)), &created); err != nil {
 			return provider.Response{}, err
 		}
-		return operation("assign_research", map[string]any{"assignee": created.AgentID, "task": "Diagnose the fixture and deliver findings"})
+		return operation("assign_research", map[string]any{"assignee": created.AgentID, "task": "Diagnose the fixture and deliver findings", "context": nil, "expected_output": nil})
 	case 3:
 		return operation("wait_for_input", struct{}{})
 	case 4:
 		for _, m := range r.Messages {
 			if m.Envelope != nil && m.Envelope.Progress != nil && len(m.Envelope.Progress.Briefs) > 0 {
-				return operation("get_research_brief", map[string]any{"brief_id": m.Envelope.Progress.Briefs[0].BriefID})
+				return operation("get_research_brief", map[string]any{"brief_id": m.Envelope.Progress.Briefs[0].BriefID, "max_bytes": nil})
 			}
 		}
 		return provider.Response{}, fmt.Errorf("missing delivery notice")
@@ -65,7 +66,7 @@ func (f acceptanceRoot) Submit(_ context.Context, r provider.Request, _ provider
 		if err := json.Unmarshal([]byte(lastResult(r)), &page); err != nil || len(page.Items) != 1 {
 			return provider.Response{}, fmt.Errorf("brief read: %v %s", err, lastResult(r))
 		}
-		return operation("get_work_progress", map[string]any{"mode": "finding", "finding_id": page.Items[0].FindingIDs[0]})
+		return operation("get_work_progress", map[string]any{"mode": "finding", "finding_id": page.Items[0].FindingIDs[0], "max_bytes": nil})
 	case 6:
 		var page struct {
 			Items []work.ProgressFinding `json:"items"`
@@ -73,7 +74,7 @@ func (f acceptanceRoot) Submit(_ context.Context, r provider.Request, _ provider
 		if err := json.Unmarshal([]byte(lastResult(r)), &page); err != nil || len(page.Items) != 1 {
 			return provider.Response{}, fmt.Errorf("finding read: %v", err)
 		}
-		return operation("get_work_progress", map[string]any{"mode": "evidence", "evidence_ref": page.Items[0].Evidence[0].URI})
+		return operation("get_work_progress", map[string]any{"mode": "evidence", "evidence_ref": page.Items[0].Evidence[0].URI, "max_bytes": nil})
 	default:
 		if !strings.Contains(lastResult(r), "diagnostic-result") {
 			return provider.Response{}, fmt.Errorf("missing evidence")
@@ -94,7 +95,7 @@ func (f acceptanceWorker) Submit(_ context.Context, r provider.Request, _ provid
 				p.w = *m.Envelope.Work
 			}
 		}
-		return operation("shell", map[string]any{"work_id": p.w.ID, "command": "printf diagnostic-result"})
+		return operation("shell", map[string]any{"work_id": p.w.ID, "command": "printf diagnostic-result", "timeout_ms": nil})
 	case 2:
 		var receipt struct {
 			Ref string `json:"evidence_ref"`
@@ -103,13 +104,13 @@ func (f acceptanceWorker) Submit(_ context.Context, r provider.Request, _ provid
 			return provider.Response{}, err
 		}
 		p.ref = receipt.Ref
-		return operation("report_work_progress", work.ReportWorkProgressRequest{WorkID: p.w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic returned the fixture result", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: p.ref}}}}})
+		return operation("report_work_progress", tool.ReportWorkProgressInput{WorkID: p.w.ID, Findings: []tool.ProgressFindingDraftInput{{Claim: "Diagnostic returned the fixture result", Basis: work.Observed, Evidence: []tool.EvidenceRefInput{{URI: p.ref}}}}})
 	case 3:
 		var receipt work.ReportWorkProgressResult
 		if err := json.Unmarshal([]byte(lastResult(r)), &receipt); err != nil || len(receipt.FindingIDs) != 1 {
 			return provider.Response{}, fmt.Errorf("report: %v %s", err, lastResult(r))
 		}
-		return operation("submit_research", work.SubmitResearchRequest{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: receipt.WorkRevision}, Summary: "Diagnostic finding delivered", FindingIDs: receipt.FindingIDs})
+		return operation("submit_research", tool.SubmitResearchInput{WorkTarget: work.WorkTarget{ID: p.w.ID, ExpectedRevision: receipt.WorkRevision}, Summary: "Diagnostic finding delivered", FindingIDs: receipt.FindingIDs})
 	default:
 		return operation("wait_for_input", struct{}{})
 	}

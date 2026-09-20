@@ -29,7 +29,7 @@ func TestUsageAcrossToolLoopAndFailure(t *testing.T) {
 	first := p.next(t)
 	first.answer <- answer{response: provider.Response{
 		Usage:     usage(100, 10),
-		ToolCalls: []provider.ToolCall{{ID: "call-usage", Name: "unknown", Arguments: []byte(`{}`)}},
+		ToolCalls: []provider.ToolCall{{ID: "call-usage", Name: "unknown", Arguments: []byte(`{"input":{}}`)}},
 	}}
 	second := p.next(t) // The tool error is incorporated before this call.
 	e := nextUsage(t, c)
@@ -56,7 +56,7 @@ func TestUsageAcrossToolLoopAndFailure(t *testing.T) {
 	third := p.next(t)
 	third.answer <- answer{response: provider.Response{
 		Content: "must not enter history", Usage: usage(150, 20),
-		ToolCalls: []provider.ToolCall{{ID: "rejected", Name: "unknown", Arguments: []byte(`{}`)}},
+		ToolCalls: []provider.ToolCall{{ID: "rejected", Name: "unknown", Arguments: []byte(`{"input":{}}`)}},
 	}, err: errors.New("rejected completion")}
 	e = nextUsage(t, c)
 	if e.Observation.Call != 3 || e.Observation.ContextRevision != 6 {

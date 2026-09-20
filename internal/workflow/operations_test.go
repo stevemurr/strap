@@ -39,7 +39,7 @@ func operationResult[T any](t *testing.T, s *Session, viaTools bool, actor messa
 			operations = s.auditor.Tools
 		}
 	}
-	raw, err := json.Marshal(args)
+	raw, err := tool.MarshalInput(args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,23 +78,23 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 	implementor := create(roster.Implementor)
 	auditor := create(roster.Auditor)
 	planRequest := work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Unassigned")}}}
-	plan := operationResult(t, s, viaTools, root, "create_plan", planRequest, func() (work.Plan, error) {
+	plan := operationResult(t, s, viaTools, root, "create_plan", map[string]any{"title": "Storage", "steps": []any{map[string]any{"title": "Implement", "acceptance_criteria": nil}, map[string]any{"title": "Unassigned", "acceptance_criteria": nil}}}, func() (work.Plan, error) {
 		return s.UpdatePlan(ctx, root, planRequest)
 	})
 	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
-	implementation := operationResult(t, s, viaTools, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: assignment.Context, ExpectedOutput: assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
+	implementation := operationResult(t, s, viaTools, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	implementationID := implementation.ID
 	var lastAudit work.Audit
 	for _, verdict := range []work.Verdict{work.Fail, work.Pass} {
 		progress := work.ReportWorkProgressRequest{WorkID: implementation.ID, Steps: []work.StepProgress{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}
-		receipt := operationResult(t, s, viaTools, implementation.Assignee, "report_work_progress", progress, func() (work.ReportWorkProgressResult, error) {
+		receipt := operationResult(t, s, viaTools, implementation.Assignee, "report_work_progress", tool.ReportWorkProgressInput{WorkID: progress.WorkID, Steps: []tool.StepProgressInput{{ID: plan.Steps[0].ID, Status: ptr(work.ReadyForReview)}}}, func() (work.ReportWorkProgressResult, error) {
 			return s.ReportWorkProgress(ctx, implementation.Assignee, progress)
 		})
 		implementation.Revision = receipt.WorkRevision
 		submissionRequest := work.SubmitRequest{WorkTarget: work.WorkTarget{ID: implementation.ID, ExpectedRevision: implementation.Revision}, Summary: "implemented", Evidence: []string{"checked"}}
-		submission := operationResult(t, s, viaTools, implementation.Assignee, "submit_work", submissionRequest, func() (work.SubmitReceipt, error) {
+		submission := operationResult(t, s, viaTools, implementation.Assignee, "submit_work", tool.SubmitInput{WorkTarget: submissionRequest.WorkTarget, Summary: submissionRequest.Summary, Evidence: submissionRequest.Evidence}, func() (work.SubmitReceipt, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)
 		})
 		original, err := s.GetWork(ctx, root, implementationID)
@@ -115,7 +115,11 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 		if verdict == work.Fail {
 			verdictRequest.Findings = []work.Finding{{StepIDs: []work.StepID{plan.Steps[0].ID}, Description: "missing check", RequiredChange: "handle error", Verification: "test failure"}}
 		}
-		lastAudit = operationResult(t, s, viaTools, auditing.Assignee, "submit_audit", verdictRequest, func() (work.Audit, error) {
+		wireAudit := tool.AuditInput{WorkTarget: verdictRequest.WorkTarget, SubmissionID: verdictRequest.SubmissionID, Verdict: verdictRequest.Verdict, Summary: verdictRequest.Summary}
+		for _, f := range verdictRequest.Findings {
+			wireAudit.Findings = append(wireAudit.Findings, tool.FindingInput{StepIDs: f.StepIDs, Description: f.Description, RequiredChange: f.RequiredChange, Verification: f.Verification})
+		}
+		lastAudit = operationResult(t, s, viaTools, auditing.Assignee, "submit_audit", wireAudit, func() (work.Audit, error) {
 			return s.SubmitAudit(ctx, auditing.Assignee, verdictRequest)
 		})
 		if verdict == work.Fail {
@@ -147,7 +151,7 @@ func operationCycle(t *testing.T, viaTools bool) operationOutcome {
 		t.Fatalf("unexpected audit/repair outcome: %+v, %+v, %+v", final, plan, audit)
 	}
 	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "reassign then cancel"}
-	extra := operationResult(t, s, viaTools, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: assignment.Context, ExpectedOutput: assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
+	extra := operationResult(t, s, viaTools, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
 		return s.AssignWork(ctx, root, assignment)
 	})
 	oldAssignee := extra.Assignee
@@ -207,7 +211,7 @@ func TestTypedOperationsEnforceAuthorityAndRevisions(t *testing.T) {
 	}
 	// The model adapter must use that same root-only check, even if a host
 	// accidentally exposes the root tool to a worker.
-	if _, err := callAs(s, ctx, w.Assignee, "create_plan", plan); !errors.Is(err, work.ErrForbidden) {
+	if _, err := callAs(s, ctx, w.Assignee, "create_plan", map[string]any{"title": "unauthorized", "steps": []any{map[string]any{"title": "step", "acceptance_criteria": nil}}}); !errors.Is(err, work.ErrForbidden) {
 		t.Fatalf("tool bypassed root-only check: %v", err)
 	}
 	if _, err := s.AssignWork(ctx, w.Assignee, work.AssignmentRequest{Kind: work.Implementation, Task: "delegate"}); !errors.Is(err, work.ErrForbidden) {
@@ -283,7 +287,6 @@ func TestTypedOperationsRespectCanceledContext(t *testing.T) {
 		call func() error
 	}{
 		{"update_plan", func() error { _, e := s.UpdatePlan(ctx, root, work.PlanUpdate{}); return e }},
-		{"update_progress", func() error { _, e := s.UpdateProgress(ctx, root, work.ProgressUpdate{}); return e }},
 		{"assign", func() error { _, e := s.AssignWork(ctx, root, work.AssignmentRequest{}); return e }},
 		{"reassign", func() error { _, e := s.ReassignWork(ctx, root, work.ReassignRequest{}); return e }},
 		{"cancel", func() error { _, e := s.CancelWork(ctx, root, work.CancelRequest{}); return e }},

@@ -52,7 +52,7 @@ func TestInspectionProjectionIsBoundedAndDoesNotMutateTranscript(t *testing.T) {
 }
 
 func TestInspectionProjectionPreservesRawArgumentsAndLabelsImages(t *testing.T) {
-	in := conversation.AgentInspection{Transcript: &agent.TranscriptPage{Entries: []agent.TranscriptEntry{{Position: 1, Message: provider.Message{Role: "assistant", Content: content.Content{{Text: "checking"}, {Image: &content.Image{MIMEType: "image/png", Data: []byte("secret binary")}}}, ToolCalls: []provider.ToolCall{{ID: "bad", Name: "shell", Arguments: json.RawMessage(`{"invalid":`)}}}}}}}
+	in := conversation.AgentInspection{Transcript: &agent.TranscriptPage{Entries: []agent.TranscriptEntry{{Position: 1, Message: provider.Message{Role: "assistant", Content: content.Content{{Text: "checking"}, {Image: &content.Image{MIMEType: "image/png", Data: []byte("secret binary")}}}, ToolCalls: []provider.ToolCall{{ID: "bad", Name: "shell", Arguments: json.RawMessage(`{"input":{"invalid":}`)}}}}}}}
 	result, err := inspectionResult(AgentInspection{AgentInspection: in})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestInspectToolDefaultsToTranscriptAndPreservesThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Actor: created.AgentID, Arguments: json.RawMessage(`{"agent_id":"` + string(created.AgentID) + `"}`)})
+	result, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Actor: created.AgentID, Arguments: json.RawMessage(`{"input":{"agent_id":"` + string(created.AgentID) + `","before":null,"limit":null}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

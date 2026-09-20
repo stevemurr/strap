@@ -140,10 +140,7 @@ func (s *Session) commonTools() []tool.Tool {
 		}),
 	}, s.progressReads...)
 }
-func (s *Session) updateProgress(ctx context.Context, c tool.Call, u work.ProgressUpdate) (tool.Result, error) {
-	v, e := s.UpdateProgress(ctx, c.Actor, u)
-	return result(v, e)
-}
+
 func (s *Session) RootTools() []tool.Tool {
 	tools := append(s.commonTools(),
 		tool.WaitForInput(),

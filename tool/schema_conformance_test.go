@@ -19,7 +19,7 @@ func TestAuditSchemaRejectsMissingFailedFindings(t *testing.T) {
 		calls++
 		return Text("recorded"), nil
 	})
-	raw := json.RawMessage(`{"work_id":"w","expected_revision":1,"submission_id":"s","verdict":"fail","summary":"broken"}`)
+	raw := json.RawMessage(`{"input":{"work_id":"w","expected_revision":1,"submission_id":"s","verdict":"fail","summary":"broken","findings":null}}`)
 	schema := compileExportedSchema(t, op.Definition().Parameters)
 	if err := validateExportedSchema(t, schema, raw); err == nil {
 		t.Error("advertised schema accepted failed audit without findings")
@@ -78,26 +78,25 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 	}{
 		{
 			"assign_implementation",
-			`{"assignee":"worker","task":"implement","context":"background","expected_output":"patch","scope":{"plan_id":"p","step_ids":["s"]}}`,
+			`{"input":{"assignee":"worker","task":"implement","context":"background","expected_output":"patch","scope":{"plan_id":"p","step_ids":["s"]}}}`,
 			[]string{"assignee", "task"},
 			[]schemaMutation{
 				{"mixed submission", "submission_id", `"s"`},
 				{"mixed revision", "expected_revision", `1`},
 				{"legacy discriminator", "kind", `"implementation"`},
 				{"empty task", "task", `""`},
-				{"null context", "context", `null`},
-				{"null scope", "scope", `null`},
+				{"wrong context", "context", `42`},
+				{"wrong scope", "scope", `42`},
 				{"missing plan", "scope.plan_id", ""},
 				{"nested extra", "scope.owner", `"forged"`},
 				{"no steps", "scope.step_ids", `[]`},
-				{"duplicate steps", "scope.step_ids", `["s","s"]`},
 				{"empty step", "scope.step_ids", `[""]`},
 				{"null step", "scope.step_ids", `["s",null]`},
 			},
 		},
 		{
 			"assign_audit",
-			`{"assignee":"auditor","work_id":"w","expected_revision":2,"submission_id":"s"}`,
+			`{"input":{"assignee":"auditor","work_id":"w","expected_revision":2,"submission_id":"s"}}`,
 			[]string{"assignee", "work_id", "expected_revision", "submission_id"},
 			[]schemaMutation{
 				{"mixed audit id", "audit_id", `"a"`},
@@ -111,7 +110,7 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 		},
 		{
 			"assign_repair",
-			`{"assignee":"worker","work_id":"w","expected_revision":2,"audit_id":"a"}`,
+			`{"input":{"assignee":"worker","work_id":"w","expected_revision":2,"audit_id":"a"}}`,
 			[]string{"assignee", "work_id", "expected_revision", "audit_id"},
 			[]schemaMutation{
 				{"mixed submission", "submission_id", `"s"`},
@@ -122,12 +121,12 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 		},
 		{
 			"assign_research",
-			`{"assignee":"researcher","task":"investigate","context":"background","expected_output":"findings"}`,
+			`{"input":{"assignee":"researcher","task":"investigate","context":"background","expected_output":"findings"}}`,
 			[]string{"assignee", "task"},
 			[]schemaMutation{
 				{"mixed scope", "scope", `{"plan_id":"p","step_ids":["s"]}`},
 				{"mixed work", "work_id", `"w"`},
-				{"null optional", "expected_output", `null`},
+				{"wrong optional", "expected_output", `42`},
 			},
 		},
 	} {
@@ -215,15 +214,15 @@ func mutateSchemaSeed(t *testing.T, seed string, mutation schemaMutation) json.R
 		}
 		return out
 	}
-	return apply(json.RawMessage(seed), strings.Split(mutation.path, "."))
+	return apply(json.RawMessage(seed), strings.Split("input."+mutation.path, "."))
 }
 
 func TestAuditSchemaAndDispatchConform(t *testing.T) {
 	calls := 0
 	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { calls++; return Text("ok"), nil })
 	schema := compileExportedSchema(t, op.Definition().Parameters)
-	pass := `{"work_id":"w","expected_revision":2,"submission_id":"s","verdict":"pass","summary":"checked"}`
-	fail := `{"work_id":"w","expected_revision":2,"submission_id":"s","verdict":"fail","summary":"broken","findings":[{"description":"missing check","required_change":"add check","verification":"run test"}]}`
+	pass := `{"input":{"work_id":"w","expected_revision":2,"submission_id":"s","verdict":"pass","summary":"checked","findings":null}}`
+	fail := `{"input":{"work_id":"w","expected_revision":2,"submission_id":"s","verdict":"fail","summary":"broken","findings":[{"description":"missing check","required_change":"add check","verification":"run test","step_ids":null}]}}`
 	cases := []struct {
 		name, raw string
 		valid     bool
@@ -235,7 +234,7 @@ func TestAuditSchemaAndDispatchConform(t *testing.T) {
 		{"authority", "assignee", `"forged"`},
 		{"overflow", "expected_revision", `18446744073709551616`},
 		{"empty work", "work_id", `""`},
-		{"null findings", "findings", `null`},
+		{"wrong findings", "findings", `42`},
 		{"nonempty pass findings", "findings", `[{"description":"d","required_change":"c","verification":"v"}]`},
 	} {
 		cases = append(cases, struct {

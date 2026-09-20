@@ -176,6 +176,9 @@ the work; the owner must be informed and able to recover it.
 
 ## Operations and inputs
 
+The following are domain APIs. Model tool inputs use the closed `input` envelope
+and required fields with explicit nulls described in [the tool input contract](docs/tool-input-contract.md).
+
 Use one concrete synchronized `Store`; define consumer-local interfaces only when
 a real substitution requirement appears. These are synchronous in-memory
 operations. Tool adapters retain cancellation contexts and supply trusted actor
@@ -186,7 +189,7 @@ func New() *Store
 
 func (*Store) UpdatePlan(identity.ActorID, PlanUpdate) (Plan, error)
 func (*Store) AssignWork(identity.ActorID, AssignRequest) (Work, error)
-func (*Store) UpdateProgress(identity.ActorID, ProgressUpdate) (Work, error)
+func (*Store) ReportWorkProgress(identity.ActorID, ReportWorkProgressRequest) (ReportWorkProgressResult, error)
 func (*Store) SubmitWork(identity.ActorID, SubmitRequest) (Submission, error)
 func (*Store) AssignAudit(identity.ActorID, AssignAuditRequest) (Work, error)
 func (*Store) SubmitAudit(identity.ActorID, AuditRequest) (Audit, error)
@@ -207,7 +210,7 @@ execution has started. They replace the earlier `Assign` / `StartAudit` wording.
 |---|---|
 | `PlanUpdate` | Optional plan ID and expected structural revision; optional title; step additions/edits, ordering, cancellation |
 | `AssignRequest` | Application-validated assignee; optional scope; task, context, expected output. Creates implementation work only |
-| `ProgressUpdate` | `WorkTarget`; optional work note/blocker; scoped step status/note patches |
+| `ReportWorkProgressRequest` | Explicit work ID; replacement position, findings, or scoped step updates |
 | `SubmitRequest` | `WorkTarget`; summary, evidence, artifact references |
 | `AssignAuditRequest` | Implementation `WorkTarget`, current submission ID, application-validated auditor |
 | `AuditRequest` | Audit `WorkTarget`, submission ID, pass/fail verdict, summary, findings |

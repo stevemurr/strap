@@ -2,7 +2,6 @@ package interaction
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -171,7 +170,7 @@ func (f fixture) script(scenarioID string) provider.Provider {
 	}
 	if scenarioID == "audit-revision-race" {
 		call := func(id, name string, value any) provider.Response {
-			arguments, _ := json.Marshal(value)
+			arguments, _ := tool.MarshalInput(value)
 			return provider.Response{ToolCalls: []provider.ToolCall{{ID: id, Name: name, Arguments: arguments}}}
 		}
 		read := map[string]any{"work_id": f.Original.ID}
@@ -202,7 +201,7 @@ func (f fixture) script(scenarioID string) provider.Provider {
 	responses := make([]provider.Response, len(requests))
 	for i, request := range requests {
 		// AssignAuditArgs contains only JSON-safe concrete values.
-		arguments, _ := json.Marshal(request)
+		arguments, _ := tool.MarshalInput(request)
 		responses[i] = provider.Response{ToolCalls: []provider.ToolCall{{
 			ID: fmt.Sprintf("%s-%d", scenarioID, i+1), Name: "assign_audit", Arguments: arguments,
 		}}}

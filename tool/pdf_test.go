@@ -32,7 +32,7 @@ func TestPDFRenderingPageOrderAndLimits(t *testing.T) {
 	for _, tc := range []struct {
 		raw   string
 		pages []int
-	}{{`{"path":"pages.pdf"}`, []int{1, 2}}, {`{"path":"pages.pdf","pages":[3,1]}`, []int{3, 1}}} {
+	}{{`{"input":{"path":"pages.pdf","pages":null}}`, []int{1, 2}}, {`{"input":{"path":"pages.pdf","pages":[3,1]}}`, []int{3, 1}}} {
 		result, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(tc.raw)})
 		if err != nil {
 			t.Fatal(err)
@@ -58,17 +58,17 @@ func TestPDFRenderingPageOrderAndLimits(t *testing.T) {
 			}
 		}
 	}
-	for _, raw := range []string{`{"path":"pages.pdf","pages":[]}`, `{"path":"pages.pdf","pages":[0]}`, `{"path":"pages.pdf","pages":[4]}`, `{"path":"pages.pdf","pages":[1,1]}`, `{"path":"pages.pdf","pages":[1,2,3]}`} {
+	for _, raw := range []string{`{"input":{"path":"pages.pdf","pages":[]}}`, `{"input":{"path":"pages.pdf","pages":[0]}}`, `{"input":{"path":"pages.pdf","pages":[4]}}`, `{"input":{"path":"pages.pdf","pages":[1,1]}}`, `{"input":{"path":"pages.pdf","pages":[1,2,3]}}`} {
 		if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
 	tiny, _ := NewPDF(PDFConfig{Dir: "testdata", MaxImageBytes: 10})
-	if _, err := tiny.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"pages.pdf"}`)}); err == nil {
+	if _, err := tiny.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"pages.pdf","pages":null}}`)}); err == nil {
 		t.Fatal("image byte cap ignored")
 	}
 	small, _ := NewPDF(PDFConfig{Dir: "testdata", MaxFileBytes: 10})
-	if _, err := small.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"pages.pdf"}`)}); err == nil {
+	if _, err := small.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"pages.pdf","pages":null}}`)}); err == nil {
 		t.Fatal("file byte cap ignored")
 	}
 }
@@ -79,12 +79,12 @@ func TestPDFInvalidFileAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	pdf, _ := NewPDF(PDFConfig{Dir: dir})
-	if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"invalid.pdf"}`)}); err == nil {
+	if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"invalid.pdf","pages":null}}`)}); err == nil {
 		t.Fatal("invalid PDF accepted")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := pdf.Call(ctx, Call{Arguments: json.RawMessage(`{"path":"invalid.pdf"}`)}); !errors.Is(err, context.Canceled) {
+	if _, err := pdf.Call(ctx, Call{Arguments: json.RawMessage(`{"input":{"path":"invalid.pdf","pages":null}}`)}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }
@@ -133,7 +133,7 @@ func TestPDFPathsUseWorkingDirectoryOnlyForRelativePaths(t *testing.T) {
 	}
 	for _, path := range []string{absolute, "inside.pdf", "../outside.pdf", "link.pdf"} {
 		t.Run(path, func(t *testing.T) {
-			args, _ := json.Marshal(map[string]string{"path": path})
+			args, _ := MarshalInput(map[string]any{"path": path, "pages": nil})
 			result, err := pdf.Call(context.Background(), Call{Arguments: args})
 			if err != nil {
 				t.Fatal(err)
@@ -148,7 +148,7 @@ func TestPDFPathsUseWorkingDirectoryOnlyForRelativePaths(t *testing.T) {
 		})
 	}
 	for _, path := range []string{"", work, filepath.Join(dir, "missing.pdf")} {
-		args, _ := json.Marshal(map[string]string{"path": path})
+		args, _ := MarshalInput(map[string]any{"path": path, "pages": nil})
 		if _, err := pdf.Call(context.Background(), Call{Arguments: args}); err == nil {
 			t.Fatalf("accepted invalid file %q", path)
 		}

@@ -15,9 +15,9 @@ import (
 )
 
 type openArgs struct {
-	URL      string `json:"url"`
-	MaxChars *int   `json:"max_chars,omitempty"`
-	Cursor   string `json:"cursor,omitempty"`
+	URL      string  `json:"url"`
+	MaxChars *int    `json:"max_chars"`
+	Cursor   *string `json:"cursor"`
 }
 
 type WebLink = agentbrowser.Link
@@ -64,8 +64,8 @@ func (w *Web) open(ctx context.Context, call Call, args openArgs) (Result, error
 		return Result{}, err
 	}
 	defer done()
-	if args.Cursor != "" {
-		page, err := w.continuePage(call.Actor, requested, args.Cursor, limit)
+	if args.Cursor != nil {
+		page, err := w.continuePage(call.Actor, requested, *args.Cursor, limit)
 		if err != nil {
 			return Result{}, err
 		}

@@ -61,7 +61,7 @@ func TestBootstrapAndNoImplicitTools(t *testing.T) {
 		if len(request.request.Tools) != 0 {
 			t.Fatalf("injected tools: %+v", request.request.Tools)
 		}
-		request.tool("create_test_agent", `{"task":"unexpected"}`)
+		request.tool("create_test_agent", `{"input":{"task":"unexpected","context":null,"expected_output":null}}`)
 		next := m.next(t)
 		last := next.request.Messages[len(next.request.Messages)-1]
 		if last.Content.Text() != "Tool error: unknown tool: create_test_agent" {
@@ -92,7 +92,7 @@ func TestSharedCreationToolUsesExecutingAgentAndConfiguredSpec(t *testing.T) {
 		if _, err := c.Send(id, "delegate"); err != nil {
 			t.Fatal(err)
 		}
-		callers.next(t).tool("create_test_agent", `{"task":"work"}`)
+		callers.next(t).tool("create_test_agent", `{"input":{"task":"work","context":null,"expected_output":null}}`)
 		worker := workers.next(t)
 		if systemPrompt(t, worker).Role != "Configured execution prompt" || len(worker.request.Tools) != 0 {
 			t.Fatal("caller configuration leaked into created agent")
@@ -122,13 +122,13 @@ func TestSharedCreationToolUsesExecutingAgentAndConfiguredSpec(t *testing.T) {
 			t.Fatal("creation receipt does not match delivery")
 		}
 		// Sender attribution is also supplied per invocation for the shared send tool.
-		continuation.tool("send_message", `{"to":"user","message":"progress","actor":"forged"}`)
+		continuation.tool("send_message", `{"input":{"to":"user","message":"progress","actor":"forged"}}`)
 		continuation = callers.next(t)
 		rejected := continuation.request.Messages[len(continuation.request.Messages)-1].Content.Text()
 		if !strings.Contains(rejected, "actor is not an allowed field") {
 			t.Fatalf("forged identity was not rejected: %s", rejected)
 		}
-		continuation.tool("send_message", `{"to":"user","message":"progress"}`)
+		continuation.tool("send_message", `{"input":{"to":"user","message":"progress"}}`)
 		observed := event(t, c, func(e conversation.Event) bool {
 			msg, ok := e.(conversation.MessageEvent)
 			return ok && msg.Message.Content == "progress"

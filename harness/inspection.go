@@ -1,8 +1,11 @@
 package harness
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/url"
+	"sort"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/eventlog"
@@ -11,12 +14,14 @@ import (
 )
 
 type RoleConfiguration struct {
+	SchemaHash       string                    `json:"schema_hash"`
 	Model            *ModelConfig              `json:"model,omitempty"`
 	InjectedProvider bool                      `json:"injected_provider"`
 	Prompt           prompt.Prompt             `json:"prompt"`
 	Tools            []provider.ToolDefinition `json:"tools"`
 }
 type EffectiveConfig struct {
+	ToolContractVersion   string                      `json:"tool_contract_version"`
 	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Dir                   string                      `json:"dir"`
@@ -50,6 +55,15 @@ func describeRole(cfg Config, role AgentConfig, spec agent.Spec, injected bool) 
 		d.Parameters = append(json.RawMessage(nil), d.Parameters...)
 		r.Tools = append(r.Tools, d)
 	}
+	// Hash canonical names and schemas independently of registration order.
+	contracts := append([]provider.ToolDefinition(nil), r.Tools...)
+	sort.Slice(contracts, func(i, j int) bool { return contracts[i].Name < contracts[j].Name })
+	for i := range contracts {
+		contracts[i].Description = ""
+	}
+	raw, _ := json.Marshal(contracts)
+	digest := sha256.Sum256(raw)
+	r.SchemaHash = hex.EncodeToString(digest[:])
 	return r
 }
 

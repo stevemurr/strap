@@ -24,7 +24,7 @@ func ExampleFunc() {
 	}
 	// Heterogeneous runtime registries still use the unchanged Tool interface.
 	var registered tool.Tool = greet
-	result, err := registered.Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"name":"Ada"}`)})
+	result, err := registered.Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"input":{"name":"Ada"}}`)})
 	if err != nil {
 		panic(err)
 	}

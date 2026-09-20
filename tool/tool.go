@@ -35,7 +35,7 @@ type Definition[A any] struct {
 	Name        string
 	Description string
 	Parameters  Parameters[A]
-	// Bookkeeping names top-level parameters the model copies from a previous
+	// Bookkeeping names fields inside input that the model copies from a previous
 	// receipt, such as revisions. They carry no intent, so the agent ignores
 	// them when deciding whether a call repeats the previous one.
 	Bookkeeping []string
@@ -145,3 +145,5 @@ func JSON(value any) (Result, error) {
 }
 
 func (f Func[A]) snapshot() preparedTool { return f }
+
+func (f Func[A]) contract() *parameterNode { return f.Spec.Parameters.root }

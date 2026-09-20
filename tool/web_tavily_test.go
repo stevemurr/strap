@@ -19,10 +19,7 @@ func TestTavilySearchReturnsRankedHits(t *testing.T) {
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Error(err)
 		}
-		w.Write([]byte(`{"results":[
-			{"title":"context package","url":"https://pkg.go.dev/context","content":"Package context defines the Context type."},
-			{"title":"no url","url":"","content":"dropped"},
-			{"title":"Go blog","url":"https://go.dev/blog/context","content":"An introduction."}]}`))
+		w.Write([]byte(`{"results":[{"title":"context package","url":"https://pkg.go.dev/context","content":"Package context defines the Context type."},{"title":"no url","url":"","content":"dropped"},{"title":"Go blog","url":"https://go.dev/blog/context","content":"An introduction."}]}`))
 	}))
 	defer server.Close()
 	backend := &tavilySearch{key: "test-key", endpoint: server.URL, client: server.Client()}

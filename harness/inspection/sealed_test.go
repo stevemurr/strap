@@ -27,7 +27,7 @@ type sealedScript struct{ step atomic.Int32 }
 
 func (p *sealedScript) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	if p.step.Add(1) == 1 {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "inspect_agent", Arguments: json.RawMessage(`{"agent_id":"missing"}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "inspect_agent", Arguments: json.RawMessage(`{"input":{"agent_id":"missing","before":null,"limit":null}}`)}}}, nil
 	}
 	return provider.Response{Content: strings.Repeat("long answer ", 2000)}, nil
 }

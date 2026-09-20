@@ -114,7 +114,7 @@ func TestRevisionRaceLiveProviderUsesActualConflictAndFreshRead(t *testing.T) {
 			assignment := tool.AssignAuditArgs{Assignee: f.Auditor, WorkTarget: work.WorkTarget{ID: before.ID, ExpectedRevision: before.Revision}, SubmissionID: before.LatestSubmissionID}
 			// Preserve deliberate whitespace too: the race changes domain state,
 			// never the provider's submitted arguments.
-			args, err := json.MarshalIndent(assignment, "", "  ")
+			args, err := json.MarshalIndent(tool.Input[tool.AssignAuditArgs]{Value: assignment}, "", "  ")
 			if err != nil {
 				return provider.Response{}, err
 			}

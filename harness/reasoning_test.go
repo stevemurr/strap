@@ -35,7 +35,7 @@ func TestReasoningRecoveryNeverEntersNextHTTPRequest(t *testing.T) {
 		}
 		requests <- string(b)
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: "+`{"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"PRIVATE_REASON_🌎"}}]}`+"\n\n")
+		fmt.Fprint(w, "data: "+`{"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"PRIVATE_REASON_\ud83c\udf0e"}}]}`+"\n\n")
 		w.(http.Flusher).Flush()
 		select {
 		case <-release:

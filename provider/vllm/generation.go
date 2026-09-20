@@ -20,13 +20,7 @@ type Generation struct {
 	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
 	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
 	ReasoningEffort      *string  `json:"reasoning_effort,omitempty"`       // Qwen template: low, medium, or xhigh.
-	// StrictAllTools marks every advertised tool, including dynamically added
-	// tools. Enable only for a model profile backed by a validated server.
-	// It takes precedence over StrictTools and defaults to false. Tool selection
-	// stays automatic and application-side argument validation still applies.
-	StrictAllTools bool `json:"strict_all_tools,omitempty"`
-	// StrictTools selectively constrains named tools when StrictAllTools is false.
-	StrictTools []string `json:"strict_tools,omitempty"`
+
 }
 
 // Empty reports whether no generation setting was supplied, so a backend with

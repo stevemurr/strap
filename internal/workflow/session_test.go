@@ -42,7 +42,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 	defer p.mu.Unlock()
 	p.calls++
 	invoke := func(name string, args any) (provider.Response, error) {
-		raw, e := json.Marshal(args)
+		raw, e := tool.MarshalInput(args)
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("call-%d", p.calls), Name: name, Arguments: raw}}}, e
 	}
 	for _, m := range r.Messages {
@@ -171,9 +171,13 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 	}
 	if len(changes) > 0 {
-		return invoke("report_work_progress", work.ReportWorkProgressRequest{WorkID: target.ID, Steps: changes})
+		inputs := make([]tool.StepProgressInput, len(changes))
+		for i, v := range changes {
+			inputs[i] = tool.StepProgressInput{ID: v.ID, Status: v.Status, Note: v.Note}
+		}
+		return invoke("report_work_progress", tool.ReportWorkProgressInput{WorkID: target.ID, Steps: inputs})
 	}
-	return invoke("submit_work", work.SubmitRequest{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
+	return invoke("submit_work", tool.SubmitInput{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }
 func TestFullCycleWithoutUIReader(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -200,7 +204,7 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 		if operation.Definition().Name != "create_plan" {
 			continue
 		}
-		created, err := operation.Call(ctx, tool.Call{Actor: p.root, Arguments: json.RawMessage(`{"title":"Storage","steps":[{"title":"Implement"},{"title":"Test"},{"title":"Integrate"}]}`)})
+		created, err := operation.Call(ctx, tool.Call{Actor: p.root, Arguments: json.RawMessage(`{"input":{"title":"Storage","steps":[{"title":"Implement","acceptance_criteria":null},{"title":"Test","acceptance_criteria":null},{"title":"Integrate","acceptance_criteria":null}]}}`)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -334,7 +338,7 @@ func recoverySession(t *testing.T) (context.Context, *Session) {
 }
 func invokeRoot(t *testing.T, s *Session, name string, args any) tool.Result {
 	t.Helper()
-	raw, e := json.Marshal(args)
+	raw, e := tool.MarshalInput(args)
 	if e != nil {
 		t.Fatal(e)
 	}

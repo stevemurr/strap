@@ -14,23 +14,23 @@ import (
 
 type contractStep struct {
 	ID     string  `json:"step_id"`
-	Status *string `json:"status,omitempty"`
+	Status *string `json:"status"`
 }
 type contractArgs struct {
 	Title string         `json:"title"`
-	Count *int8          `json:"count,omitempty"`
-	Steps []contractStep `json:"steps,omitempty"`
-	Pages []int          `json:"pages,omitempty"`
+	Count *int8          `json:"count"`
+	Steps []contractStep `json:"steps"`
+	Pages []int          `json:"pages"`
 }
 
 func TestParametersValidateAndDecodeOneContract(t *testing.T) {
 	choices := []string{"pending", "ready"}
-	params, err := NewParameters[contractArgs](Minimum("count", 1), Maximum("count", 10), MinItems("steps", 1), MinLength("steps[].step_id", 1), Enum("steps[].status", choices...), MinItems("pages", 1), MaxItems("pages", 2), UniqueItems("pages"), Minimum("pages[]", 1))
+	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("count", 1), Maximum("count", 10), MinItems("steps", 1), MinLength("steps[].step_id", 1), Enum("steps[].status", choices...), MinItems("pages", 1), MaxItems("pages", 2), Minimum("pages[]", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	choices[0] = "mutated"
-	for _, raw := range []string{`{"title":""}`, `{"title":"plan","count":1.0}`, `{"title":"plan","count":1e1,"steps":[{"step_id":"s","status":"pending"}],"pages":[2,1]}`} {
+	for _, raw := range []string{`{"input":{"title":"p","pages":[1,1.0],"count":null,"steps":null}}`, `{"input":{"title":"","count":null,"steps":null,"pages":null}}`, `{"input":{"title":"plan","count":1.0,"steps":null,"pages":null}}`, `{"input":{"title":"plan","count":1e1,"steps":[{"step_id":"s","status":"pending"}],"pages":[2,1]}}`} {
 		got, err := params.Decode(json.RawMessage(raw))
 		if err != nil {
 			t.Fatalf("%s: %v", raw, err)
@@ -39,13 +39,13 @@ func TestParametersValidateAndDecodeOneContract(t *testing.T) {
 			t.Fatal("omission changed")
 		}
 	}
-	for _, raw := range []string{`{}`, `{"title":null}`, `{"title":"p","Title":"bypass"}`, `{"title":"p","title":"duplicate"}`, `{"title":"p","count":0}`, `{"title":"p","count":11}`, `{"title":"p","count":128}`, `{"title":"p","count":1.5}`, `{"title":"p","steps":"[]"}`, `{"title":"p","steps":[]}`, `{"title":"p","steps":[{}]}`, `{"title":"p","steps":[{"step_id":"s","note":"escape"}]}`, `{"title":"p","steps":[{"step_id":"s","status":"completed"}]}`, `{"title":"p","steps":[{"step_id":"s","status":"done"}]}`, `{"title":"p","pages":[1,1.0]}`, `{"title":"p","pages":[1,2,3]}`, `{"title":"p","pages":[]}`, `{"title":"p"} {}`} {
+	for _, raw := range []string{`{"input":{}}`, `{"input":{"title":null,"count":null,"steps":null,"pages":null}}`, `{"input":{"title":"p","Title":"bypass","count":null,"steps":null,"pages":null}}`, `{"input":{"title":"p","title":"duplicate","count":null,"steps":null,"pages":null}}`, `{"input":{"title":"p","count":0,"steps":null,"pages":null}}`, `{"input":{"title":"p","count":11,"steps":null,"pages":null}}`, `{"input":{"title":"p","count":128,"steps":null,"pages":null}}`, `{"input":{"title":"p","count":1.5,"steps":null,"pages":null}}`, `{"input":{"title":"p","steps":"[]","count":null,"pages":null}}`, `{"input":{"title":"p","steps":[],"count":null,"pages":null}}`, `{"input":{"title":"p","steps":[{"status":null}],"count":null,"pages":null}}`, `{"input":{"title":"p","steps":[{"step_id":"s","note":"escape","status":null}],"count":null,"pages":null}}`, `{"input":{"title":"p","steps":[{"step_id":"s","status":"completed"}],"count":null,"pages":null}}`, `{"input":{"title":"p","steps":[{"step_id":"s","status":"done"}],"count":null,"pages":null}}`, `{"input":{"title":"p","pages":[1,2,3],"count":null,"steps":null}}`, `{"input":{"title":"p","pages":[],"count":null,"steps":null}}`, `{"input":{"title":"p"} {}}`} {
 		if _, err := params.Decode(json.RawMessage(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
 	var schema map[string]any
-	if err := json.Unmarshal(params.Schema(), &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(t, params.Schema()), &schema); err != nil {
 		t.Fatal(err)
 	}
 	props := schema["properties"].(map[string]any)
@@ -53,7 +53,7 @@ func TestParametersValidateAndDecodeOneContract(t *testing.T) {
 	if count["minimum"] != float64(1) || count["maximum"] != float64(10) {
 		t.Fatal(count)
 	}
-	if got := schema["required"].([]any); len(got) != 1 || got[0] != "title" {
+	if got := schema["required"].([]any); len(got) != 4 {
 		t.Fatal(got)
 	}
 	original := string(params.Schema())
@@ -62,13 +62,13 @@ func TestParametersValidateAndDecodeOneContract(t *testing.T) {
 	if string(params.Schema()) != original {
 		t.Fatal("schema storage leaked")
 	}
-	if _, err := params.Decode([]byte(`{"title":"p","count":11}`)); err == nil {
+	if _, err := params.Decode([]byte(`{"input":{"title":"p","count":11,"steps":null,"pages":null}}`)); err == nil {
 		t.Fatal("export changed validation")
 	}
 }
 
 type recursiveArgs struct {
-	Next *recursiveArgs `json:"next,omitempty"`
+	Next *recursiveArgs `json:"next"`
 }
 type customInput string
 
@@ -97,15 +97,24 @@ func TestParametersRejectUnsupportedDefinitions(t *testing.T) {
 			}]()
 			return err
 		},
-		func() error { _, err := NewParameters[contractArgs](Minimum("missing", 1)); return err },
-		func() error { _, err := NewParameters[contractArgs](Minimum("title", 1)); return err },
-		func() error { _, err := NewParameters[contractArgs](Maximum("count", 128)); return err },
 		func() error {
-			_, err := NewParameters[contractArgs](Minimum("count", 10), Maximum("count", 1))
+			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("missing", 1))
 			return err
 		},
 		func() error {
-			_, err := NewParameters[contractArgs](MinItems("steps", 3), MaxItems("steps", 1))
+			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("title", 1))
+			return err
+		},
+		func() error {
+			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Maximum("count", 128))
+			return err
+		},
+		func() error {
+			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("count", 10), Maximum("count", 1))
+			return err
+		},
+		func() error {
+			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), MinItems("steps", 3), MaxItems("steps", 1))
 			return err
 		},
 	}
@@ -115,7 +124,7 @@ func TestParametersRejectUnsupportedDefinitions(t *testing.T) {
 		}
 	}
 	var zero Parameters[contractArgs]
-	if _, err := zero.Decode([]byte(`{"title":"p"}`)); err == nil {
+	if _, err := zero.Decode([]byte(`{"input":{"title":"p","count":null,"steps":null,"pages":null}}`)); err == nil {
 		t.Fatal("accepted uninitialized contract")
 	}
 }
@@ -130,15 +139,15 @@ func TestIntegerContractPreservesExactValues(t *testing.T) {
 	}
 	p := parameters[args]()
 	for _, raw := range []string{
-		`{"signed":-9007199254740991,"unsigned":9007199254740991}`,
-		`{"signed":-9007199254740991.0,"unsigned":90071992547409910e-1}`,
-		`{"signed":0e99999999999999999999,"unsigned":0e-99999999999999999999}`,
+		`{"input":{"signed":-9007199254740991,"unsigned":9007199254740991}}`,
+		`{"input":{"signed":-9007199254740991.0,"unsigned":90071992547409910e-1}}`,
+		`{"input":{"signed":0e99999999999999999999,"unsigned":0e-99999999999999999999}}`,
 	} {
 		if _, err := p.Decode([]byte(raw)); err != nil {
 			t.Fatalf("%s: %v", raw, err)
 		}
 	}
-	for _, raw := range []string{`{"signed":9007199254740992,"unsigned":0}`, `{"signed":0,"unsigned":9007199254740992}`, `{"signed":9223372036854775807,"unsigned":0}`, `{"signed":0,"unsigned":18446744073709551615}`, `{"signed":0,"unsigned":-1}`, `{"signed":1e99999999999999,"unsigned":0}`, `{"signed":1e-99999999999999,"unsigned":0}`} {
+	for _, raw := range []string{`{"input":{"signed":9007199254740992,"unsigned":0}}`, `{"input":{"signed":0,"unsigned":9007199254740992}}`, `{"input":{"signed":9223372036854775807,"unsigned":0}}`, `{"input":{"signed":0,"unsigned":18446744073709551615}}`, `{"input":{"signed":0,"unsigned":-1}}`, `{"input":{"signed":1e99999999999999,"unsigned":0}}`, `{"input":{"signed":1e-99999999999999,"unsigned":0}}`} {
 		if _, err := p.Decode([]byte(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
@@ -146,7 +155,7 @@ func TestIntegerContractPreservesExactValues(t *testing.T) {
 }
 func TestFuncRejectsInvalidCallsBeforeHandler(t *testing.T) {
 	calls := 0
-	f := Func[contractArgs]{Spec: Definition[contractArgs]{Name: "example", Parameters: parameters[contractArgs]()}, Invoke: func(_ context.Context, c Call, a contractArgs) (Result, error) {
+	f := Func[contractArgs]{Spec: Definition[contractArgs]{Name: "example", Parameters: parameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))}, Invoke: func(_ context.Context, c Call, a contractArgs) (Result, error) {
 		calls++
 		if c.Actor != "root" || a.Title != "ok" {
 			t.Fatal(c, a)
@@ -156,18 +165,18 @@ func TestFuncRejectsInvalidCallsBeforeHandler(t *testing.T) {
 	if err := f.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Call(context.Background(), Call{Arguments: []byte(`{}`)}); err == nil {
+	if _, err := f.Call(context.Background(), Call{Arguments: []byte(`{"input":{}}`)}); err == nil {
 		t.Fatal("missing field accepted")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := f.Call(ctx, Call{Arguments: []byte(`{"title":"ok"}`)}); !errors.Is(err, context.Canceled) {
+	if _, err := f.Call(ctx, Call{Arguments: []byte(`{"input":{"title":"ok","count":null,"steps":null,"pages":null}}`)}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if calls != 0 {
 		t.Fatal("invalid call reached handler")
 	}
-	if _, err := f.Call(context.Background(), Call{Actor: "root", Arguments: []byte(`{"title":"ok"}`)}); err != nil {
+	if _, err := f.Call(context.Background(), Call{Actor: "root", Arguments: []byte(`{"input":{"title":"ok","count":null,"steps":null,"pages":null}}`)}); err != nil {
 		t.Fatal(err)
 	}
 	f.Invoke = nil
@@ -194,13 +203,13 @@ func TestComposePreservesBranchesAndRejectsAmbiguity(t *testing.T) {
 		t.Fatal("mutated handler used")
 		return Result{}, nil
 	}
-	for raw, want := range map[string]string{`{"title":"p"}`: "create", `{"plan_id":"p"}`: "edit"} {
+	for raw, want := range map[string]string{`{"input":{"title":"p"}}`: "create", `{"input":{"plan_id":"p"}}`: "edit"} {
 		got, err := composed.Call(context.Background(), Call{Arguments: []byte(raw)})
 		if err != nil || got.Content.Text() != want {
 			t.Fatal(got, err)
 		}
 	}
-	for _, raw := range []string{`{}`, `{"title":"p","plan_id":"p"}`, `{"title":1}`} {
+	for _, raw := range []string{`{"input":{}}`, `{"input":{"title":"p","plan_id":"p"}}`, `{"input":{"title":1}}`} {
 		if _, err := composed.Call(context.Background(), Call{Arguments: []byte(raw)}); err == nil {
 			t.Fatal(raw)
 		}
@@ -214,14 +223,14 @@ func TestComposePreservesBranchesAndRejectsAmbiguity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ambiguous.Call(context.Background(), Call{Arguments: []byte(`{"plan_id":"p"}`)}); err == nil || !strings.Contains(err.Error(), "multiple") {
+	if _, err := ambiguous.Call(context.Background(), Call{Arguments: []byte(`{"input":{"plan_id":"p"}}`)}); err == nil || !strings.Contains(err.Error(), "multiple") {
 		t.Fatal(err)
 	}
 	if calls != 2 {
 		t.Fatal("ambiguous call executed")
 	}
 	var schema map[string]any
-	if err := json.Unmarshal(composed.Definition().Parameters, &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(t, composed.Definition().Parameters), &schema); err != nil {
 		t.Fatal(err)
 	}
 	if len(schema["oneOf"].([]any)) != 2 {
@@ -234,14 +243,14 @@ func TestComposePreservesBranchesAndRejectsAmbiguity(t *testing.T) {
 	}
 }
 func TestParametersSharedAcrossCalls(t *testing.T) {
-	p := parameters[contractArgs]()
+	p := parameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for range 20 {
-				if _, err := p.Decode([]byte(`{"title":"p"}`)); err != nil {
+				if _, err := p.Decode([]byte(`{"input":{"title":"p","count":null,"steps":null,"pages":null}}`)); err != nil {
 					t.Error(err)
 				}
 				p.Schema()
@@ -258,7 +267,7 @@ func TestTypedParametersCannotBeConvertedAcrossArgumentTypes(t *testing.T) {
 		t.Fatal("argument type can be changed without rebuilding the contract")
 	}
 }
-func TestCompositionPreservesIntegerBoundsAndTopLevelTypeHints(t *testing.T) {
+func TestCompositionPreservesIntegerBoundsWithoutHints(t *testing.T) {
 	type first struct {
 		Steps    []string `json:"steps"`
 		Revision uint64   `json:"revision"`
@@ -282,13 +291,13 @@ func TestCompositionPreservesIntegerBoundsAndTopLevelTypeHints(t *testing.T) {
 		} `json:"properties"`
 		Branches []json.RawMessage `json:"oneOf"`
 	}
-	if err := json.Unmarshal(raw, &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(t, raw), &schema); err != nil {
 		t.Fatal(err)
 	}
-	if schema.Properties["steps"].Type != "array" || schema.Properties["revision"].Type != "integer" || len(schema.Branches) != 2 {
+	if len(schema.Properties) != 0 || len(schema.Branches) != 2 {
 		t.Fatal(string(raw))
 	}
-	for _, input := range []string{`{"steps":[],"revision":18446744073709551616}`, `{"steps":[],"revision":1,"plan_id":"p"}`} {
+	for _, input := range []string{`{"input":{"steps":[],"revision":18446744073709551616}}`, `{"input":{"steps":[],"revision":1,"plan_id":"p"}}`} {
 		if _, err := op.Call(context.Background(), Call{Arguments: []byte(input)}); err == nil {
 			t.Fatal("hints weakened alternatives", input)
 		}
@@ -320,7 +329,7 @@ func TestNestedCompositionDoesNotNarrowMixedPropertyTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`{"value":"text"}`, `{"value":1}`, `{"value":true}`} {
+	for _, raw := range []string{`{"input":{"value":"text"}}`, `{"input":{"value":1}}`, `{"input":{"value":true}}`} {
 		if _, err := outer.Call(context.Background(), Call{Arguments: []byte(raw)}); err != nil {
 			t.Fatal(err)
 		}
@@ -328,7 +337,7 @@ func TestNestedCompositionDoesNotNarrowMixedPropertyTypes(t *testing.T) {
 	var schema struct {
 		Properties map[string]map[string]any `json:"properties"`
 	}
-	if err := json.Unmarshal(outer.Definition().Parameters, &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(t, outer.Definition().Parameters), &schema); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := schema.Properties["value"]["type"]; ok {
@@ -337,35 +346,35 @@ func TestNestedCompositionDoesNotNarrowMixedPropertyTypes(t *testing.T) {
 }
 
 func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
-	params, err := NewParameters[contractArgs](
+	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"),
 		Reject("steps[]", "note", "notes come from worker progress"),
 		Reject("", "workdir", "prefix the command with cd"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = params.Decode(json.RawMessage(`{"title":"p","workdir":"/x","actor":"forged","steps":[{"step_id":"s","note":"n","priority":1}]}`))
+	_, err = params.Decode(json.RawMessage(`{"input":{"title":"p","workdir":"/x","actor":"forged","steps":[{"step_id":"s","note":"n","priority":1,"status":null}],"count":null,"pages":null}}`))
 	if err == nil {
 		t.Fatal("accepted unknown fields")
 	}
 	// The first disallowed field keeps its original phrasing; the rest follow.
-	want := "arguments.actor is not an allowed field (also not allowed: workdir); workdir: prefix the command with cd"
+	want := "arguments.input.actor is not an allowed field (also not allowed: workdir); workdir: prefix the command with cd"
 	if err.Error() != want {
 		t.Fatalf("got %q, want %q", err, want)
 	}
-	_, err = params.Decode(json.RawMessage(`{"title":"p","steps":[{"step_id":"s","note":"n","priority":1}]}`))
-	if err == nil || err.Error() != "arguments.steps[0].note is not an allowed field (also not allowed: priority); note: notes come from worker progress" {
+	_, err = params.Decode(json.RawMessage(`{"input":{"title":"p","steps":[{"step_id":"s","note":"n","priority":1,"status":null}],"count":null,"pages":null}}`))
+	if err == nil || err.Error() != "arguments.input.steps[0].note is not an allowed field (also not allowed: priority); note: notes come from worker progress" {
 		t.Fatalf("nested rejection: %v", err)
 	}
-	_, err = params.Decode(json.RawMessage(`{"steps":[{"status":"pending"}]}`))
-	if err == nil || err.Error() != "arguments.title is required" {
+	_, err = params.Decode(json.RawMessage(`{"input":{"steps":[{"status":"pending"}],"count":null,"pages":null}}`))
+	if err == nil || err.Error() != "arguments.input.title is required" {
 		t.Fatalf("required phrasing changed: %v", err)
 	}
-	_, err = params.Decode(json.RawMessage(`{"title":"p","steps":[{}]}`))
-	if err == nil || err.Error() != "arguments.steps[0].step_id is required" {
+	_, err = params.Decode(json.RawMessage(`{"input":{"title":"p","steps":[{"status":null}],"count":null,"pages":null}}`))
+	if err == nil || err.Error() != "arguments.input.steps[0].step_id is required" {
 		t.Fatalf("nested required phrasing changed: %v", err)
 	}
 	for _, bad := range []Constraint{Reject("", "title", "exists"), Reject("steps[]", "", "empty"), Reject("title", "x", "not an object"), Reject("", "x", "")} {
-		if _, err := NewParameters[contractArgs](bad); err == nil {
+		if _, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), bad); err == nil {
 			t.Fatal("accepted invalid reject hint")
 		}
 	}
@@ -376,15 +385,15 @@ func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
 // rather than report a bare type mismatch. Every other wrong type keeps the
 // short phrasing.
 func TestStringifiedCompositeExplainsTheTrailingText(t *testing.T) {
-	params, err := NewParameters[contractArgs]()
+	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ raw, want string }{
-		{`{"title":"p","steps":"[{\"step_id\":\"s\"}]}"}`, "arguments.steps must be array, not a string; send the array itself and stop at its closing ], with no characters after it"},
-		{`{"title":"p","steps":["{\"step_id\":\"s\"}"]}`, "arguments.steps[0] must be object, not a string; send the object itself and stop at its closing }, with no characters after it"},
-		{`{"title":"p","steps":5}`, "arguments.steps must be array"},
-		{`{"title":"p","steps":[{"step_id":["s"]}]}`, "arguments.steps[0].step_id must be string"},
+		{`{"input":{"title":"p","steps":"[{\"step_id\":\"s\"}]}","count":null,"pages":null}}`, "arguments.input.steps must be array, not a string; send the array itself and stop at its closing ], with no characters after it"},
+		{`{"input":{"title":"p","steps":["{\"step_id\":\"s\"}"],"count":null,"pages":null}}`, "arguments.input.steps[0] must be object, not a string; send the object itself and stop at its closing }, with no characters after it"},
+		{`{"input":{"title":"p","steps":5,"count":null,"pages":null}}`, "arguments.input.steps must be array"},
+		{`{"input":{"title":"p","steps":[{"step_id":["s"],"status":null}],"count":null,"pages":null}}`, "arguments.input.steps[0].step_id must be string"},
 	} {
 		_, err := params.Decode(json.RawMessage(c.raw))
 		if err == nil || err.Error() != c.want {
@@ -397,14 +406,14 @@ func TestStringifiedCompositeExplainsTheTrailingText(t *testing.T) {
 // the first bad element of an array costs one round trip per element. A single
 // failure keeps its unaggregated phrasing.
 func TestArrayRejectionNamesEveryFailingElement(t *testing.T) {
-	params, err := NewParameters[contractArgs]()
+	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ raw, want string }{
-		{`{"title":"p","steps":[{"step_id":"s"},{},{}]}`, "arguments.steps[1].step_id is required (also: arguments.steps[2].step_id is required)"},
-		{`{"title":"p","steps":[{}]}`, "arguments.steps[0].step_id is required"},
-		{`{"title":"p","steps":[{"step_id":"s"},{"note":"n"}]}`, "arguments.steps[1].note is not an allowed field"},
+		{`{"input":{"title":"p","steps":[{"step_id":"s","status":null},{"status":null},{"status":null}],"count":null,"pages":null}}`, "arguments.input.steps[1].step_id is required (also: arguments.input.steps[2].step_id is required)"},
+		{`{"input":{"title":"p","steps":[{"status":null}],"count":null,"pages":null}}`, "arguments.input.steps[0].step_id is required"},
+		{`{"input":{"title":"p","steps":[{"step_id":"s","status":null},{"note":"n","status":null}],"count":null,"pages":null}}`, "arguments.input.steps[1].note is not an allowed field"},
 	} {
 		_, err := params.Decode(json.RawMessage(c.raw))
 		if err == nil || err.Error() != c.want {

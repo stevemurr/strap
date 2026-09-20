@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/stevemurr/strap/harness"
@@ -144,16 +143,7 @@ func Flags(flags *flag.FlagSet, model *harness.ModelConfig) {
 	}
 	boolFlag("thinking", "Override thinking mode (-thinking=false disables it)", &model.Generation.EnableThinking)
 	boolFlag("force-nonempty-content", "Require assistant content with tool calls (requires chat-template support)", &model.Generation.ForceNonemptyContent)
-	flags.Func("strict-tools", "Comma-separated tools whose generated arguments vLLM must constrain to their schema (structural tags; measure per tool before adding one to a profile)", func(raw string) error {
-		names := []string{}
-		for _, name := range strings.Split(raw, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				names = append(names, name)
-			}
-		}
-		model.Generation.StrictTools = names
-		return nil
-	})
+
 }
 
 // WasSet reports whether a flag was given explicitly on the command line.

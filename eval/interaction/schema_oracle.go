@@ -150,7 +150,11 @@ func decodeSchemaArgs(raw json.RawMessage, target any) error {
 		}
 		return value
 	}
-	encoded, err := json.Marshal(canonicalize(value))
+	object, ok := value.(map[string]any)
+	if !ok || len(object) != 1 || object["input"] == nil {
+		return fmt.Errorf("arguments requires input object")
+	}
+	encoded, err := json.Marshal(canonicalize(object["input"]))
 	if err != nil {
 		return err
 	}
@@ -355,36 +359,36 @@ func schemaRejection(name string, known bool, message string) bool {
 	if !known {
 		return message == "unknown tool: "+name
 	}
-	return strings.Contains(message, "arguments.") || strings.Contains(message, "arguments must ") || strings.Contains(message, "arguments requires ") || strings.Contains(message, "invalid JSON")
+	return strings.Contains(message, "arguments.input.") || strings.Contains(message, "arguments must ") || strings.Contains(message, "arguments requires ") || strings.Contains(message, "invalid JSON")
 }
 
 // This classifier is deliberately independent of production argument decoding.
 // It identifies the historical bad shape, not the tool-call ID or script index.
 func schemaProbe(id, name string, raw json.RawMessage) (bool, string) {
 	var args map[string]json.RawMessage
-	if json.Unmarshal(raw, &args) != nil {
+	if json.Unmarshal(schemaPayload(raw), &args) != nil {
 		return false, ""
 	}
 	has := func(key string) bool { _, ok := args[key]; return ok }
 	switch id {
 	case "schema-audit-repair-field":
-		return name == "assign_audit" && has("audit_id") && !has("submission_id"), "arguments.audit_id is not an allowed field"
+		return name == "assign_audit" && has("audit_id") && !has("submission_id"), "arguments.input.audit_id is not an allowed field"
 	case "schema-audit-required":
-		return name == "assign_audit" && has("assignee") && !has("work_id") && !has("expected_revision") && !has("submission_id"), "arguments.expected_revision is required"
+		return name == "assign_audit" && has("assignee") && !has("work_id") && !has("expected_revision") && !has("submission_id"), "arguments.input.expected_revision is required"
 	case "schema-audit-kind":
-		return name == "assign_audit" && has("kind"), "arguments.kind is not an allowed field"
+		return name == "assign_audit" && has("kind"), "arguments.input.kind is not an allowed field"
 	case "schema-audit-null-extra":
-		return name == "assign_audit" && has("context") && bytes.Equal(bytes.TrimSpace(args["context"]), []byte("null")), "arguments.context is not an allowed field"
+		return name == "assign_audit" && has("context") && bytes.Equal(bytes.TrimSpace(args["context"]), []byte("null")), "arguments.input.context is not an allowed field"
 	case "schema-removed-assignment-tool":
 		return name == "assign_work", "unknown tool: assign_work"
 	case "schema-audit-fail-findings":
-		return name == "submit_audit" && string(args["verdict"]) == `"fail"` && !has("findings"), "arguments.findings is required"
+		return name == "submit_audit" && string(args["verdict"]) == `"fail"` && !has("findings"), "arguments.input.findings is required"
 	case "schema-audit-pass-findings":
 		var findings []json.RawMessage
 		_ = json.Unmarshal(args["findings"], &findings)
-		return name == "submit_audit" && string(args["verdict"]) == `"pass"` && len(findings) > 0, "arguments.findings permits at most 0 items"
+		return name == "submit_audit" && string(args["verdict"]) == `"pass"` && len(findings) > 0, "arguments.input.findings permits at most 0 items"
 	case "schema-progress-objective":
-		return name == "report_work_progress" && has("objective") && !has("position"), "arguments.objective is not an allowed field"
+		return name == "report_work_progress" && has("objective") && !has("position"), "arguments.input.objective is not an allowed field"
 	}
 	return false, ""
 }

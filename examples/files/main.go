@@ -39,23 +39,23 @@ func runSteps(ctx context.Context, kit map[string]tool.Tool) error {
 	}{
 		{
 			label: "Write literal text, including newlines", name: "write_file",
-			args: json.RawMessage(`{"path":"tasks.txt","content":"Task: document tools\nStatus: draft\nTask: run examples\nStatus: draft\n"}`),
+			args: json.RawMessage(`{"input":{"path":"tasks.txt","content":"Task: document tools\nStatus: draft\nTask: run examples\nStatus: draft\n"}}`),
 		},
 		{
 			label: "Read a window starting at line 3", name: "read_file",
-			args: json.RawMessage(`{"path":"tasks.txt","offset":3,"limit":2}`),
+			args: json.RawMessage(`{"input":{"path":"tasks.txt","offset":3,"limit":2}}`),
 		},
 		{
 			label: "An ambiguous edit returns an error and leaves the file unchanged", name: "edit_file",
-			args: json.RawMessage(`{"path":"tasks.txt","old":"Status: draft","new":"Status: done"}`), wantError: true,
+			args: json.RawMessage(`{"input":{"path":"tasks.txt","old":"Status: draft","new":"Status: done"}}`), wantError: true,
 		},
 		{
 			label: "Retry with enough surrounding text to identify one match", name: "edit_file",
-			args: json.RawMessage(`{"path":"tasks.txt","old":"Task: run examples\nStatus: draft","new":"Task: run examples\nStatus: done"}`),
+			args: json.RawMessage(`{"input":{"path":"tasks.txt","old":"Task: run examples\nStatus: draft","new":"Task: run examples\nStatus: done"}}`),
 		},
 		{
 			label: "Read the updated file", name: "read_file",
-			args: json.RawMessage(`{"path":"tasks.txt"}`),
+			args: json.RawMessage(`{"input":{"path":"tasks.txt","offset":null,"limit":null}}`),
 		},
 	}
 	for _, step := range steps {

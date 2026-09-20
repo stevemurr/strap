@@ -215,7 +215,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 					WorkID work.ID `json:"work_id"`
 				}
 				var snapshot work.Inspection
-				if json.Unmarshal(a.Call.Arguments, &args) == nil && args.WorkID == f.Original.ID && json.Unmarshal([]byte(a.Result.Content.Text()), &snapshot) == nil && reflect.DeepEqual(snapshot.Work, race.original) {
+				if decodeSchemaArgs(a.Call.Arguments, &args) == nil && args.WorkID == f.Original.ID && json.Unmarshal([]byte(a.Result.Content.Text()), &snapshot) == nil && reflect.DeepEqual(snapshot.Work, race.original) {
 					raceRevisionKnown = true
 				}
 			}

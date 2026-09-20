@@ -54,9 +54,9 @@ func (o assignmentOperation[A]) decode(raw json.RawMessage) (work.AssignmentRequ
 type AssignImplementationArgs struct {
 	Assignee       identity.ActorID `json:"assignee"`
 	Task           string           `json:"task"`
-	Context        string           `json:"context,omitempty"`
-	ExpectedOutput string           `json:"expected_output,omitempty"`
-	Scope          *work.Scope      `json:"scope,omitempty"`
+	Context        *string          `json:"context"`
+	ExpectedOutput *string          `json:"expected_output"`
+	Scope          *work.Scope      `json:"scope"`
 }
 
 // AssignAuditArgs binds an independent audit to an original work and submission.
@@ -77,21 +77,21 @@ type AssignRepairArgs struct {
 type AssignResearchArgs struct {
 	Assignee       identity.ActorID `json:"assignee"`
 	Task           string           `json:"task"`
-	Context        string           `json:"context,omitempty"`
-	ExpectedOutput string           `json:"expected_output,omitempty"`
+	Context        *string          `json:"context"`
+	ExpectedOutput *string          `json:"expected_output"`
 }
 
 var implementationContract = assignmentOperation[AssignImplementationArgs]{
 	definition: Definition[AssignImplementationArgs]{
 		Name:        "assign_implementation",
-		Description: "Assign new implementation work to an existing implementor. Supply a task and optional context, expected_output, and scope containing plan_id and step_ids. Creates tracked work; the receipt is registration, not completion. Use reassign_work to transfer existing work.",
-		Parameters: parameters[AssignImplementationArgs](
+		Description: "Assign new implementation work to an existing implementor. Supply a task and nullable context, expected_output, and scope containing plan_id and step_ids. Creates tracked work; the receipt is registration, not completion. Use reassign_work to transfer existing work.",
+		Parameters: parameters[AssignImplementationArgs](Nullable("context", "no additional context"), Nullable("expected_output", "no additional output requirements"), Nullable("scope", "unscoped work"),
 			MinLength("assignee", 1), MinLength("task", 1),
 			MinLength("scope.plan_id", 1), MinItems("scope.step_ids", 1),
-			UniqueItems("scope.step_ids"), MinLength("scope.step_ids[]", 1)),
+			MinLength("scope.step_ids[]", 1)),
 	},
 	normalize: func(a AssignImplementationArgs) work.AssignmentRequest {
-		return work.AssignmentRequest{Kind: work.Implementation, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput, Scope: a.Scope}
+		return work.AssignmentRequest{Kind: work.Implementation, Assignee: a.Assignee, Task: a.Task, Context: valueOrZero(a.Context), ExpectedOutput: valueOrZero(a.ExpectedOutput), Scope: a.Scope}
 	},
 }
 
@@ -128,11 +128,11 @@ var repairContract = assignmentOperation[AssignRepairArgs]{
 var researchContract = assignmentOperation[AssignResearchArgs]{
 	definition: Definition[AssignResearchArgs]{
 		Name:        "assign_research",
-		Description: "Assign a bounded investigation to an existing researcher. Supply the question as task and optional context and expected_output. Include relevant plan information in context. Creates tracked research work; the receipt is registration, not findings or completion.",
-		Parameters:  parameters[AssignResearchArgs](MinLength("assignee", 1), MinLength("task", 1)),
+		Description: "Assign a bounded investigation to an existing researcher. Supply the question as task and nullable context and expected_output. Include relevant plan information in context. Creates tracked research work; the receipt is registration, not findings or completion.",
+		Parameters:  parameters[AssignResearchArgs](Nullable("context", "no additional context"), Nullable("expected_output", "no additional output requirements"), MinLength("assignee", 1), MinLength("task", 1)),
 	},
 	normalize: func(a AssignResearchArgs) work.AssignmentRequest {
-		return work.AssignmentRequest{Kind: work.Research, Assignee: a.Assignee, Task: a.Task, Context: a.Context, ExpectedOutput: a.ExpectedOutput}
+		return work.AssignmentRequest{Kind: work.Research, Assignee: a.Assignee, Task: a.Task, Context: valueOrZero(a.Context), ExpectedOutput: valueOrZero(a.ExpectedOutput)}
 	},
 }
 

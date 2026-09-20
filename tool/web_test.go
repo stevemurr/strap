@@ -58,7 +58,11 @@ func testWeb(t *testing.T, config WebConfig) *Web {
 
 func openResult(t *testing.T, w *Web, actor, url, cursor string, limit int) OpenURLResult {
 	t.Helper()
-	args, _ := json.Marshal(openArgs{URL: url, Cursor: cursor, MaxChars: &limit})
+	var continuation *string
+	if cursor != "" {
+		continuation = &cursor
+	}
+	args, _ := MarshalInput(openArgs{URL: url, Cursor: continuation, MaxChars: &limit})
 	r, err := w.Tools()[1].Call(context.Background(), Call{Actor: message.ActorID(actor), Arguments: args})
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +114,7 @@ func TestSearchContractEncodesQueryAndBoundsResults(t *testing.T) {
 		}
 		return webkit.Page{HTML: `<a class="result__a" href="https://a.test">A</a><a class="result__a" href="https://b.test">B</a>`}, nil
 	})
-	args, _ := json.Marshal(map[string]any{"query": query, "max_results": 1})
+	args, _ := MarshalInput(map[string]any{"query": query, "max_results": 1})
 	r, err := w.Tools()[0].Call(context.Background(), Call{Arguments: args})
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +123,7 @@ func TestSearchContractEncodesQueryAndBoundsResults(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.Content.Text()), &found); err != nil || found.Query != query || len(found.Results) != 1 {
 		t.Fatalf("%+v %v", found, err)
 	}
-	for _, raw := range []string{`{"query":" "}`, `{"query":"x","max_results":0}`, `{"query":"x","max_results":11}`, `{"query":"x","script":"bad"}`} {
+	for _, raw := range []string{`{"input":{"query":" ","max_results":null}}`, `{"input":{"query":"x","max_results":0}}`, `{"input":{"query":"x","max_results":11}}`, `{"input":{"query":"x","script":"bad","max_results":null}}`} {
 		if _, err := w.Tools()[0].Call(context.Background(), Call{Arguments: []byte(raw)}); err == nil {
 			t.Fatal("accepted", raw)
 		}
@@ -241,7 +245,7 @@ func TestWebMissingBackendsAndValidation(t *testing.T) {
 		t.Fatal("construction must be lazy", err)
 	}
 	defer w.Close(context.Background())
-	for i, args := range []string{`{"query":"test"}`, `{"url":"https://example.com"}`} {
+	for i, args := range []string{`{"input":{"query":"test","max_results":null}}`, `{"input":{"url":"https://example.com","cursor":null,"max_chars":null}}`} {
 		if _, err := w.Tools()[i].Call(context.Background(), Call{Arguments: []byte(args)}); err == nil || !strings.Contains(err.Error(), "requires") {
 			t.Fatal(err)
 		}

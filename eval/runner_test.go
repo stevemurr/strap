@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/stevemurr/strap/tool"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,7 +41,7 @@ func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Obse
 	}
 	n := p.calls.Add(1)
 	if p.write && n == 1 {
-		args, _ := json.Marshal(map[string]string{"path": "probe.go", "content": p.content})
+		args, _ := tool.MarshalInput(map[string]string{"path": "probe.go", "content": p.content})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "write_file", Arguments: args}}}, nil
 	}
 	if p.wait {
@@ -62,7 +63,7 @@ func (p *script) delegate(r provider.Request, n int32) (provider.Response, error
 	}
 	switch n {
 	case 2:
-		return call("create_agent", `{"role":"implementor"}`), nil
+		return call("create_agent", `{"input":{"role":"implementor"}}`), nil
 	case 3:
 		assignee := "agent-2"
 		for i := len(r.Messages) - 1; i >= 0; i-- {
@@ -74,9 +75,9 @@ func (p *script) delegate(r provider.Request, n int32) (provider.Response, error
 			}
 			break
 		}
-		return call("assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"Implement Answer in probe.go"}`, assignee)), nil
+		return call("assign_implementation", fmt.Sprintf(`{"input":{"assignee":%q,"task":"Implement Answer in probe.go","context":null,"expected_output":null,"scope":null}}`, assignee)), nil
 	default:
-		return provider.Response{Content: "Waiting for the implementor.", ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("wait-%d", n), Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+		return provider.Response{Content: "Waiting for the implementor.", ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("wait-%d", n), Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 	}
 }
 

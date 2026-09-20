@@ -27,7 +27,7 @@ type traceScript struct{ step atomic.Int32 }
 
 func (p *traceScript) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
 	if p.step.Add(1) == 1 {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "list_agents", Arguments: json.RawMessage(`{}`)}}}, nil
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "list_agents", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 	}
 	return provider.Response{Content: "done"}, nil
 }

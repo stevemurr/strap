@@ -92,8 +92,8 @@ func TestPausePreservesModelResponseAndRemainingToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending.answer <- answer{response: provider.Response{ToolCalls: []provider.ToolCall{
-		{ID: "first-call", Name: "first", Arguments: json.RawMessage(`{}`)},
-		{ID: "second-call", Name: "second", Arguments: json.RawMessage(`{}`)},
+		{ID: "first-call", Name: "first", Arguments: json.RawMessage(`{"input":{}}`)},
+		{ID: "second-call", Name: "second", Arguments: json.RawMessage(`{"input":{}}`)},
 	}}}
 	awaitState(t, c, c.Root(), agent.Paused)
 	if firstCalls.Load() != 0 {

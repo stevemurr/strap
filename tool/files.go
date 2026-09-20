@@ -51,8 +51,8 @@ func NewFiles(config FilesConfig) (*Files, error) {
 
 type readArgs struct {
 	Path   string `json:"path"`
-	Offset *int   `json:"offset,omitempty"`
-	Limit  *int   `json:"limit,omitempty"`
+	Offset *int   `json:"offset"`
+	Limit  *int   `json:"limit"`
 }
 
 type writeArgs struct {
@@ -92,7 +92,7 @@ func (f *Files) buildTools() []Tool {
 	return []Tool{
 		builtin("read_file",
 			fmt.Sprintf("Read a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Returns numbered lines, starting at offset (1-based, default 1), up to limit (default 200, maximum 2000). Files are limited to %d bytes and output to %d bytes. Symlinks resolve to their targets.", f.config.Dir, f.config.MaxFileBytes, f.config.OutputLimit),
-			f.read, MinLength("path", 1), Minimum("offset", 1), Minimum("limit", 1), Maximum("limit", 2000)),
+			f.read, Nullable("offset", "start at the beginning"), Nullable("limit", "use the default read limit"), MinLength("path", 1), Minimum("offset", 1), Minimum("limit", 1), Maximum("limit", 2000)),
 		builtin("write_file",
 			fmt.Sprintf("Create or replace a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Content is limited to %d bytes. Content is literal text, including newlines; do not add Markdown fences or shell heredocs. Parent directories must exist. Symlinks resolve to their targets. Replacements are atomic and retain file permissions.", f.config.Dir, f.config.MaxFileBytes),
 			f.write, MinLength("path", 1)),

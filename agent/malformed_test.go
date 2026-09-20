@@ -13,7 +13,7 @@ import (
 )
 
 func malformedCall() error {
-	return fmt.Errorf("vllm: %w", &provider.ToolArgumentsError{CallID: "bad", Name: "write_file", Arguments: `{"path":"a","content":"open`, FinishReason: "tool_calls", Calls: 1})
+	return fmt.Errorf("vllm: %w", &provider.ToolArgumentsError{CallID: "bad", Name: "write_file", Arguments: `{"input":{"path":"a","content":"open}`, FinishReason: "tool_calls", Calls: 1})
 }
 
 // A tool call whose arguments never became JSON was not dispatched and did not

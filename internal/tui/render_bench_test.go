@@ -34,7 +34,7 @@ func renderBenchEval(b *testing.B) *evalModel {
 		for i := 0; i < 80; i++ {
 			a.streamUI.nextEntry++
 			actor := message.ActorID("root")
-			a.entries = append(a.entries, entry{serial: a.streamUI.nextEntry, label: "Tool", actors: []message.ActorID{actor}, tool: toolKey{agent: actor, call: fmt.Sprint(i)}, toolInfo: displayTool(agent.ToolActivity{Call: provider.ToolCall{Name: "shell", Arguments: []byte(`{"command":"go test ./internal/tui -run TestRendering"}`)}, StartedAt: now, FinishedAt: now, Result: tool.Text(strings.Repeat("ok github.com/stevemurr/strap/internal/tui 0.024s\n", 160))})})
+			a.entries = append(a.entries, entry{serial: a.streamUI.nextEntry, label: "Tool", actors: []message.ActorID{actor}, tool: toolKey{agent: actor, call: fmt.Sprint(i)}, toolInfo: displayTool(agent.ToolActivity{Call: provider.ToolCall{Name: "shell", Arguments: []byte(`{"input":{"command":"go test ./internal/tui -run TestRendering"}}`)}, StartedAt: now, FinishedAt: now, Result: tool.Text(strings.Repeat("ok github.com/stevemurr/strap/internal/tui 0.024s\n", 160))})})
 		}
 		id := identity.OutputID{Agent: "root", Call: 1}
 		a.observe(conversation.AgentEvent{Agent: "root", Event: agent.OutputStarted{Output: id}})

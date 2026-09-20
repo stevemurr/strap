@@ -273,7 +273,7 @@ func TestSchemaSuccessfulOperationDoesNotHideSameBatchEffects(t *testing.T) {
 			adversarialAudit(f),
 			// The extra action must land to exercise the grader, so it carries
 			// no revision that the graded operation could invalidate first.
-			adversarialCall("plan", "create_plan", map[string]any{"title": "Second plan in the same batch", "steps": []any{map[string]any{"title": "Do it again"}}}),
+			adversarialCall("plan", "create_plan", map[string]any{"title": "Second plan in the same batch", "steps": []any{map[string]any{"title": "Do it again", "acceptance_criteria": nil}}}),
 		}}}
 	})
 	if result.Outcome != "failed" || !result.Behavior.Scorable || result.Harness.Passed != result.Harness.Total || result.ToolCalls != 2 {
@@ -289,11 +289,11 @@ func TestSchemaOracleAcceptsEquivalentJSONIntegers(t *testing.T) {
 			result := runSchemaResponses(t, func(f fixture) []provider.Response {
 				call := adversarialAudit(f)
 				var arguments map[string]json.RawMessage
-				if err := json.Unmarshal(call.Arguments, &arguments); err != nil {
+				if err := json.Unmarshal(schemaPayload(call.Arguments), &arguments); err != nil {
 					t.Fatal(err)
 				}
 				arguments["expected_revision"] = json.RawMessage(fmt.Sprintf(spelling, f.Original.Revision))
-				call.Arguments, _ = json.Marshal(arguments)
+				call.Arguments, _ = tool.MarshalInput(arguments)
 				return []provider.Response{{ToolCalls: []provider.ToolCall{call}}}
 			})
 			if result.Outcome != "passed" || !result.Behavior.CleanSuccess || result.Schema == nil || !result.Schema.FirstArgumentsValid {
@@ -305,10 +305,10 @@ func TestSchemaOracleAcceptsEquivalentJSONIntegers(t *testing.T) {
 
 func TestSchemaProgressRequiresRequestedPositionContent(t *testing.T) {
 	result := runSchemaScenarioResponses(t, "schema-progress-objective", func(f fixture) []provider.Response {
-		return []provider.Response{responseCall("report_work_progress", work.ReportWorkProgressRequest{
+		return []provider.Response{responseCall("report_work_progress", tool.ReportWorkProgressInput{
 			WorkID: f.Schema.Target.ID,
 
-			Position: &work.WorkPosition{Objective: f.Schema.ExpectedPosition.Objective},
+			Position: &tool.WorkPositionInput{Objective: f.Schema.ExpectedPosition.Objective},
 		})}
 	})
 	if result.Outcome != "failed" || !result.Behavior.Scorable || result.Schema == nil || !result.Schema.FirstArgumentsValid {

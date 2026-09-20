@@ -25,7 +25,7 @@ func TestLocalToolsThroughRootAndChild(t *testing.T) {
 	if _, err := c.Send(c.Root(), "write, edit, and delegate a check"); err != nil {
 		t.Fatal(err)
 	}
-	m.next(t).tool("write_file", `{"path":"result.txt","content":"before\n"}`)
+	m.next(t).tool("write_file", `{"input":{"path":"result.txt","content":"before\n"}}`)
 	written := m.next(t)
 	var writeResult tool.WriteFileResult
 	last := written.request.Messages[len(written.request.Messages)-1]
@@ -35,15 +35,15 @@ func TestLocalToolsThroughRootAndChild(t *testing.T) {
 	if err := json.Unmarshal([]byte(last.Content.Text()), &writeResult); err != nil || writeResult.BytesWritten != 7 {
 		t.Fatalf("write result: %+v, %v", writeResult, err)
 	}
-	written.tool("edit_file", `{"path":"result.txt","old":"before","new":"after"}`)
-	m.next(t).tool("shell", `{"command":"cat result.txt; exit 3"}`)
+	written.tool("edit_file", `{"input":{"path":"result.txt","old":"before","new":"after"}}`)
+	m.next(t).tool("shell", `{"input":{"command":"cat result.txt; exit 3","timeout_ms":null}}`)
 	checked := m.next(t)
 	last = checked.request.Messages[len(checked.request.Messages)-1]
 	var shellResult tool.ShellResult
 	if err := json.Unmarshal([]byte(last.Content.Text()), &shellResult); err != nil || shellResult.Output != "after\n" || shellResult.ExitCode == nil || *shellResult.ExitCode != 3 {
 		t.Fatalf("shell result: %+v, %v", shellResult, err)
 	}
-	checked.tool("create_test_agent", `{"task":"Read and check result.txt"}`)
+	checked.tool("create_test_agent", `{"input":{"task":"Read and check result.txt","context":null,"expected_output":null}}`)
 	var root, child call
 	for range 2 {
 		got := m.next(t)
@@ -65,7 +65,7 @@ func TestLocalToolsThroughRootAndChild(t *testing.T) {
 	}
 	root.text("delegated")
 	userReply(t, c, "delegated")
-	child.tool("read_file", `{"path":"result.txt"}`)
+	child.tool("read_file", `{"input":{"path":"result.txt","offset":null,"limit":null}}`)
 	read := m.next(t)
 	var readResult tool.ReadFileResult
 	last = read.request.Messages[len(read.request.Messages)-1]

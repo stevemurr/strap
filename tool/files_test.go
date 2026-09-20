@@ -29,7 +29,7 @@ func fileTools(t *testing.T, config FilesConfig) (*Files, map[string]Tool) {
 
 func callJSON(t *testing.T, operation Tool, args any, result any) string {
 	t.Helper()
-	raw, err := json.Marshal(args)
+	raw, err := MarshalInput(args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestFilesRoundTrip(t *testing.T) {
 	if read.Content != "2\tsecond\n" || !read.More || read.TotalLines != 3 || read.Truncated {
 		t.Fatalf("read window: %+v", read)
 	}
-	callJSON(t, kit["read_file"], map[string]any{"path": "test.txt", "offset": 99}, &read)
+	callJSON(t, kit["read_file"], map[string]any{"path": "test.txt", "offset": 99, "limit": nil}, &read)
 	if read.Content != "" || read.More {
 		t.Fatalf("past EOF: %+v", read)
 	}
@@ -74,7 +74,7 @@ func TestFilesRoundTrip(t *testing.T) {
 	}
 	callJSON(t, kit["edit_file"], map[string]any{"path": "test.txt", "old": "changed\n", "new": ""}, nil)
 	callJSON(t, kit["write_file"], map[string]any{"path": "test.txt", "content": ""}, nil)
-	callJSON(t, kit["read_file"], map[string]any{"path": "test.txt"}, &read)
+	callJSON(t, kit["read_file"], map[string]any{"path": "test.txt", "offset": nil, "limit": nil}, &read)
 	if read.TotalLines != 0 || read.Content != "" || read.More {
 		t.Fatalf("empty file: %+v", read)
 	}
@@ -88,22 +88,22 @@ func TestFilesInvalidCallsDoNotModify(t *testing.T) {
 	}
 	_, kit := fileTools(t, FilesConfig{Dir: dir})
 	cases := []struct{ name, raw string }{
-		{"write_file", `{"path":"test.txt"}`},
-		{"write_file", `{"path":"test.txt","content":null}`},
-		{"write_file", `{"path":"test.txt","content":"bad","extra":true}`},
-		{"write_file", `{"path":"test.txt","content":"bad","content":"worse"}`},
-		{"write_file", `{"path":"test.txt","content":"bad"} {}`},
-		{"write_file", `{"path":"test.txt","content":17}`},
+		{"write_file", `{"input":{"path":"test.txt","offset":null,"limit":null}}`},
+		{"write_file", `{"input":{"path":"test.txt","content":null}}`},
+		{"write_file", `{"input":{"path":"test.txt","content":"bad","extra":true}}`},
+		{"write_file", `{"input":{"path":"test.txt","content":"bad","content":"worse"}}`},
+		{"write_file", `{"input":{"path":"test.txt","content":"bad"}} {}`},
+		{"write_file", `{"input":{"path":"test.txt","content":17}}`},
 		{"write_file", `null`},
 		{"write_file", `[]`},
-		{"write_file", `{"path":"test.txt","content":"\u0000"}`},
-		{"read_file", `{"path":"test.txt","offset":0}`},
-		{"read_file", `{"path":"test.txt","limit":2001}`},
-		{"read_file", `{"path":"test.txt","limit":1.5}`},
-		{"edit_file", `{"path":"test.txt","old":"same","new":"bad"}`},
-		{"edit_file", `{"path":"test.txt","old":"missing","new":"bad"}`},
-		{"edit_file", `{"path":"test.txt","old":"","new":"bad"}`},
-		{"edit_file", `{"path":"test.txt","old":"same same"}`},
+		{"write_file", `{"input":{"path":"test.txt","content":"\u0000"}}`},
+		{"read_file", `{"input":{"path":"test.txt","offset":0,"limit":null}}`},
+		{"read_file", `{"input":{"path":"test.txt","limit":2001,"offset":null}}`},
+		{"read_file", `{"input":{"path":"test.txt","limit":1.5,"offset":null}}`},
+		{"edit_file", `{"input":{"path":"test.txt","old":"same","new":"bad"}}`},
+		{"edit_file", `{"input":{"path":"test.txt","old":"missing","new":"bad"}}`},
+		{"edit_file", `{"input":{"path":"test.txt","old":"","new":"bad"}}`},
+		{"edit_file", `{"input":{"path":"test.txt","old":"same same"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name+tc.raw, func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestFilesPathsAndSymlinkTargets(t *testing.T) {
 				t.Fatal(edited)
 			}
 			var read ReadFileResult
-			callJSON(t, kit["read_file"], map[string]any{"path": path}, &read)
+			callJSON(t, kit["read_file"], map[string]any{"path": path, "offset": nil, "limit": nil}, &read)
 			if read.Path != path || read.Content != "1\tfinal\n" {
 				t.Fatal(read)
 			}
@@ -211,14 +211,14 @@ func TestFilesInvalidPathsDoNotModify(t *testing.T) {
 	_, kit := fileTools(t, FilesConfig{Dir: dir})
 	for _, path := range []string{"", ".", dir, "missing/child", "target/child", "dangling", "cycle"} {
 		for _, name := range []string{"read_file", "write_file", "edit_file"} {
-			args := map[string]any{"path": path}
+			args := map[string]any{"path": path, "offset": nil, "limit": nil}
 			if name == "write_file" {
 				args["content"] = "changed"
 			}
 			if name == "edit_file" {
 				args["old"], args["new"] = "original", "changed"
 			}
-			raw, _ := json.Marshal(args)
+			raw, _ := MarshalInput(args)
 			if _, err := kit[name].Call(context.Background(), Call{Arguments: raw}); err == nil {
 				t.Errorf("%s accepted %q", name, path)
 			}
@@ -240,7 +240,7 @@ func TestEditRejectsOverlappingMatches(t *testing.T) {
 	dir := t.TempDir()
 	_, kit := fileTools(t, FilesConfig{Dir: dir})
 	callJSON(t, kit["write_file"], map[string]any{"path": "file", "content": "aaa"}, nil)
-	if _, err := kit["edit_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"file","old":"aa","new":"b"}`)}); err == nil {
+	if _, err := kit["edit_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"file","old":"aa","new":"b"}}`)}); err == nil {
 		t.Fatal("overlapping matches were considered unique")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "file"))
@@ -266,7 +266,7 @@ func TestFilesLimitsAndPermissions(t *testing.T) {
 		t.Fatalf("permissions: %v, %v", info, err)
 	}
 	var result ReadFileResult
-	callJSON(t, kit["read_file"], map[string]any{"path": "script"}, &result)
+	callJSON(t, kit["read_file"], map[string]any{"path": "script", "offset": nil, "limit": nil}, &result)
 	if !result.Truncated || !result.More || len(result.Content) > 8 || !utf8.ValidString(result.Content) {
 		t.Fatalf("bounded Unicode: %+v", result)
 	}
@@ -282,7 +282,7 @@ func TestFilesLimitsAndPermissions(t *testing.T) {
 		if err := os.WriteFile(path, contents, 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := kit["read_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"script"}`)}); err == nil {
+		if _, err := kit["read_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"script","offset":null,"limit":null}}`)}); err == nil {
 			t.Fatalf("accepted oversized/binary file %q", contents)
 		}
 	}
@@ -302,7 +302,7 @@ func TestFilesConcurrentEditsAndCancellation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := kit["edit_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"file","old":"start","new":"done"}`)}); err == nil {
+			if _, err := kit["edit_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"file","old":"start","new":"done"}}`)}); err == nil {
 				successes.Add(1)
 			}
 		}()
@@ -317,7 +317,7 @@ func TestFilesConcurrentEditsAndCancellation(t *testing.T) {
 	defer f.unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err := kit["write_file"].Call(ctx, Call{Arguments: json.RawMessage(`{"path":"file","content":"wrong"}`)})
+	_, err := kit["write_file"].Call(ctx, Call{Arguments: json.RawMessage(`{"input":{"path":"file","content":"wrong"}}`)})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("canceled lock wait: %v", err)
 	}

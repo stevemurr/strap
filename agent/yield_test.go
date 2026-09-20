@@ -13,8 +13,8 @@ import (
 
 type countedTool struct{ count *atomic.Int32 }
 
-func (countedTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: "effect", Parameters: json.RawMessage(`{"type":"object"}`)}
+func (t countedTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "effect", Parameters: t.InputContract().Schema()}
 }
 func (t countedTool) Call(context.Context, tool.Call) (tool.Result, error) {
 	t.count.Add(1)
@@ -42,7 +42,7 @@ func TestYieldSettlesAndResumesQueuedInputWithoutReply(t *testing.T) {
 					if queued {
 						help()
 					}
-					return provider.Response{Content: "Waiting for help.", ToolCalls: []provider.ToolCall{{ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+					return provider.Response{Content: "Waiting for help.", ToolCalls: []provider.ToolCall{{ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 				}
 				return provider.Response{Content: "resumed"}, nil
 			})
@@ -82,7 +82,7 @@ func TestMixedControlBatchHasNoEffectsAndContinues(t *testing.T) {
 	c.Spec.Tools = []tool.Tool{countedTool{&effects}, tool.WaitForInput()}
 	c.Spec.Provider = modelFunc(func(_ context.Context, r provider.Request) (provider.Response, error) {
 		if calls.Add(1) == 1 {
-			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "effect", Name: "effect", Arguments: json.RawMessage(`{}`)}, {ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{}`)}}}, nil
+			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "effect", Name: "effect", Arguments: json.RawMessage(`{"input":{}}`)}, {ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 		}
 		n := len(r.Messages)
 		if r.Messages[n-2].ToolCallID != "effect" || r.Messages[n-1].ToolCallID != "wait" {
@@ -104,4 +104,12 @@ func TestMixedControlBatchHasNoEffectsAndContinues(t *testing.T) {
 	}
 	cancel()
 	await(t, done)
+}
+
+func (t countedTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

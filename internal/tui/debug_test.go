@@ -24,7 +24,7 @@ func TestDebugTraceShowsDelegationMessagesAndToolNames(t *testing.T) {
 	m.now = func() time.Time { return now }
 	m.observe(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "worker", Parent: "root", State: agent.Idle}})
 	m.observe(conversation.MessageEvent{Message: message.Message{ID: "job", From: "root", To: "worker", Kind: message.Instruction, Work: &work.Work{Task: "Read a page", Context: "Background", ExpectedOutput: "Summary"}}})
-	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "read-1", Name: "read_pdf", Arguments: []byte(`{"path":"notes.pdf"}`)}, StartedAt: now}
+	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "read-1", Name: "read_pdf", Arguments: []byte(`{"input":{"path":"notes.pdf"}}`)}, StartedAt: now}
 	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	if !m.busy() {
 		t.Fatal("worker tool did not activate spinner")
@@ -93,7 +93,7 @@ func TestSpinnerAndTimerFollowActivityIncludingDelegatedWork(t *testing.T) {
 
 func TestToolErrorsCancellationAndTerminalText(t *testing.T) {
 	m, _ := setup(t)
-	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "call", Name: "shell\x1b[2J", Arguments: []byte(`{}`)}, StartedAt: time.Now()}
+	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "call", Name: "shell\x1b[2J", Arguments: []byte(`{"input":{}}`)}, StartedAt: time.Now()}
 	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	if strings.Contains(m.activityLine(), "\x1b[2J") {
 		t.Fatal("tool name injected terminal controls")
@@ -208,7 +208,7 @@ func TestToolTimelineShowsPreviewsButHidesRawDetails(t *testing.T) {
 	m, _ := setup(t)
 	m.entries = nil
 	for _, name := range []string{"create_agent", "read_pdf", "some_custom_tool"} {
-		activity := agent.ToolActivity{Call: provider.ToolCall{ID: "raw-call-id", Name: name, Arguments: []byte(`{"path":"private.pdf"}`)}, StartedAt: time.Now()}
+		activity := agent.ToolActivity{Call: provider.ToolCall{ID: "raw-call-id", Name: name, Arguments: []byte(`{"input":{"path":"private.pdf"}}`)}, StartedAt: time.Now()}
 		m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 		activity.FinishedAt = activity.StartedAt.Add(time.Second)
 		activity.Result = tool.Text("raw-result")

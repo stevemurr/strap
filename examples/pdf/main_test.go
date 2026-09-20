@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/stevemurr/strap/tool"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,7 +42,7 @@ func pdfServer(t *testing.T, mode string) *httptest.Server {
 			if err != nil {
 				t.Error(err)
 			}
-			args, _ := json.Marshal(map[string]any{"path": path, "pages": []int{1}})
+			args, _ := tool.MarshalInput(map[string]any{"path": path, "pages": []int{1}})
 			json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "tool_calls", "message": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "pdf", "type": "function", "function": map[string]any{"name": "read_pdf", "arguments": string(args)}}}}}}})
 			return
 		}

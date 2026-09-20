@@ -37,7 +37,7 @@ type PDF struct {
 }
 type pdfArgs struct {
 	Path  string `json:"path"`
-	Pages []int  `json:"pages,omitempty"`
+	Pages []int  `json:"pages"`
 }
 
 func NewPDF(config PDFConfig) (*PDF, error) {
@@ -55,7 +55,7 @@ func NewPDF(config PDFConfig) (*PDF, error) {
 		return nil, errors.New("invalid PDF limits: pages 1..32, dimension 64..4096, positive byte limits and timeout required")
 	}
 	p := &PDF{config: config}
-	params, err := NewParameters[pdfArgs](MinLength("path", 1), MinItems("pages", 1), MaxItems("pages", config.MaxPages), UniqueItems("pages"), Minimum("pages[]", 1))
+	params, err := NewParameters[pdfArgs](Nullable("pages", "read the default first pages"), MinLength("path", 1), MinItems("pages", 1), MaxItems("pages", config.MaxPages), Minimum("pages[]", 1))
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func NewPDF(config PDFConfig) (*PDF, error) {
 func (p *PDF) Definition() provider.ToolDefinition { return p.bound.Definition() }
 func (p *PDF) Validate() error                     { return p.bound.Validate() }
 func (p *PDF) description() string {
-	return fmt.Sprintf("Read a PDF by rendering its pages as images for you to inspect. Accepts absolute paths; relative paths resolve from %s. Requires image input support. pages is an optional list of 1-based page numbers in reading order, at most %d. When omitted, return the first %d pages. Metadata reports total and omitted page counts; request remaining pages in later calls.", p.config.Dir, p.config.MaxPages, p.config.MaxPages)
+	return fmt.Sprintf("Read a PDF by rendering its pages as images for you to inspect. Accepts absolute paths; relative paths resolve from %s. Requires image input support. pages is a nullable list of 1-based page numbers in reading order, at most %d. When null, return the first %d pages. Metadata reports total and omitted page counts; request remaining pages in later calls.", p.config.Dir, p.config.MaxPages, p.config.MaxPages)
 }
 func (p *PDF) Call(ctx context.Context, call Call) (Result, error) { return p.bound.Call(ctx, call) }
 
@@ -246,3 +246,5 @@ func (p *PDF) prepare(ctx context.Context, call Call) (func() (Result, error), e
 	return p.bound.prepare(ctx, call)
 }
 func (p *PDF) snapshot() preparedTool { return p.bound.snapshot() }
+
+func (p *PDF) contract() *parameterNode { return p.bound.contract() }

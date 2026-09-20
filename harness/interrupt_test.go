@@ -192,7 +192,7 @@ func TestInterruptConcurrentWaitersRetainHistoryAndCanContinueAfterTimeout(t *te
 			<-release
 			// A dependency can report success despite cancellation. The harness
 			// must neither commit this response nor execute its proposed tool.
-			return provider.Response{Content: "late success", ToolCalls: []provider.ToolCall{{ID: "late", Name: "shell", Arguments: json.RawMessage(`{}`)}}}, nil
+			return provider.Response{Content: "late success", ToolCalls: []provider.ToolCall{{ID: "late", Name: "shell", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 		}
 		requests <- r
 		return provider.Response{Content: "ready"}, nil
@@ -353,7 +353,7 @@ type interruptTool struct {
 }
 
 func (t interruptTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: t.name, Parameters: json.RawMessage(`{"type":"object","properties":{}}`)}
+	return provider.ToolDefinition{Name: t.name, Parameters: t.InputContract().Schema()}
 }
 func (t interruptTool) Call(ctx context.Context, _ tool.Call) (tool.Result, error) {
 	return t.call(ctx)
@@ -366,9 +366,9 @@ func TestInterruptSettlesToolBatchWithoutRetryingEffects(t *testing.T) {
 	p := interruptModel(func(_ context.Context, r provider.Request, _ provider.Observer) (provider.Response, error) {
 		if calls.Add(1) == 1 {
 			return provider.Response{ToolCalls: []provider.ToolCall{
-				{ID: "saved", Name: "save", Arguments: json.RawMessage(`{}`)},
-				{ID: "partial", Name: "slow", Arguments: json.RawMessage(`{}`)},
-				{ID: "skipped", Name: "later", Arguments: json.RawMessage(`{}`)},
+				{ID: "saved", Name: "save", Arguments: json.RawMessage(`{"input":{}}`)},
+				{ID: "partial", Name: "slow", Arguments: json.RawMessage(`{"input":{}}`)},
+				{ID: "skipped", Name: "later", Arguments: json.RawMessage(`{"input":{}}`)},
 			}}, nil
 		}
 		requests <- r
@@ -480,4 +480,12 @@ func TestInterruptPausedIdleSessionCanStartNewExchange(t *testing.T) {
 	if _, err := s.Send(s.Root(), "cannot revive terminated root"); !errors.Is(err, conversation.ErrAgentStopped) {
 		t.Fatal(err)
 	}
+}
+
+func (t interruptTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
 }

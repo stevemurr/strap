@@ -28,7 +28,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 		}
 		return JSON(w)
 	})
-	created, err := owner.Call(context.Background(), Call{Actor: "root", Arguments: []byte(`{"title":"Plan","steps":[{"title":"Implement"}]}`)})
+	created, err := owner.Call(context.Background(), Call{Actor: "root", Arguments: []byte(`{"input":{"title":"Plan","steps":[{"title":"Implement","acceptance_criteria":null}]}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []byte(fmt.Sprintf(`{"work_id":%q,"steps":[{"step_id":%q,"status":"ready_for_review"}]}`, w.ID, p.Steps[0].ID))
+	args := []byte(fmt.Sprintf(`{"input":{"work_id":%q,"steps":[{"step_id":%q,"status":"ready_for_review","note":null}],"position":null,"findings":null}}`, w.ID, p.Steps[0].ID))
 	updated, err := worker.Call(context.Background(), Call{Actor: "worker", Arguments: args})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 		t.Fatalf("repeated report did not advance the work revision: %+v", second)
 	}
 	// Progress does not consume the owner's structural plan revision.
-	edit := []byte(fmt.Sprintf(`{"plan_id":%q,"expected_revision":%d,"title":"Updated plan"}`, p.ID, p.Revision))
+	edit := []byte(fmt.Sprintf(`{"input":{"plan_id":%q,"expected_revision":%d,"title":"Updated plan"}}`, p.ID, p.Revision))
 	if _, err := RenamePlan(plans).Call(context.Background(), Call{Actor: "root", Arguments: edit}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 		}
 		return JSON(submission)
 	})
-	args = []byte(fmt.Sprintf(`{"work_id":%q,"expected_revision":%d,"summary":"Done"}`, second.WorkID, second.WorkRevision))
+	args = []byte(fmt.Sprintf(`{"input":{"work_id":%q,"expected_revision":%d,"summary":"Done","evidence":null,"artifacts":null}}`, second.WorkID, second.WorkRevision))
 	if _, err := submit.Call(context.Background(), Call{Actor: "worker", Arguments: args}); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestPlanToolRoundTripKeepsPlanAndWorkRevisionsSeparate(t *testing.T) {
 func TestSubmitAuditDoesNotAcceptAuthorityFields(t *testing.T) {
 	calls := 0
 	op := SubmitAudit(func(_ context.Context, c Call, r work.AuditRequest) (Result, error) { calls++; return Text("ok"), nil })
-	for _, raw := range []string{`{"work_id":"a","expected_revision":1,"submission_id":"s","verdict":"pass","summary":"ok","assignee":"attacker"}`, `{"work_id":"a","expected_revision":1,"submission_id":"s","verdict":"fail","summary":"bad","findings":[{"description":"x","required_change":"x","verification":"x","owner":"attacker"}]}`} {
+	for _, raw := range []string{`{"input":{"work_id":"a","expected_revision":1,"submission_id":"s","verdict":"pass","summary":"ok","assignee":"attacker","findings":null}}`, `{"input":{"work_id":"a","expected_revision":1,"submission_id":"s","verdict":"fail","summary":"bad","findings":[{"description":"x","required_change":"x","verification":"x","owner":"attacker","step_ids":null}]}}`} {
 		if _, e := op.Call(context.Background(), Call{Arguments: []byte(raw)}); e == nil {
 			t.Fatal("accepted authority input")
 		}
@@ -117,7 +117,7 @@ func TestWorkToolSchemasHaveValidRequiredArrays(t *testing.T) {
 	}
 	for _, op := range definitions {
 		var schema any
-		if e := json.Unmarshal(op.Definition().Parameters, &schema); e != nil {
+		if e := json.Unmarshal(inputSchema(t, op.Definition().Parameters), &schema); e != nil {
 			t.Fatal(e)
 		}
 		check(schema)
@@ -125,15 +125,15 @@ func TestWorkToolSchemasHaveValidRequiredArrays(t *testing.T) {
 }
 
 func TestSubmitAuditFindingsContract(t *testing.T) {
-	finding := `[{"description":"missing check","required_change":"add check","verification":"run test"}]`
+	finding := `[{"description":"missing check","required_change":"add check","verification":"run test","step_ids":null}]`
 	for _, tc := range []struct {
 		name, verdict, findings string
 		valid                   bool
 	}{
-		{"pass omitted", "pass", "", true},
+		{"pass omitted", "pass", "", false},
 		{"pass empty", "pass", "[]", true},
 		{"pass nonempty", "pass", finding, false},
-		{"pass null", "pass", "null", false},
+		{"pass null", "pass", "null", true},
 		{"pass string", "pass", `"[]"`, false},
 		{"fail omitted", "fail", "", false},
 		{"fail empty", "fail", "[]", false},
@@ -151,11 +151,11 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 				}
 				return Text("recorded"), nil
 			})
-			raw := `{"work_id":"audit-1","expected_revision":1,"submission_id":"submission-1","summary":"checked","verdict":"` + tc.verdict + `"`
+			raw := `{"input":{"work_id":"audit-1","expected_revision":1,"submission_id":"submission-1","summary":"checked","verdict":"` + tc.verdict + `"`
 			if tc.findings != "" {
 				raw += `,"findings":` + tc.findings
 			}
-			raw += `}`
+			raw += `}}`
 			_, err := op.Call(context.Background(), Call{Arguments: []byte(raw)})
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%v, error=%v", tc.valid, err)
@@ -165,8 +165,7 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 			}
 		})
 	}
-	// Common fields remain visible at the top level, while oneOf preserves
-	// each verdict's complete argument constraints.
+	// Each verdict has a complete alternative inside input, without parser hints.
 	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { return Result{}, nil })
 	var schema struct {
 		Type       string            `json:"type"`
@@ -177,17 +176,14 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 			Description string   `json:"description"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(t, op.Definition().Parameters), &schema); err != nil {
 		t.Fatal(err)
 	}
-	if schema.Type != "object" || !slices.Equal(schema.Properties["verdict"].Enum, []string{"pass", "fail"}) || len(schema.OneOf) != 2 {
+	if schema.Type != "" || len(schema.Properties) != 0 || len(schema.OneOf) != 2 {
 		t.Fatalf("audit schema shape: %+v", schema)
 	}
-	if !slices.Equal(schema.Required, []string{"verdict", "expected_revision", "submission_id", "summary", "work_id"}) {
-		t.Fatalf("required %v", schema.Required)
-	}
-	if _, ok := schema.Properties["findings"]; !ok {
-		t.Fatal("schema omits findings")
+	if len(schema.Required) != 0 {
+		t.Fatal("root required hints survived")
 	}
 }
 
@@ -204,11 +200,11 @@ func TestCreatePlanExposesOnlyTitleAndCriteriaPerStep(t *testing.T) {
 			} `json:"steps"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(op.Definition().Parameters, &schema); err != nil {
+	if err := json.Unmarshal(inputSchema(t, op.Definition().Parameters), &schema); err != nil {
 		t.Fatal(err)
 	}
 	step := schema.Properties.Steps.Items
-	if len(step.Properties) != 2 || step.Properties["title"] == nil || step.Properties["acceptance_criteria"] == nil || len(step.Required) != 1 {
+	if len(step.Properties) != 2 || step.Properties["title"] == nil || step.Properties["acceptance_criteria"] == nil || len(step.Required) != 2 {
 		t.Fatalf("step shape: %v required %v", step.Properties, step.Required)
 	}
 	if strings.Contains(string(op.Definition().Parameters), "oneOf") {
@@ -233,15 +229,15 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 		tools[op.Definition().Name] = op
 	}
 	accepted := []struct{ tool, raw string }{
-		{"create_plan", `{"title":"p","steps":[{"title":"s","acceptance_criteria":["a"]},{"title":"t"}]}`},
-		{"create_plan", `{"steps":[{"title":"Only step"}]}`},
-		{"create_plan", `{"title":"  ","steps":[{"title":"Blank title"}]}`},
-		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","acceptance_criteria":[]}`},
-		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","title":"renamed"}`},
-		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","acceptance_criteria":["b"]}`},
-		{"cancel_steps", `{"plan_id":"plan-x","expected_revision":3,"step_ids":["step-y","step-z"]}`},
-		{"reorder_steps", `{"plan_id":"plan-x","expected_revision":3,"order":["step-z","step-y"]}`},
-		{"rename_plan", `{"plan_id":"plan-x","expected_revision":3,"title":"Renamed"}`},
+		{"create_plan", `{"input":{"title":"p","steps":[{"title":"s","acceptance_criteria":["a"]},{"title":"t","acceptance_criteria":null}]}}`},
+		{"create_plan", `{"input":{"steps":[{"title":"Only step","acceptance_criteria":null}],"title":null}}`},
+		{"create_plan", `{"input":{"title":"  ","steps":[{"title":"Blank title","acceptance_criteria":null}]}}`},
+		{"add_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"title":"new","acceptance_criteria":[]}}`},
+		{"edit_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","title":"renamed","acceptance_criteria":null}}`},
+		{"edit_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","title":null,"acceptance_criteria":["b"]}}`},
+		{"cancel_steps", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_ids":["step-y","step-z"]}}`},
+		{"reorder_steps", `{"input":{"plan_id":"plan-x","expected_revision":3,"order":["step-z","step-y"]}}`},
+		{"rename_plan", `{"input":{"plan_id":"plan-x","expected_revision":3,"title":"Renamed"}}`},
 	}
 	for _, c := range accepted {
 		if _, err := tools[c.tool].Call(context.Background(), Call{Actor: "root", Arguments: []byte(c.raw)}); err != nil {
@@ -266,20 +262,20 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 		t.Fatalf("plan updates diverged:\n got %s\nwant %s", a, b)
 	}
 	rejected := []struct{ tool, raw, want string }{
-		{"create_plan", `{"title":"p","steps":[{"title":"s","status":"completed"}]}`, "status: step status is never set through plan tools"},
-		{"create_plan", `{"title":"p","steps":[{"title":"s","step_id":"step-1"}]}`, "creation issues step IDs"},
-		{"create_plan", `{"plan_id":"plan-x","expected_revision":1,"title":"p","steps":[{"title":"s"}]}`, "create_plan takes no revision"},
-		{"create_plan", `{"title":"p","steps":"[{\"title\":\"s\"}]"}`, "steps must be array"},
-		{"create_plan", `{"title":"p","steps":[]}`, "requires at least 1 items"},
-		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","status":"pending"}`, "status: step status is never set through plan tools"},
-		{"add_step", `{"plan_id":"plan-x","expected_revision":3,"title":"new","step_id":"step-y"}`, "add_step issues the step_id"},
-		{"add_step", `{"plan_id":"plan-x","title":"new"}`, "arguments.expected_revision is required"},
-		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","status":"completed"}`, "status: step status is never set through plan tools"},
-		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y"}`, "requires at least one of title, acceptance_criteria"},
-		{"edit_step", `{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","note":"n"}`, "note: step notes come from worker progress reports"},
-		{"cancel_steps", `{"plan_id":"plan-x","expected_revision":3,"step_ids":[]}`, "requires at least 1 items"},
-		{"reorder_steps", `{"plan_id":"plan-x","expected_revision":"3","order":["a"]}`, "expected_revision must be integer"},
-		{"rename_plan", `{"plan_id":"plan-x","expected_revision":3,"title":"","work_id":"w"}`, "work_id is not an allowed field"},
+		{"create_plan", `{"input":{"title":"p","steps":[{"title":"s","status":"completed","acceptance_criteria":null}]}}`, "status: step status is never set through plan tools"},
+		{"create_plan", `{"input":{"title":"p","steps":[{"title":"s","step_id":"step-1","status":null,"note":null}]}}`, "creation issues step IDs"},
+		{"create_plan", `{"input":{"plan_id":"plan-x","expected_revision":1,"title":"p","steps":[{"title":"s","acceptance_criteria":null}]}}`, "create_plan takes no revision"},
+		{"create_plan", `{"input":{"title":"p","steps":"[{\"title\":\"s\"}]"}}`, "steps must be array"},
+		{"create_plan", `{"input":{"title":"p","steps":[]}}`, "requires at least 1 items"},
+		{"add_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"title":"new","status":"pending","acceptance_criteria":null}}`, "status: step status is never set through plan tools"},
+		{"add_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"title":"new","step_id":"step-y","acceptance_criteria":null}}`, "add_step issues the step_id"},
+		{"add_step", `{"input":{"plan_id":"plan-x","title":"new","acceptance_criteria":null}}`, "arguments.input.expected_revision is required"},
+		{"edit_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","status":"completed"}}`, "status: step status is never set through plan tools"},
+		{"edit_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","title":null,"acceptance_criteria":null}}`, "requires at least one non-null value among acceptance_criteria, title"},
+		{"edit_step", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_id":"step-y","note":"n"}}`, "note: step notes come from worker progress reports"},
+		{"cancel_steps", `{"input":{"plan_id":"plan-x","expected_revision":3,"step_ids":[]}}`, "requires at least 1 items"},
+		{"reorder_steps", `{"input":{"plan_id":"plan-x","expected_revision":"3","order":["a"]}}`, "expected_revision must be integer"},
+		{"rename_plan", `{"input":{"plan_id":"plan-x","expected_revision":3,"title":"","work_id":"w"}}`, "work_id is not an allowed field"},
 	}
 	before := len(got)
 	for _, c := range rejected {
@@ -295,7 +291,7 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
-	raw, err := json.Marshal(v)
+	raw, err := MarshalInput(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,10 +344,10 @@ func TestProgressReportRejectsUndocumentedAliasesAndNulls(t *testing.T) {
 		return Text("ok"), nil
 	})
 	for _, raw := range []string{
-		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"objective":"Ship it"}`,
-		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it"},"findings":null}`,
-		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it"},"steps":null}`,
-		`{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"x"},"priority":1}`,
+		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"objective":"Ship it"}}`,
+		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`,
+		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"steps":null,"findings":null}}`,
+		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"x","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"priority":1,"findings":null,"steps":null}}`,
 	} {
 		if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(raw)}); err == nil {
 			t.Fatalf("accepted %s", raw)

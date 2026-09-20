@@ -42,7 +42,7 @@ func (f wakeRoot) Submit(_ context.Context, r provider.Request, _ provider.Obser
 		}
 		return operation("create_agent", map[string]any{"role": "implementor"})
 	case 2:
-		return operation("create_plan", map[string]any{"title": "Wake", "steps": []any{map[string]any{"title": "first"}, map[string]any{"title": "second"}}})
+		return operation("create_plan", map[string]any{"title": "Wake", "steps": []any{map[string]any{"title": "first", "acceptance_criteria": nil}, map[string]any{"title": "second", "acceptance_criteria": nil}}})
 	case 3:
 		if err := json.Unmarshal([]byte(lastResult(r)), &p.plan); err != nil {
 			return provider.Response{}, err
@@ -55,7 +55,7 @@ func (f wakeRoot) Submit(_ context.Context, r provider.Request, _ provider.Obser
 				break
 			}
 		}
-		return operation("assign_implementation", map[string]any{"assignee": created.AgentID, "task": "do first", "scope": map[string]any{"plan_id": p.plan.ID, "step_ids": []work.StepID{p.plan.Steps[0].ID}}})
+		return operation("assign_implementation", map[string]any{"assignee": created.AgentID, "task": "do first", "scope": map[string]any{"plan_id": p.plan.ID, "step_ids": []work.StepID{p.plan.Steps[0].ID}}, "context": nil, "expected_output": nil})
 	case 4:
 		if err := json.Unmarshal([]byte(lastResult(r)), &p.w); err != nil {
 			return provider.Response{}, err

@@ -12,9 +12,7 @@ import (
 func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work.PlanUpdate) (work.Plan, error) {
 	return s.workflow.UpdatePlan(ctx, actor, u)
 }
-func (s *Session) UpdateProgress(ctx context.Context, actor identity.ActorID, u work.ProgressUpdate) (work.Work, error) {
-	return s.workflow.UpdateProgress(ctx, actor, u)
-}
+
 func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
 	return s.workflow.CancelWork(ctx, actor, r)
 }

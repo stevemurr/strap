@@ -129,7 +129,8 @@ func Encode(model string, input provider.Request) (Request, error) {
 	}
 	flush()
 	for _, tool := range input.Tools {
-		result.Tools = append(result.Tools, functionTool{Type: "function", Function: functionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters}})
+		yes := true
+		result.Tools = append(result.Tools, functionTool{Type: "function", Function: functionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: &yes}})
 	}
 	return result, nil
 }

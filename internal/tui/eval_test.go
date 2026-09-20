@@ -38,7 +38,7 @@ func TestEvalShowsLiveMetricsWithoutComposer(t *testing.T) {
 	emit := func(e conversation.Event) { m.observe(eval.Progress{Task: task, Event: e, At: time.Now()}) }
 	id := identity.OutputID{Agent: "root", Call: 1}
 	emit(conversation.AgentEvent{Agent: "root", Event: agent.OutputStarted{Output: id}})
-	activity := agent.ToolActivity{InvocationID: "a", Call: provider.ToolCall{ID: "call", Name: "read_file", Arguments: []byte(`{"path":"cache.go"}`)}, StartedAt: time.Now()}
+	activity := agent.ToolActivity{InvocationID: "a", Call: provider.ToolCall{ID: "call", Name: "read_file", Arguments: []byte(`{"input":{"path":"cache.go"}}`)}, StartedAt: time.Now()}
 	emit(conversation.ToolEvent{Agent: "root", Activity: activity})
 	emit(conversation.ToolEvent{Agent: "root", Activity: activity}) // Duplicate start.
 	if len(m.current().tools) != 1 || m.current().runningTools() != 1 {

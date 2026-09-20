@@ -30,8 +30,6 @@ type Client struct {
 	model            string
 	wire             *chatwire.Client
 	generation       generationFields
-	strictTools      map[string]bool
-	strictAllTools   bool
 	tokenizeEndpoint string
 }
 
@@ -64,14 +62,7 @@ func New(config Config) (*Client, error) {
 	u, _ := url.Parse(config.BaseURL)
 	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1") + "/tokenize"
 	u.RawPath = ""
-	strict := map[string]bool{}
-	for _, name := range config.Generation.StrictTools {
-		if strings.TrimSpace(name) == "" {
-			return nil, fmt.Errorf("vllm: strict_tools names a blank tool")
-		}
-		strict[name] = true
-	}
-	return &Client{model: config.Model, wire: wire, generation: generation, strictTools: strict, strictAllTools: config.Generation.StrictAllTools, tokenizeEndpoint: u.String()}, nil
+	return &Client{model: config.Model, wire: wire, generation: generation, tokenizeEndpoint: u.String()}, nil
 }
 
 // HTTPError preserves rejected options and other bounded server diagnostics.
@@ -89,14 +80,6 @@ func (c *Client) Submit(ctx context.Context, input provider.Request, observer pr
 	base, err := chatwire.Encode(c.model, input)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("vllm: encode content: %w", err)
-	}
-	// Match by name: a request advertises the tools of one agent's role, and
-	// the configured names cover every role.
-	for i := range base.Tools {
-		if c.strictAllTools || c.strictTools[base.Tools[i].Function.Name] {
-			yes := true
-			base.Tools[i].Function.Strict = &yes
-		}
 	}
 	// Embed typed fields at the root. extra_body is an SDK convention, not a
 	// vLLM wire field. Only chat template options have a nested JSON object.

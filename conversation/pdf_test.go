@@ -47,7 +47,7 @@ func TestPDFImagesReachModelThroughAgent(t *testing.T) {
 			return
 		}
 		if calls.Add(1) == 1 {
-			fmt.Fprint(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"pdf-1","type":"function","function":{"name":"read_pdf","arguments":"{\"path\":\"pages.pdf\",\"pages\":[3,1]}"}}]}}]}`)
+			fmt.Fprint(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"pdf-1","type":"function","function":{"name":"read_pdf","arguments":"{\"input\":{\"path\":\"pages.pdf\",\"pages\":[3,1]}}"}}]}}]}`)
 			return
 		}
 		if len(request.Messages) != 5 || request.Messages[3].Role != "tool" || request.Messages[3].ToolCallID != "pdf-1" || request.Messages[4].Role != "user" {
@@ -116,7 +116,7 @@ func TestImageResultHistoryIsIndependent(t *testing.T) {
 	if _, err := c.Send(c.Root(), "read"); err != nil {
 		t.Fatal(err)
 	}
-	m.next(t).tool("page", `{}`)
+	m.next(t).tool("page", `{"input":{}}`)
 	next := m.next(t)
 	original[1].Image.Data[0] = 9
 	next.request.Messages[3].Content[1].Image.Data[0] = 8

@@ -128,12 +128,7 @@ type AssignRequest struct {
 	Context        string           `json:"context,omitempty"`
 	ExpectedOutput string           `json:"expected_output,omitempty"`
 }
-type ProgressUpdate struct {
-	WorkTarget
-	Note    *string        `json:"note,omitempty"`
-	Blocker *string        `json:"blocker,omitempty"`
-	Steps   []StepProgress `json:"steps,omitempty"`
-}
+
 type StepProgress struct {
 	ID     StepID      `json:"step_id"`
 	Status *StepStatus `json:"status,omitempty"`

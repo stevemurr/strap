@@ -38,7 +38,7 @@ func TestNewExchangeAdmissionAndUnconditionalToolContinuation(t *testing.T) {
 			c.Spec.Tools = []tool.Tool{customTool{name: "fail", err: errors.New("assignment cancelled")}}
 			c.Spec.Provider = modelFunc(func(_ context.Context, r provider.Request) (provider.Response, error) {
 				if calls.Add(1) == 1 {
-					return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "fail", Arguments: json.RawMessage(`{}`)}}}, nil
+					return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "fail", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
 				}
 				if r.Messages[len(r.Messages)-1].Role != "tool" {
 					t.Error("missing tool continuation")

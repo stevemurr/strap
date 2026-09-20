@@ -47,7 +47,7 @@ func (p *adversarialProvider) Submit(ctx context.Context, r provider.Request, o 
 }
 
 func adversarialCall(id, name string, args any) provider.ToolCall {
-	b, _ := json.Marshal(args)
+	b, _ := tool.MarshalInput(args)
 	return provider.ToolCall{ID: id, Name: name, Arguments: b}
 }
 
@@ -142,7 +142,7 @@ func TestAdversarialWrongAssignmentBranchThenCorrection(t *testing.T) {
 
 func TestAdversarialMalformedOutputThenCorrection(t *testing.T) {
 	p := &adversarialProvider{
-		firstErr: &provider.ToolArgumentsError{Name: "assign_audit", CallID: "truncated", Arguments: `{"assignee":`, FinishReason: "length"},
+		firstErr: &provider.ToolArgumentsError{Name: "assign_audit", CallID: "truncated", Arguments: `{"input":{"assignee":}`, FinishReason: "length"},
 		build: func(f fixture) []provider.Response {
 			return []provider.Response{{ToolCalls: []provider.ToolCall{adversarialAudit(f)}}}
 		},

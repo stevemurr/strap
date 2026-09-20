@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-// validateValues applies omission rules inside nested objects and arrays too.
+// validateValues rejects duplicate keys and malformed or trailing JSON before decoding.
 func validateValues(raw json.RawMessage) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	var value func() error
@@ -16,8 +16,7 @@ func validateValues(raw json.RawMessage) error {
 		if err != nil {
 			return err
 		}
-		// null inside the arguments means the field is omitted; Decode drops
-		// it before validation. A top-level null is rejected there.
+		// Nullability is checked against the contract by Decode.
 		delimiter, ok := token.(json.Delim)
 		if !ok {
 			return nil

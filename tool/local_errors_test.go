@@ -48,7 +48,7 @@ func TestLocalToolConfigurationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := shell.Call(context.Background(), Call{Arguments: json.RawMessage(`{"command":"printf fallback"}`)})
+	result, err := shell.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"command":"printf fallback","timeout_ms":null}}`)})
 	if err != nil || !strings.Contains(result.Content.Text(), "fallback") {
 		t.Fatal(result, err)
 	}
@@ -71,14 +71,14 @@ func TestShellAndPDFCanParticipateInTypedComposition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := nested.Call(context.Background(), Call{Arguments: json.RawMessage(`{"command":"printf composed"}`)})
+	result, err := nested.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"command":"printf composed","timeout_ms":null}}`)})
 	if err != nil || !strings.Contains(result.Content.Text(), "composed") {
 		t.Fatal(result, err)
 	}
-	if _, err := nested.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"missing.pdf"}`)}); err == nil {
+	if _, err := nested.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"missing.pdf","pages":null}}`)}); err == nil {
 		t.Fatal("missing PDF succeeded")
 	}
-	if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":" "}`)}); err == nil {
+	if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":" ","offset":null,"limit":null}}`)}); err == nil {
 		t.Fatal("blank PDF path accepted")
 	}
 }
@@ -104,7 +104,7 @@ func TestPDFRejectsMalformedRendererOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"input.pdf"}`)}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := pdf.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"input.pdf","pages":null}}`)}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatal(err)
 			}
 		})
@@ -119,9 +119,9 @@ func TestLocalToolsReportFilesystemErrorsWithoutChangingFiles(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(file, 0600) })
 	for _, name := range []string{"read_file", "edit_file"} {
-		raw := `{"path":"locked"}`
+		raw := `{"input":{"path":"locked","offset":null,"limit":null}}`
 		if name == "edit_file" {
-			raw = `{"path":"locked","old":"original","new":"changed"}`
+			raw = `{"input":{"path":"locked","old":"original","new":"changed"}}`
 		}
 		if _, err := kit[name].Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatal("unreadable file accepted")
@@ -131,14 +131,14 @@ func TestLocalToolsReportFilesystemErrorsWithoutChangingFiles(t *testing.T) {
 	if err := os.Symlink(loop, loop); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`{"path":"loop"}`, `{"path":"locked/child"}`} {
+	for _, raw := range []string{`{"input":{"path":"loop","offset":null,"limit":null}}`, `{"input":{"path":"locked/child","offset":null,"limit":null}}`} {
 		if _, err := kit["read_file"].Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatal("invalid path accepted")
 		}
 	}
 	os.Chmod(dir, 0500)
 	defer os.Chmod(dir, 0700)
-	if _, err := kit["write_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"new","content":"x"}`)}); err == nil {
+	if _, err := kit["write_file"].Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"new","content":"x"}}`)}); err == nil {
 		t.Fatal("write in read-only directory succeeded")
 	}
 }
@@ -167,14 +167,14 @@ func TestLocalDefinitionsAndDefaultDirectory(t *testing.T) {
 	_, kit := fileTools(t, FilesConfig{OutputLimit: 3})
 	callJSON(t, kit["write_file"], map[string]any{"path": "unicode", "content": "世界"}, nil)
 	var got ReadFileResult
-	callJSON(t, kit["read_file"], map[string]any{"path": "unicode"}, &got)
+	callJSON(t, kit["read_file"], map[string]any{"path": "unicode", "offset": nil, "limit": nil}, &got)
 	if got.Content != "1\t" || !got.Truncated {
 		t.Fatal(got)
 	}
 	for _, name := range []string{"read_file", "edit_file"} {
-		raw := `{"path":" "}`
+		raw := `{"input":{"path":" ","offset":null,"limit":null}}`
 		if name == "edit_file" {
-			raw = `{"path":" ","old":"x","new":"y"}`
+			raw = `{"input":{"path":" ","old":"x","new":"y"}}`
 		}
 		if _, err := kit[name].Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Fatal("blank path accepted")
@@ -192,12 +192,12 @@ func TestPDFSnapshotCreationAndReadFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"input.pdf"}`)}); err == nil {
+	if _, err := p.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"input.pdf","pages":null}}`)}); err == nil {
 		t.Fatal("unreadable input accepted")
 	}
 	os.Chmod(path, 0600)
 	t.Setenv("TMPDIR", filepath.Join(dir, "missing"))
-	if _, err := p.Call(context.Background(), Call{Arguments: json.RawMessage(`{"path":"input.pdf"}`)}); err == nil || !strings.Contains(err.Error(), "missing") {
+	if _, err := p.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"path":"input.pdf","pages":null}}`)}); err == nil || !strings.Contains(err.Error(), "missing") {
 		t.Fatal(err)
 	}
 }

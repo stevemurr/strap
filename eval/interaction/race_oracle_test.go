@@ -102,7 +102,7 @@ func TestRevisionRaceOracleCounterexamples(t *testing.T) {
 			start.Kind, start.Agent = "tool", string(f.Root)
 			finish := start
 			finish.Sequence++
-			activity := agent.ToolActivity{InvocationID: "unexpected-interleaved-invocation", Call: provider.ToolCall{ID: "unexpected-interleaved-call", Name: "rename_plan", Arguments: json.RawMessage(`{}`)}, StartedAt: time.Now()}
+			activity := agent.ToolActivity{InvocationID: "unexpected-interleaved-invocation", Call: provider.ToolCall{ID: "unexpected-interleaved-call", Name: "rename_plan", Arguments: json.RawMessage(`{"input":{}}`)}, StartedAt: time.Now()}
 			startEvent := conversation.ToolEvent{Agent: f.Root, Activity: activity}
 			activity.FinishedAt = activity.StartedAt.Add(time.Millisecond)
 			finishEvent := conversation.ToolEvent{Agent: f.Root, Activity: activity}

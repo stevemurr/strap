@@ -27,7 +27,7 @@ func TestShellOutputExitAndWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	s := shellTool(t, ShellConfig{Dir: dir})
 	var result ShellResult
-	callJSON(t, s, map[string]any{"command": "printf out; printf err >&2; printf contents > file; exit 7"}, &result)
+	callJSON(t, s, map[string]any{"command": "printf out; printf err >&2; printf contents > file; exit 7", "timeout_ms": nil}, &result)
 	if result.Output != "outerr" || result.ExitCode == nil || *result.ExitCode != 7 || result.TimedOut || result.Truncated {
 		t.Fatalf("command result: %+v", result)
 	}
@@ -40,7 +40,7 @@ func TestShellOutputExitAndWorkingDirectory(t *testing.T) {
 func TestShellBoundsOutputWhileDraining(t *testing.T) {
 	s := shellTool(t, ShellConfig{Dir: t.TempDir(), OutputLimit: 16})
 	var result ShellResult
-	callJSON(t, s, map[string]any{"command": "printf START___; i=0; while [ $i -lt 5000 ]; do printf 0123456789; i=$((i+1)); done; printf ____END"}, &result)
+	callJSON(t, s, map[string]any{"command": "printf START___; i=0; while [ $i -lt 5000 ]; do printf 0123456789; i=$((i+1)); done; printf ____END", "timeout_ms": nil}, &result)
 	if !result.Truncated || !strings.HasPrefix(result.Output, "START___") || !strings.HasSuffix(result.Output, "____END") || result.ExitCode == nil || *result.ExitCode != 0 {
 		t.Fatalf("bounded result: %+v", result)
 	}
@@ -92,7 +92,7 @@ func TestShellCleansDescendantsAfterNormalExit(t *testing.T) {
 	dir := t.TempDir()
 	s := shellTool(t, ShellConfig{Dir: dir})
 	var result ShellResult
-	callJSON(t, s, map[string]any{"command": "(sleep 1; printf leaked > marker) & printf done"}, &result)
+	callJSON(t, s, map[string]any{"command": "(sleep 1; printf leaked > marker) & printf done", "timeout_ms": nil}, &result)
 	if result.Output != "done" || result.ExitCode == nil || *result.ExitCode != 0 || !result.OutputIncomplete {
 		t.Fatalf("exit with open descendant pipe: %+v", result)
 	}
@@ -109,7 +109,7 @@ func TestShellCancellation(t *testing.T) {
 	timer := time.AfterFunc(50*time.Millisecond, cancel)
 	defer timer.Stop()
 	start := time.Now()
-	_, err := s.Call(ctx, Call{Arguments: json.RawMessage(`{"command":"sleep 10"}`)})
+	_, err := s.Call(ctx, Call{Arguments: json.RawMessage(`{"input":{"command":"sleep 10","timeout_ms":null}}`)})
 	if !errors.Is(err, context.Canceled) || time.Since(start) > 2*time.Second {
 		t.Fatalf("cancel: %v after %s", err, time.Since(start))
 	}
@@ -119,22 +119,22 @@ func TestShellEnvironmentAndArgumentValidation(t *testing.T) {
 	t.Setenv("STRAP_TEST_PRIVATE", "should-not-inherit")
 	s := shellTool(t, ShellConfig{Dir: t.TempDir()})
 	var result ShellResult
-	callJSON(t, s, map[string]any{"command": "printf '%s' \"${STRAP_TEST_PRIVATE-unset}\""}, &result)
+	callJSON(t, s, map[string]any{"command": "printf '%s' \"${STRAP_TEST_PRIVATE-unset}\"", "timeout_ms": nil}, &result)
 	if result.Output != "unset" {
 		t.Fatalf("inherited private environment: %q", result.Output)
 	}
 	env := []string{"STRAP_TEST_VALUE=original"}
 	s = shellTool(t, ShellConfig{Dir: t.TempDir(), Env: env})
 	env[0] = "STRAP_TEST_VALUE=changed"
-	callJSON(t, s, map[string]any{"command": "printf '%s' \"$STRAP_TEST_VALUE\""}, &result)
+	callJSON(t, s, map[string]any{"command": "printf '%s' \"$STRAP_TEST_VALUE\"", "timeout_ms": nil}, &result)
 	if result.Output != "original" {
 		t.Fatalf("configuration was not copied: %q", result.Output)
 	}
 	for _, raw := range []string{
-		`{}`, `{"command":""}`, `{"command":"  "}`, `{"command":null}`,
-		`{"command":"true","timeout_ms":0}`, `{"command":"true","timeout_ms":-1}`,
-		`{"command":"true","timeout_ms":300001}`, `{"command":"true","timeout_ms":9223372036854775807}`,
-		`{"command":"true","background":true}`,
+		`{}`, `{"input":{"command":"","timeout_ms":null}}`, `{"input":{"command":"  ","timeout_ms":null}}`, `{"input":{"command":null,"timeout_ms":null}}`,
+		`{"input":{"command":"true","timeout_ms":0}}`, `{"input":{"command":"true","timeout_ms":-1}}`,
+		`{"input":{"command":"true","timeout_ms":300001}}`, `{"input":{"command":"true","timeout_ms":9223372036854775807}}`,
+		`{"input":{"command":"true","background":true,"timeout_ms":null}}`,
 	} {
 		if _, err := s.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Errorf("accepted invalid arguments: %s", raw)
@@ -152,7 +152,7 @@ func TestShellStartFailure(t *testing.T) {
 	if err := os.Remove(program); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Call(context.Background(), Call{Arguments: json.RawMessage(`{"command":"true"}`)}); err == nil {
+	if _, err := s.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"command":"true","timeout_ms":null}}`)}); err == nil {
 		t.Fatal("start failure was reported as a command result")
 	}
 }
@@ -162,7 +162,7 @@ func TestShellCancellationKeepsPartialOutputAndCleanupFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	time.AfterFunc(100*time.Millisecond, cancel)
-	raw, err := s.Call(ctx, Call{Arguments: json.RawMessage(`{"command":"printf partial-evidence; sleep 10"}`)})
+	raw, err := s.Call(ctx, Call{Arguments: json.RawMessage(`{"input":{"command":"printf partial-evidence; sleep 10","timeout_ms":null}}`)})
 	var result ShellResult
 	if e := json.Unmarshal([]byte(raw.Content.Text()), &result); e != nil {
 		t.Fatal(e)
@@ -171,7 +171,7 @@ func TestShellCancellationKeepsPartialOutputAndCleanupFailure(t *testing.T) {
 		t.Fatal(result, err)
 	}
 	s.stop = func(cmd *exec.Cmd) error { _ = stopProcessGroup(cmd); return errors.New("cleanup rejected") }
-	raw, err = s.Call(context.Background(), Call{Arguments: json.RawMessage(`{"command":"printf retained"}`)})
+	raw, err = s.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"command":"printf retained","timeout_ms":null}}`)})
 	if e := json.Unmarshal([]byte(raw.Content.Text()), &result); e != nil {
 		t.Fatal(e)
 	}

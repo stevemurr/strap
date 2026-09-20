@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/stevemurr/strap/harness"
-	"github.com/stevemurr/strap/harness/httpapi"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -16,7 +15,7 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 	ctx, s := recoverySession(t, true)
 	base := "/sessions/" + s.ID()
 	for _, raw := range []string{`{}`, `{"role":null}`, `{"role":""}`, `{"role":"root"}`, `{"role":"implementor","task":"hidden work"}`, `{"role":"implementor","profile":"legacy"}`} {
-		response := request(t, s.http, "POST", base+"/agents", httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(raw)})
+		response := request(t, s.http, "POST", base+"/agents", wireRequest(s.Root(), json.RawMessage(raw)))
 		if response.Code != 400 || len(s.Agents()) != 1 {
 			t.Fatal(raw, response.Code, response.Body.String())
 		}
@@ -31,7 +30,7 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 		raw    string
 	}{
 		{"assign_implementation", `{"task":"task"}`},
-		{"assign_implementation", `{"assignee":null,"task":"task"}`},
+		{"assign_implementation", `{"assignee":null,"task":"task","context":null,"expected_output":null,"scope":null}`},
 		{"assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"task","work_id":""}`, impl)},
 		{"assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"task","kind":"implementation"}`, impl)},
 		{"assign_implementation", fmt.Sprintf(`{"assignee":%q,"task":"task","context":null}`, impl)},
@@ -40,12 +39,12 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 		{"assign_repair", fmt.Sprintf(`{"assignee":%q,"work_id":"w","expected_revision":1,"submission_id":"s"}`, impl)},
 		{"assign_research", fmt.Sprintf(`{"assignee":%q,"task":"task","scope":{"plan_id":"p","step_ids":["s"]}}`, impl)},
 	} {
-		response := request(t, s.http, "POST", base+"/work/"+tc.action, httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(tc.raw)})
+		response := request(t, s.http, "POST", base+"/work/"+tc.action, wireRequest(s.Root(), json.RawMessage(tc.raw)))
 		if response.Code != 400 {
 			t.Fatal(tc.action, tc.raw, response.Code, response.Body.String())
 		}
 	}
-	removed := request(t, s.http, "POST", base+"/work/assign", httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task"}`, impl))})
+	removed := request(t, s.http, "POST", base+"/work/assign", wireRequest(s.Root(), json.RawMessage(fmt.Sprintf(`{"kind":"implementation","assignee":%q,"task":"task"}`, impl))))
 	if removed.Code != 404 {
 		t.Fatal("removed assignment route remains available", removed.Code, removed.Body.String())
 	}
@@ -54,7 +53,7 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 		t.Fatal(page, e)
 	}
 	for _, raw := range []string{`{"work_id":"w","expected_revision":1}`, `{"work_id":"w","expected_revision":1,"assignee":null}`, `{"work_id":"w","expected_revision":1,"assignee":""}`} {
-		response := request(t, s.http, "POST", base+"/work/reassign", httpapi.WorkRequest[json.RawMessage]{Actor: s.Root(), Request: json.RawMessage(raw)})
+		response := request(t, s.http, "POST", base+"/work/reassign", wireRequest(s.Root(), json.RawMessage(raw)))
 		if response.Code != 400 {
 			t.Fatal(raw, response.Code)
 		}
@@ -64,7 +63,7 @@ func TestExplicitCreationAndAssignmentWireContracts(t *testing.T) {
 	if e = json.Unmarshal(role.Body.Bytes(), &info); e != nil || info.Role != roster.Implementor || !info.Registered {
 		t.Fatal(info, e)
 	}
-	unauthorized := request(t, s.http, "POST", base+"/agents", httpapi.WorkRequest[roster.CreateRequest]{Actor: impl, Request: roster.CreateRequest{Role: roster.Auditor}})
+	unauthorized := request(t, s.http, "POST", base+"/agents", wireRequest(impl, roster.CreateRequest{Role: roster.Auditor}))
 	if unauthorized.Code != 403 {
 		t.Fatal(unauthorized.Code)
 	}
@@ -109,15 +108,39 @@ func TestResearchAssignmentUsesItsOperationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := request(t, s.http, "POST", "/sessions/"+s.ID()+"/work/assign_research", httpapi.WorkRequest[tool.AssignResearchArgs]{
-		Actor:   s.Root(),
-		Request: tool.AssignResearchArgs{Assignee: researcher.AgentID, Task: "Investigate the protocol", Context: "Review its documented limits", ExpectedOutput: "A concise set of findings"},
-	})
+	response := request(t, s.http, "POST", "/sessions/"+s.ID()+"/work/assign_research", wireRequest(s.Root(), tool.AssignResearchArgs{Assignee: researcher.AgentID, Task: "Investigate the protocol", Context: testString("Review its documented limits"), ExpectedOutput: testString("A concise set of findings")}))
 	var assigned work.Work
 	if err := json.Unmarshal(response.Body.Bytes(), &assigned); err != nil || response.Code != 200 {
 		t.Fatal(response.Code, response.Body.String(), err)
 	}
 	if assigned.Kind != work.Research || assigned.Assignee != researcher.AgentID || assigned.Task != "Investigate the protocol" {
 		t.Fatal(assigned)
+	}
+}
+
+func testString(s string) *string { return &s }
+
+func TestRemovedProgressMutationAndFlatCommandsAreRejected(t *testing.T) {
+	ctx, s := recoverySession(t, true)
+	base := "/sessions/" + s.ID()
+	worker := createHTTPWorker(t, s)
+	before, err := s.ListWork(ctx, s.Root(), work.ListQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"assign_implementation", "cancel", "submit", "research", "audit", "report-progress"} {
+		flat := map[string]any{"actor": s.Root(), "request": tool.AssignImplementationArgs{Assignee: worker, Task: "must not run"}}
+		response := request(t, s.http, "POST", base+"/work/"+action, flat)
+		if response.Code != 400 {
+			t.Fatalf("%s: %d %s", action, response.Code, response.Body.String())
+		}
+	}
+	response := request(t, s.http, "POST", base+"/work/progress", wireRequest(s.Root(), map[string]any{"work_id": "w"}))
+	if response.Code != 404 {
+		t.Fatalf("removed route: %d %s", response.Code, response.Body.String())
+	}
+	after, err := s.ListWork(ctx, s.Root(), work.ListQuery{})
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected commands changed work", err)
 	}
 }
