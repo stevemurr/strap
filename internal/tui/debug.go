@@ -67,14 +67,18 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 		return
 	}
 	delete(m.activeTools, key)
+	shown := false
 	for i := len(m.entries) - 1; i >= 0; i-- {
 		if m.entries[i].label == "Tool" && m.entries[i].tool == key {
 			m.entries[i].toolInfo = displayTool(activity)
 			m.noteStreamEntry(&m.entries[i])
+			shown = true
 			break
 		}
 	}
-	if activity.Err != nil {
+	// The tool row renders its failure. Keep a fallback only when its start
+	// was not observed or its row has already been pruned.
+	if activity.Err != nil && !shown {
 		m.addAttributed("Error", string(event.Agent), name+" failed: "+activity.Err.Error(), false, event.Agent)
 	}
 	if !m.selecting {
@@ -161,9 +165,15 @@ func (m *model) addDetail(label, meta, body string, follow bool) {
 }
 
 func (m *model) addAttributed(label, meta, body string, follow bool, actors ...message.ActorID) {
-	m.streamUI.nextEntry++
 	progress := len(actors) == 1 && meta == string(actors[0])+" · progress" && (label == "Strap" || label == "Message")
-	m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: actors, label: safeText(label), meta: safeText(meta), body: safeText(body), at: m.now(), progress: progress})
+	m.addEntry(entry{actors: actors, label: label, meta: meta, body: body, progress: progress}, follow)
+}
+
+func (m *model) addEntry(e entry, follow bool) {
+	m.streamUI.nextEntry++
+	e.serial, e.at = m.streamUI.nextEntry, m.now()
+	e.label, e.meta, e.body = safeText(e.label), safeText(e.meta), safeText(e.body)
+	m.entries = append(m.entries, e)
 	m.noteStreamEntry(&m.entries[len(m.entries)-1])
 	if !m.selecting {
 		m.renderTranscript(follow && m.entries[len(m.entries)-1].inStream(m.streamUI.selected))

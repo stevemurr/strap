@@ -20,10 +20,14 @@ var planWorkingBackground = lipgloss.AdaptiveColor{Light: "#F0F5FF", Dark: "#202
 type planView struct {
 	plan             work.Plan
 	expanded         bool
+	overview         bool
+	scroll           int
 	selected, detail work.StepID
 }
 type planRenderKey struct {
 	width, budget           int
+	scroll                  int
+	overview                bool
 	generation              uint64
 	active                  work.PlanID
 	selected, detail        work.StepID
@@ -58,7 +62,7 @@ func (m *model) rememberPlan(p work.Plan) {
 		return
 	}
 	if v == nil {
-		v = &planView{expanded: true}
+		v = &planView{expanded: true, scroll: -1}
 		m.plans.views[p.ID] = v
 		m.plans.order = append(m.plans.order, p.ID)
 		current := m.currentPlan()
@@ -68,7 +72,14 @@ func (m *model) rememberPlan(p work.Plan) {
 	}
 	// Progress updates can change step status without changing plan structure's
 	// revision. Equal revisions must still be applied in event stream order.
+	var previous work.StepID
+	if len(v.plan.Steps) > 0 {
+		previous = v.plan.Steps[planCursor(v)].ID
+	}
 	v.plan = p.Clone()
+	if v.selected == "" && len(v.plan.Steps) > 0 && previous != v.plan.Steps[planCursor(v)].ID {
+		v.scroll, v.detail = -1, ""
+	}
 	m.plans.generation++
 }
 func (m *model) observePlanEvent(e work.Event) {
@@ -244,7 +255,7 @@ func (m *model) planBudget() int {
 		return 0
 	}
 	// Input and suggestions retain priority. Leave room to read the conversation.
-	return max(0, min(12, m.height-4-m.input.Height()-m.completionHeight()-m.streamChrome()-m.stackBarHeight()-max(2, min(6, m.height/3))))
+	return max(0, min(14, m.height-4-m.input.Height()-m.completionHeight()-m.streamChrome()-m.stackBarHeight()-max(2, min(6, m.height/3))))
 }
 func (m *model) planHeight() int { return len(m.planLines(m.viewport.Width, m.planBudget())) }
 func (m *model) planTop() int {
@@ -264,15 +275,13 @@ func (m *model) planLines(width, budget int) []planLine {
 	if v == nil {
 		return nil
 	}
-	key := planRenderKey{width: width, budget: budget, generation: m.plans.generation, active: m.plans.active, selected: v.selected, detail: v.detail, expanded: v.expanded, focused: m.plans.focused, dark: lipgloss.HasDarkBackground(), profile: lipgloss.ColorProfile()}
+	key := planRenderKey{scroll: v.scroll, overview: v.overview, width: width, budget: budget, generation: m.plans.generation, active: m.plans.active, selected: v.selected, detail: v.detail, expanded: v.expanded, focused: m.plans.focused, dark: lipgloss.HasDarkBackground(), profile: lipgloss.ColorProfile()}
 	if m.plans.cache != nil && m.plans.cacheKey == key {
 		return m.plans.cache
 	}
 	p := v.plan
-	// Parsing occurs only on a cache miss, and shares the transcript's Markdown
-	// styles and sanitization. Compact labels flatten blocks after rendering;
-	// expanded notes retain paragraphs, lists, and code formatting.
-	renderer, _ := newMarkdownRenderer(max(1, width-2), key.dark, key.profile)
+	contentWidth := max(1, min(76, width-4))
+	renderer, _ := newMarkdownRenderer(contentWidth, key.dark, key.profile)
 	inline := func(source string) string {
 		var lines []string
 		for _, line := range strings.Split(planMarkdown(renderer, source), "\n") {
@@ -285,11 +294,8 @@ func (m *model) planLines(width, budget int) []planLine {
 		return strings.Join(lines, " ")
 	}
 	summary, done := planSummaryTitle(p, inline)
-	if progress := planProgress(p, min(29, width/3)); progress != "" {
-		summary = progress + "  " + summary
-	}
 	arrow := "▸"
-	if v.expanded && budget >= 5 {
+	if v.expanded && budget >= 6 {
 		arrow = "▾"
 	}
 	prefix := arrow + " Plan"
@@ -300,104 +306,137 @@ func (m *model) planLines(width, budget int) []planLine {
 	if width < 45 {
 		count = fmt.Sprintf("%d/%d", done, len(p.Steps))
 	}
-	left := titleStyle.Render(prefix) + " · " + inline(p.Title)
-	room := width - ansi.StringWidth(count) - 2
-	header := ansi.Truncate(left, max(1, room), "…")
-	if room > ansi.StringWidth(prefix) {
-		header = fitStreamCell(header, room) + "  " + successStyle.Render(count)
+	progress := planProgress(p, min(23, max(0, width/4)))
+	right := progress + "  " + dimStyle.Render(count)
+	left := titleStyle.Render(prefix)
+	if !m.embedded && width >= 70 {
+		left += " · " + inline(p.Title)
+	}
+	room := width - ansi.StringWidth(right) - 2
+	header := fitStreamCell(left, max(1, room)) + "  " + right
+	rows := []planLine{{text: dimStyle.Render(strings.Repeat("─", width))}, {text: header, kind: "header"}}
+	if budget == 1 {
+		rows = rows[1:]
+	}
+	if !v.expanded || budget < 6 || len(p.Steps) == 0 {
+		if budget >= 3 {
+			rows = append(rows, planLine{text: summary, kind: "header"})
+		}
 	} else {
-		header = titleStyle.Render(prefix) + " " + count
-	}
-	rows := []planLine{{text: header, kind: "header"}}
-	if budget >= 2 {
-		rows = append(rows, planLine{text: summary, kind: "header"})
-	}
-	if budget >= 3 {
-		rows = append([]planLine{{text: dimStyle.Render(strings.Repeat("─", width))}}, rows...)
-	}
-	if v.expanded && budget >= 5 && len(p.Steps) > 0 {
-		var body []planLine
-		selectedStart, selectedEnd := 0, 0
+		if budget >= 9 {
+			rows = append(rows, planLine{})
+		}
+		if done > 0 {
+			mark := "▸"
+			if v.overview {
+				mark = "▾"
+			}
+			rows = append(rows, planLine{text: dimStyle.Render(fmt.Sprintf("%s %d completed steps", mark, done)), kind: "completed"})
+		} else {
+			rows = append(rows, planLine{})
+		}
+		if budget >= 12 && done > 0 {
+			rows = append(rows, planLine{})
+		}
 		cursor := planCursor(v)
-		for i, s := range p.Steps {
+		var body []planLine
+		selectedStart := 0
+		addStep := func(i int) {
+			step := p.Steps[i]
 			start := len(body)
-			mark, label, style := planStatus(s.Status)
+			mark, label, style := planStatus(step.Status)
 			owner := p.Owner
-			assigned, ok := m.planStepWork(p, s.ID)
+			assigned, ok := m.planStepWork(p, step.ID)
 			if ok {
 				owner = assigned.Assignee
-				if s.Status == work.ReadyForReview && assigned.Kind == work.AuditWork && !workFinished(assigned) {
+				if step.Status == work.ReadyForReview && assigned.Kind == work.AuditWork && !workFinished(assigned) {
 					label = "In review"
 				}
 			}
-			name := inline(s.Title)
-			suffix := style.Render(label)
+			title := lipgloss.NewStyle().Bold(true).Render(inline(step.Title))
+			wrapped := strings.Split(ansi.Hardwrap(ansi.Wrap(title, contentWidth, ""), contentWidth, true), "\n")
+			for j, line := range wrapped {
+				prefix := "  "
+				if j == 0 {
+					prefix = style.Render(mark) + " "
+				}
+				body = append(body, planLine{text: prefix + line, kind: "step", step: step.ID})
+			}
+			meta := style.Render(label)
 			if owner != "" {
-				suffix += " " + agentIcon(owner)
+				meta += " · " + agentIcon(owner) + " " + dimStyle.Render(inlineText(string(owner)))
 			}
-			titleStyle := lipgloss.NewStyle()
-			if s.Status == work.Completed || s.Status == work.CancelledStep {
-				titleStyle = dimStyle
-			}
-			if (m.plans.focused || v.selected != "") && i == cursor {
-				// Lipgloss's underline space styler splits nested ANSI codes.
-				// A cursor and bold title preserve Markdown and show focus.
-				titleStyle = titleStyle.Bold(true)
-				mark = "›"
-			}
-			text := style.Render(mark) + " " + titleStyle.Render(name)
-			if width >= 55 {
-				room := width - ansi.StringWidth(suffix) - 4
-				text = style.Render(mark) + " " + fitStreamCell(titleStyle.Render(ansi.Truncate(name, room, "…")), room) + "  " + suffix
-			} else {
-				text = style.Render(mark+" "+label) + " · " + titleStyle.Render(name)
-			}
-			if s.Status == work.InProgress {
-				text = renderSurface(lipgloss.NewStyle().Foreground(surfaceTextColor).Background(planWorkingBackground), fitStreamCell(text, width))
-			}
-			body = append(body, planLine{text: text, kind: "step", step: s.ID})
-			if s.ID != "" && v.detail == s.ID {
-				detail := s.Note
+			body = append(body, planLine{text: "  " + meta, kind: "step", step: step.ID})
+			if i == cursor {
+				selectedStart = start
+				detail := step.Note
 				if detail == "" && ok {
 					detail = assigned.Note
 					if assigned.Blocker != "" {
 						detail = "Blocked: " + assigned.Blocker
 					}
 				}
-				if detail == "" {
-					detail = "No update yet."
-				}
-				wrapped := strings.Split(ansi.Hardwrap(planMarkdown(renderer, detail), max(1, width-2), true), "\n")
-				// Keep the selected step and its note visible together, even in
-				// the eval host's smaller dock. The owner is already in its row.
-				limit := max(0, min(4, budget-len(rows)-2))
-				if len(wrapped) > limit {
-					wrapped = wrapped[:limit]
-					if limit > 0 {
-						wrapped[limit-1] = ansi.Truncate(wrapped[limit-1], max(1, width-3), "") + "…"
+				if v.detail == step.ID && len(step.AcceptanceCriteria) > 0 {
+					detail += "\n\n**Acceptance criteria**\n\n"
+					for _, criterion := range step.AcceptanceCriteria {
+						detail += "- " + criterion + "\n"
 					}
 				}
-				for _, line := range wrapped {
-					body = append(body, planLine{text: "  " + line, kind: "step", step: s.ID})
+				if detail != "" {
+					body = append(body, planLine{kind: "step", step: step.ID})
+					note := strings.Split(ansi.Hardwrap(planMarkdown(renderer, detail), contentWidth, true), "\n")
+					if v.detail != step.ID && len(note) > 3 {
+						note = note[:3]
+						note[2] = ansi.Truncate(note[2], max(1, contentWidth-1), "") + "…"
+					}
+					for _, line := range note {
+						body = append(body, planLine{text: "  " + line, kind: "step", step: step.ID})
+					}
+				} else if v.detail == step.ID {
+					body = append(body, planLine{text: dimStyle.Render("  No update yet."), kind: "step", step: step.ID})
 				}
 			}
-			if i == cursor {
-				selectedStart, selectedEnd = start, len(body)
+			if step.Status == work.InProgress || i == cursor && m.plans.focused {
+				for j := start; j < len(body); j++ {
+					body[j].text = renderSurface(lipgloss.NewStyle().Foreground(surfaceTextColor).Background(planWorkingBackground), fitStreamCell(body[j].text, min(width, contentWidth+2)))
+				}
+			}
+			body = append(body, planLine{})
+		}
+		if v.overview {
+			for i := range p.Steps {
+				addStep(i)
+			}
+		} else {
+			addStep(cursor)
+		}
+		// The next unfinished step is a small, clickable preview, not another dense row.
+		if !v.overview {
+			for i := cursor + 1; i < len(p.Steps); i++ {
+				if p.Steps[i].Status != work.Completed && p.Steps[i].Status != work.CancelledStep {
+					preview := dimStyle.Render("Next · ") + inline(p.Steps[i].Title)
+					for _, line := range strings.Split(ansi.Hardwrap(ansi.Wrap(preview, contentWidth+2, ""), contentWidth+2, true), "\n") {
+						body = append(body, planLine{text: line, kind: "step", step: p.Steps[i].ID})
+					}
+					break
+				}
 			}
 		}
-		capacity := budget - len(rows) - 1
-		start := max(0, min(selectedStart, selectedEnd-capacity))
+		capacity := max(1, budget-len(rows)-1)
+		start := min(max(0, v.scroll), max(0, len(body)-capacity))
+		if v.overview && m.plans.focused && v.scroll < 0 {
+			start = min(selectedStart, max(0, len(body)-capacity))
+		}
+		v.scroll = start
+		key.scroll = start
 		end := min(len(body), start+capacity)
 		rows = append(rows, body[start:end]...)
 		hint := "Ctrl+P fold · F8 steps"
 		if m.plans.focused {
-			hint = "↑/↓ steps · Enter details · Esc compose"
-			if m.embedded {
-				hint = "↑/↓ steps · Enter details · Esc problems"
-			}
+			hint = "↑/↓ steps · Enter details · c outline · Esc back"
 		}
 		if start > 0 || end < len(body) {
-			hint = "↑/↓ more · " + hint
+			hint = "PgUp/Dn more · " + hint
 		}
 		kind := ""
 		if len(m.plans.order) > 1 {
@@ -406,6 +445,7 @@ func (m *model) planLines(width, budget int) []planLine {
 		}
 		rows = append(rows, planLine{text: dimStyle.Render(hint), kind: kind})
 	}
+
 	for i := range rows {
 		rows[i].text = ansi.Truncate(rows[i].text, width, "…")
 	}
@@ -440,6 +480,7 @@ func (m *model) movePlanStep(delta int) {
 		return
 	}
 	v.selected = v.plan.Steps[max(0, min(len(v.plan.Steps)-1, planCursor(v)+delta))].ID
+	v.scroll = -1
 }
 func (m *model) nextPlan(delta int) {
 	if len(m.plans.order) == 0 {
@@ -486,6 +527,13 @@ func (m *model) planKey(key string) bool {
 		m.nextPlan(-1)
 	case "]", "right":
 		m.nextPlan(1)
+	case "pgup":
+		m.currentPlan().scroll = max(0, m.currentPlan().scroll-4)
+	case "pgdown":
+		m.currentPlan().scroll += 4
+	case "c":
+		v := m.currentPlan()
+		v.overview, v.scroll = !v.overview, 0
 	case "enter", " ":
 		v := m.currentPlan()
 		if len(v.plan.Steps) > 0 {
@@ -496,7 +544,7 @@ func (m *model) planKey(key string) bool {
 				v.detail = id
 			}
 		}
-	case "ctrl+c", "ctrl+d", "ctrl+t", "f2", "f6", "f7", "pgup", "pgdown", "ctrl+home", "ctrl+end":
+	case "ctrl+c", "ctrl+d", "ctrl+t", "f2", "f6", "f7", "ctrl+home", "ctrl+end":
 		return false
 	}
 	return true
@@ -526,11 +574,16 @@ func (m *model) planMouse(event tea.MouseMsg, left, top, width, budget int) bool
 		switch r.kind {
 		case "header":
 			m.togglePlan()
+		case "completed":
+			v := m.currentPlan()
+			v.overview = !v.overview
+			v.scroll = 0
 		case "next":
 			m.nextPlan(1)
 		case "step":
 			if v := m.currentPlan(); v != nil {
 				v.selected = r.step
+				v.scroll = -1
 				if v.detail == r.step {
 					v.detail = ""
 				} else {

@@ -94,6 +94,9 @@ func (m *model) overlayBadgePeek(view string, width, height int) string {
 }
 
 func (m *model) renderMessage(e *entry, firstRow int) string {
+	if e.reportDetail != nil {
+		return m.renderProgress(e, firstRow)
+	}
 	width := max(1, m.viewport.Width-1)
 	if e.label == "You" {
 		surface := lipgloss.NewStyle().Foreground(surfaceTextColor).Background(lipgloss.AdaptiveColor{Light: "#F4F4F4", Dark: "#262626"})

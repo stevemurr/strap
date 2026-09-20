@@ -95,6 +95,9 @@ func TestPlanDockInputMouseAndFocus(t *testing.T) {
 	if m.plans.focused || !m.input.Focused() || len(s.sent) != 0 || m.interrupting {
 		t.Fatal("Escape did not return to composer")
 	}
+	m.Update(tea.KeyMsg{Type: tea.KeyF8})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	x, y := screenLocation(t, m.View(), "Run end-to-end")
 	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, x, y))
 	if m.currentPlan().detail != "verify" || m.mouseSelection != nil {
@@ -142,6 +145,7 @@ func TestPlanDockProjectionAndMultiplePlans(t *testing.T) {
 	}
 	audit := work.Work{ID: "audit", Kind: work.AuditWork, Assignee: "agent-3", State: work.Active, Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{"review"}}}
 	m.Update(received{event: conversation.WorkEvent{Event: work.Event{Work: audit}}})
+	m.currentPlan().selected = "review"
 	if !strings.Contains(dockText(m), "In review") || !strings.Contains(dockText(m), "2/5") {
 		t.Fatal("review treated as acceptance")
 	}
@@ -250,7 +254,7 @@ func TestEvalPlanSharesDockAndKeepsProblemsIndependent(t *testing.T) {
 	rows := a.planLines(e.detailWidth(), e.evalPlanBudget())
 	for i, r := range rows {
 		if r.kind == "header" {
-			e.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, 1+e.listWidth()+3, 15+a.viewport.Height+i))
+			e.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, 1, e.activityTop()+a.viewport.Height+i))
 			break
 		}
 	}
@@ -330,7 +334,7 @@ func TestPlanMarkdownRendersInDockAndDetails(t *testing.T) {
 			emitPlan(m, p)
 			m.Update(tea.KeyMsg{Type: tea.KeyF8})
 			m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-			rows := m.planLines(104, 12)
+			rows := m.planLines(104, 14)
 			view := ansi.Strip(strings.Join(planText(rows), "\n"))
 			for _, want := range []string{"Build a native notes app", "Add search", "shortcuts", "Search is ready.", "• Check keyboard navigation", "• Verify", "2/5 complete"} {
 				if !strings.Contains(view, want) {
@@ -347,7 +351,7 @@ func TestPlanMarkdownRendersInDockAndDetails(t *testing.T) {
 				if strings.Contains(ansi.Strip(row.text), "\x1b") {
 					t.Fatal("focus styling broke Markdown escape sequences", row)
 				}
-				if row.kind == "step" && row.step == "search" && strings.Contains(ansi.Strip(row.text), "In progress") && !strings.Contains(ansi.Strip(row.text), "Add search") {
+				if row.kind == "step" && row.step == "search" && strings.Contains(ansi.Strip(row.text), "Add") && !strings.Contains(ansi.Strip(row.text), "Add search") {
 					t.Fatal("focused title is unreadable", row)
 				}
 				if strings.Contains(ansi.Strip(row.text), "native notes app") && strings.Contains(row.text, "…") {

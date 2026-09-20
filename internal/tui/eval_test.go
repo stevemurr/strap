@@ -50,6 +50,7 @@ func TestEvalShowsLiveMetricsWithoutComposer(t *testing.T) {
 	emit(conversation.ContextTokensEvent{Agent: "root", Revision: 2, Count: 18432})
 	in, out := int64(75000), int64(2800)
 	emit(conversation.UsageEvent{Agent: "root", Observation: agent.UsageObservation{Usage: &provider.Usage{InputTokens: &in, OutputTokens: &out}}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"18,432 context tokens", "Tools: 1 · 0 running", "1 model calls", "75,000 / 2,800", "READ ONLY"} {
 		if !strings.Contains(view, want) {
@@ -203,7 +204,7 @@ func TestEvalMouseExpandsSharedActivity(t *testing.T) {
 	completedToolForTest(a, "root", "call", "cache.go")
 	a.viewport.GotoTop()
 	target := a.folds.targets[0]
-	m.Update(tea.MouseMsg{X: m.listWidth() + 4 + target.column, Y: 15 + target.row, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m.Update(tea.MouseMsg{X: 1 + target.column, Y: m.activityTop() + target.row, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	if !a.folds.expanded[target.key] {
 		t.Fatal("mouse missed activity fold")
 	}

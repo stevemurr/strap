@@ -124,7 +124,7 @@ func TestAgentIconHoverIsStaticBoundedAndReadOnly(t *testing.T) {
 	a := e.current().activity
 	completedToolForTest(a, "root", "read", "README.md")
 	target = a.badges.targets[0]
-	e.Update(tea.MouseMsg{X: e.listWidth() + 4 + target.column, Y: 15 + target.row, Action: tea.MouseActionMotion, Button: tea.MouseButtonNone})
+	e.Update(tea.MouseMsg{X: 1 + target.column, Y: e.activityTop() + target.row, Action: tea.MouseActionMotion, Button: tea.MouseButtonNone})
 	if a.badges.peek == nil || e.ctx.Err() != nil {
 		t.Fatal("eval hover missing or changed execution")
 	}

@@ -2,20 +2,48 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/work"
 )
 
-// Keep report fields as distinct Markdown paragraphs. Multiline content starts
-// its own block so an opening list, heading, or code fence keeps its meaning.
-func progressField(label, value string) string {
-	separator := " "
-	if strings.Contains(value, "\n") {
-		separator = "\n\n"
+func (m *model) addProgress(event work.Event) {
+	e := entry{label: "Progress", meta: string(event.Work.Assignee), actors: []message.ActorID{event.Work.Assignee}, body: progressSummary(event), reportDetail: &entry{label: "Progress", body: safeText(progressBody(event))}}
+	if event.Change != nil {
+		for _, r := range event.Change.ProgressReports {
+			e.reportRefs = append(e.reportRefs, message.ProgressReportRef{WorkID: r.WorkID, ReportID: r.ID, WorkRevision: r.WorkRevision, AssignedAtRevision: r.AssignedAtRevision})
+		}
 	}
-	return "**" + label + ":**" + separator + value
+	m.addEntry(e, false)
+}
+
+func (m *model) hasProgressReports(notice *message.WorkProgressNotice) bool {
+	if len(notice.Reports) == 0 || len(notice.Briefs) > 0 || len(notice.Covered) > 0 || notice.Attention {
+		return false
+	}
+	for _, ref := range notice.Reports {
+		found := false
+		for _, e := range m.entries {
+			if slices.Contains(e.reportRefs, ref) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// Labels live in their own paragraphs. Even a single-line value may be a
+// Markdown block (a heading, list item, quote, or indented code); prefixing it
+// with a label changes how Markdown parses it.
+func progressField(label, value string) string {
+	return "**" + label + ":**\n\n" + value
 }
 
 func progressBody(e work.Event) string {
@@ -64,6 +92,79 @@ func noticeBody(n *message.WorkProgressNotice) string {
 	}
 	for _, c := range n.Covered {
 		lines = append(lines, fmt.Sprintf("Reporting ended · %s · assignment %d · through revision %d", c.WorkID, c.AssignedAtRevision, c.ThroughRevision))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// The reading view contains the latest narrative. Full identifiers, objective,
+// evidence and assignment revisions remain available in the disclosure.
+func progressSummary(e work.Event) string {
+	if e.Change == nil {
+		return e.Work.Task
+	}
+	var blocks []string
+	for _, r := range e.Change.ProgressReports {
+		if p := r.Position; p != nil {
+			for _, value := range []string{p.Activity, p.Note} {
+				if value != "" {
+					blocks = append(blocks, value)
+				}
+			}
+			if p.Activity == "" && p.Note == "" && p.Objective != "" {
+				blocks = append(blocks, p.Objective)
+			}
+			for _, field := range [][2]string{{"Next", p.NextStep}, {"Uncertainty", p.Uncertainty}, {"Blocked", p.Blocker}, {"Decision needed", p.DecisionNeed}} {
+				if field[1] != "" {
+					blocks = append(blocks, progressField(field[0], field[1]))
+				}
+			}
+		}
+		for _, f := range r.Findings {
+			blocks = append(blocks, progressField(string(f.Basis), f.Claim))
+			if f.Limitation != "" {
+				blocks = append(blocks, progressField("Limitation", f.Limitation))
+			}
+		}
+	}
+	if len(blocks) == 0 {
+		return "Progress updated."
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func (m *model) reportExpanded(e *entry) bool {
+	if open, ok := m.folds.expanded[foldKey{serial: e.serial}]; ok {
+		return open
+	}
+	return m.folds.allExpanded
+}
+
+func (m *model) renderProgress(e *entry, firstRow int) string {
+	width := max(1, min(83, m.viewport.Width-1))
+	indent := 2
+	var lines []string
+	heading := dimStyle.Render(e.label + " · " + e.meta)
+	if len(e.actors) > 0 {
+		heading = agentIcon(e.actors[0]) + " " + heading
+		m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.actors[0], row: firstRow, column: 0})
+	}
+	lines = append(lines, heading, "")
+	for _, line := range strings.Split(m.renderBodyWidth(e, max(1, width-indent)), "\n") {
+		lines = append(lines, "  "+line)
+	}
+	lines = append(lines, "")
+	key := foldKey{serial: e.serial}
+	open := m.reportExpanded(e)
+	m.folds.targets = append(m.folds.targets, foldTarget{key: key, row: firstRow + len(lines), column: 2})
+	lines = append(lines, "  "+m.foldMarker(key, open)+dimStyle.Render(" Report details"))
+	if open {
+		lines = append(lines, "")
+		for _, line := range strings.Split(m.renderBodyWidth(e.reportDetail, max(1, width-indent)), "\n") {
+			lines = append(lines, "  "+line)
+		}
+	}
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], max(1, m.viewport.Width-1), "")
 	}
 	return strings.Join(lines, "\n")
 }

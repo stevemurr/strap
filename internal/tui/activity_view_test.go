@@ -99,7 +99,7 @@ func TestActivityBoundariesPreserveMessagesAgentsAndFailures(t *testing.T) {
 	a.Err = errors.New("tests failed")
 	m.observe(conversation.ToolEvent{Agent: "root", Activity: a})
 	view := ansi.Strip(m.viewport.View())
-	if len(m.folds.targets) != 5 || !strings.Contains(view, "A meaningful progress update") || !strings.Contains(view, "Shell failed: tests failed") {
+	if len(m.folds.targets) != 5 || !strings.Contains(view, "A meaningful progress update") || strings.Count(view, "tests failed") != 1 {
 		t.Fatal(view)
 	}
 	m.selectStream("root")

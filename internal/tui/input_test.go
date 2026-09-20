@@ -138,7 +138,7 @@ func TestLargeDraftScrollFreezeAndIncomingMessages(t *testing.T) {
 	offset := m.viewport.YOffset
 	want := strings.Repeat("draft line\n", 20) + "END"
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(want), Paste: true})
-	if m.input.Height() != 6 || m.viewport.YOffset != offset || !strings.Contains(m.input.View(), "END") {
+	if m.input.Height() <= 6 || m.viewport.YOffset != offset || !strings.Contains(m.input.View(), "END") {
 		t.Fatal("draft growth lost scroll or cursor")
 	}
 	m.Update(received{event: conversation.MessageEvent{Message: message.Message{From: "root", To: message.User, Kind: message.Reply, Content: "incoming"}}})
@@ -157,6 +157,33 @@ func TestLargeDraftScrollFreezeAndIncomingMessages(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if len(s.sent) != 1 || s.sent[0] != want {
 		t.Fatal("large draft truncated", s.sent)
+	}
+}
+
+func TestDraftGrowsToAvailableHeightAndShrinks(t *testing.T) {
+	m, s := setup(t)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 180})
+	for i := range 120 {
+		typeText(m, fmt.Sprintf("line %03d", i))
+		m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	}
+	typeText(m, "END")
+	want := m.input.Value()
+	if m.input.LineCount() != 121 || m.input.Height() != 121 {
+		t.Fatalf("draft stopped growing: %d lines, %d visible", m.input.LineCount(), m.input.Height())
+	}
+	for _, size := range []tea.WindowSizeMsg{{Width: 80, Height: 40}, {Width: 20, Height: 12}, {Width: 10, Height: 7}, {Width: 100, Height: 180}} {
+		m.Update(size)
+		if m.input.Value() != want || !strings.Contains(ansi.Strip(m.input.View()), "END") {
+			t.Fatalf("resize lost draft or cursor at %dx%d", size.Width, size.Height)
+		}
+		if rows := strings.Count(m.View(), "\n") + 1; rows > size.Height {
+			t.Fatalf("view uses %d rows at height %d", rows, size.Height)
+		}
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(s.sent) != 1 || s.sent[0] != want || m.input.Height() != 1 {
+		t.Fatal("send lost content or did not shrink the composer")
 	}
 }
 

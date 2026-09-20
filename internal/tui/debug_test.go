@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/content"
 	"github.com/stevemurr/strap/conversation"
@@ -93,6 +94,7 @@ func TestSpinnerAndTimerFollowActivityIncludingDelegatedWork(t *testing.T) {
 
 func TestToolErrorsCancellationAndTerminalText(t *testing.T) {
 	m, _ := setup(t)
+	m.resize(140, 60)
 	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "call", Name: "shell\x1b[2J", Arguments: []byte(`{"input":{}}`)}, StartedAt: time.Now()}
 	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	if strings.Contains(m.activityLine(), "\x1b[2J") {
@@ -102,14 +104,27 @@ func TestToolErrorsCancellationAndTerminalText(t *testing.T) {
 	activity.Err = errors.New("execution canceled")
 	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	last := m.entries[len(m.entries)-1]
-	if last.label != "Error" || last.body != "Shell failed: execution canceled" || strings.Contains(last.meta, "\x1b") {
+	if last.label != "Tool" || last.toolInfo == nil || last.toolInfo.failure != "execution canceled" || strings.Contains(last.meta, "\x1b") {
 		t.Fatal(last)
+	}
+	if view := ansi.Strip(m.viewport.View()); strings.Count(view, "execution canceled") != 1 {
+		t.Fatalf("tool failure must appear exactly once: %s", view)
 	}
 	activity.FinishedAt = time.Time{}
 	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
 	m.observe(conversation.AgentExited{Agent: "worker", Err: context.Canceled})
 	if m.busy() || len(m.activeTools) != 0 {
 		t.Fatal("exited agent kept tool active")
+	}
+}
+
+func TestToolErrorWithoutRetainedStartRemainsVisible(t *testing.T) {
+	m, _ := setup(t)
+	m.resize(140, 60)
+	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "missing-start", Name: "shell"}, FinishedAt: time.Now(), Err: errors.New("execution failed")}
+	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
+	if view := ansi.Strip(m.viewport.View()); strings.Count(view, "execution failed") != 1 {
+		t.Fatalf("missing tool row hid or duplicated the failure: %s", view)
 	}
 }
 

@@ -143,6 +143,9 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 	}
 	add(style.Render(mark) + " " + agentIcon(e.tool.agent) + " " + verb + " " + routeStyle.Render(d.preview))
 	resultRows := e.toolResultRows(max(1, width-4))
+	if d.name == "report_work_progress" && !open && d.failure == "" && !d.finished.IsZero() {
+		resultRows = []string{"Progress recorded · report below"}
+	}
 	if open {
 		if d.name != "shell" && d.arguments != "" && d.arguments != "{}" {
 			add(dimStyle.Render("  Arguments\n" + indentActivity(d.arguments, "  │ ")))
@@ -213,7 +216,11 @@ func (m *model) toggleFold(key foldKey) {
 	value := m.folds.allExpanded
 	for i := range m.entries {
 		if m.entries[i].serial == key.serial {
-			value = m.toolExpanded(&m.entries[i])
+			if m.entries[i].reportDetail != nil {
+				value = m.reportExpanded(&m.entries[i])
+			} else {
+				value = m.toolExpanded(&m.entries[i])
+			}
 			break
 		}
 	}

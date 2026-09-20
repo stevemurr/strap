@@ -47,7 +47,7 @@ func TestProgressMarkdownInConversationAndEval(t *testing.T) {
 				e.Update(eval.Progress{Task: task, Event: conversation.WorkEvent{Event: report}})
 				for host, view := range map[string]string{"conversation": m.View(), "eval": e.View()} {
 					plain := ansi.Strip(view)
-					for _, want := range []string{"report-tags", "worker", "Objective: Group equivalent tags.", "Activity: Writing the implementation.", "• Sort the bytes", "• Group matching keys", "Keep output deterministic.", "Next:", "go vet ./...", "inferred · finding-tags:", "▎ Approach", "return groups", "Limitation: Design only; not verified."} {
+					for _, want := range []string{"worker", "Report details", "Writing the implementation.", "• Sort the bytes", "• Group matching keys", "Keep output deterministic.", "Next:", "go vet ./...", "inferred:", "▎ Approach", "return groups", "Limitation:", "Design only; not verified."} {
 						if !strings.Contains(plain, want) {
 							t.Fatalf("%s missing %q:\n%s", host, want, plain)
 						}
@@ -94,10 +94,30 @@ func TestResearchDeliveryRendersMarkdown(t *testing.T) {
 		}}},
 	}})
 	view := ansi.Strip(m.viewport.View())
-	for _, want := range []string{"Research delivered · brief", "▎ Findings", "The behavior is documented.", "Recommendation: Use the supported API.", "• Check compatibility", "• Confirm performance"} {
+	for _, want := range []string{"Research delivered · brief", "▎ Findings", "The behavior is documented.", "Recommendation:", "Use the supported API.", "• Check compatibility", "• Confirm performance"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestProgressSingleLineMarkdownBlocks(t *testing.T) {
+	withTerminalTheme(t, false, termenv.TrueColor)
+	for _, tc := range []struct{ name, input, want string }{
+		{"heading", "## Verification", "▎ Verification"},
+		{"list", "- Check keyboard navigation", "• Check keyboard navigation"},
+		{"task", "- [x] Keyboard checks pass", "[✓] Keyboard checks pass"},
+		{"quote", "> Needs independent review", "│ Needs independent review"},
+		{"code", "    return groups", "┌─ code"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := setup(t)
+			e := &entry{label: "Progress", body: progressBody(work.Event{Change: &work.Change{ProgressReports: []work.WorkProgressReport{{Position: &work.WorkPosition{Note: tc.input}}}}})}
+			got := ansi.Strip(m.renderBodyWidth(e, 80))
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("missing rendered block %q:\n%s", tc.want, got)
+			}
+		})
 	}
 }
 
@@ -108,7 +128,7 @@ func TestResearchProgressShowsAttributedFindingsAndDistinctDelivery(t *testing.T
 	e := work.Event{Kind: work.WorkProgressReported, Work: work.Work{ID: "w", Kind: work.Research, State: work.Active, Owner: "root", Assignee: "worker"}, Change: &work.Change{ProgressReports: []work.WorkProgressReport{{ID: "r", WorkID: "w", Position: &work.WorkPosition{Objective: "inspect", Uncertainty: "unverified"}, Findings: []work.ProgressFinding{{ID: "f", Basis: work.Inferred, Claim: "may fail", Limitation: "not tested"}}}}}}
 	m.observe(conversation.WorkEvent{Event: e})
 	all := ansi.Strip(m.viewport.View())
-	if !strings.Contains(all, "inferred · f: may fail") || !strings.Contains(all, "Limitation: not tested") || !strings.Contains(all, "Uncertainty: unverified") {
+	if !strings.Contains(all, "inferred:") || !strings.Contains(all, "may fail") || !strings.Contains(all, "Limitation:") || !strings.Contains(all, "not tested") || !strings.Contains(all, "Uncertainty:") || !strings.Contains(all, "unverified") {
 		t.Fatal(all)
 	}
 	m.selectStream("root")

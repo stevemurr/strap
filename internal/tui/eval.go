@@ -95,20 +95,22 @@ func (p *evalProblem) runningTools() int {
 }
 
 type evalModel struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	opts          eval.Options
-	problems      []*evalProblem
-	byID          map[string]*evalProblem
-	selected      int
-	width, height int
-	listOffset    int
-	spinner       spinner.Model
-	started       time.Time
-	now           func() time.Time
-	stopping      bool
-	followActive  bool
-	lastLog       string
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	opts                   eval.Options
+	problems               []*evalProblem
+	byID                   map[string]*evalProblem
+	selected               int
+	width, height          int
+	listOffset             int
+	queueOpen, metricsOpen bool
+	queueCursor            int
+	spinner                spinner.Model
+	started                time.Time
+	now                    func() time.Time
+	stopping               bool
+	followActive           bool
+	lastLog                string
 }
 
 func newEvalModel(ctx context.Context, cancel context.CancelFunc, opts eval.Options) *evalModel {
@@ -251,6 +253,7 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
 	case eval.Progress:
 		m.observe(v)
+		m.resizeActivities()
 	case evalDone:
 		return m, tea.Quit
 	case evalLog:
@@ -276,6 +279,46 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		p := m.current()
 		if p == nil {
+			return m, nil
+		}
+		if key == "q" {
+			m.toggleQueue()
+			return m, nil
+		}
+		if key == "m" {
+			m.metricsOpen = !m.metricsOpen
+			m.resizeActivities()
+			return m, nil
+		}
+		if m.queueOpen {
+			switch key {
+			case "esc":
+				m.toggleQueue()
+			case "up", "k":
+				m.queueCursor = max(0, m.queueCursor-1)
+			case "down", "j":
+				m.queueCursor = min(len(m.problems)-1, m.queueCursor+1)
+			case "left":
+				m.queueCursor = max(0, m.queueCursor-1)
+			case "right":
+				m.queueCursor = min(len(m.problems)-1, m.queueCursor+1)
+			case "home":
+				m.queueCursor = 0
+			case "end":
+				m.queueCursor = len(m.problems) - 1
+			case "pgup":
+				m.queueCursor = max(0, m.queueCursor-max(1, m.queueRows()*m.queueColumns()))
+			case "pgdown":
+				m.queueCursor = min(len(m.problems)-1, m.queueCursor+max(1, m.queueRows()*m.queueColumns()))
+			case "enter":
+				m.selected = m.queueCursor
+				m.followActive = false
+				m.toggleQueue()
+			case "f":
+				m.followActive = true
+				m.followProblem()
+				m.toggleQueue()
+			}
 			return m, nil
 		}
 		a := p.activity
@@ -355,40 +398,52 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p == nil {
 			return m, nil
 		}
-		left := m.listWidth()
-		if p.activity != nil {
-			x := 1
-			if left > 0 {
-				x += left + 3
-			}
-			if p.activity.badgeMouse(v, x, 15, m.width, 15+p.activity.viewport.Height) {
+		if v.Y >= m.queueTop() && v.Y < m.queueTop()+m.queueHeight() {
+			if tea.MouseEvent(v).IsWheel() {
+				if !m.queueOpen {
+					m.toggleQueue()
+				}
+				delta := 1
+				if v.Button == tea.MouseButtonWheelUp {
+					delta = -1
+				}
+				m.queueCursor = max(0, min(len(m.problems)-1, m.queueCursor+delta))
 				return m, nil
 			}
-			if p.activity.planMouse(v, x, 15+p.activity.viewport.Height, m.detailWidth(), m.evalPlanBudget()) {
+			if v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft {
+				if v.Y == m.queueTop()+1 {
+					m.toggleQueue()
+				} else if m.queueOpen && v.Y >= m.queueTop()+2 && v.Y < m.queueTop()+2+m.queueRows() {
+					start, end := m.queueWindow()
+					cell := max(1, (m.detailWidth()-2*(m.queueColumns()-1))/m.queueColumns())
+					col := max(0, min(m.queueColumns()-1, (v.X-1)/(cell+2)))
+					index := start + (v.Y-m.queueTop()-2)*m.queueColumns() + col
+					if index < end {
+						m.selected = index
+						m.followActive = false
+						m.toggleQueue()
+					}
+				}
+			}
+			return m, nil
+		}
+		if a := p.activity; a != nil {
+			top := m.activityTop()
+			if a.badgeMouse(v, 1, top, m.width, top+a.viewport.Height) {
+				return m, nil
+			}
+			if a.planMouse(v, 1, top+a.viewport.Height, m.detailWidth(), m.evalPlanBudget()) {
 				m.resizeActivity(p)
 				return m, nil
 			}
-		}
-		if v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft && left > 0 && v.X < left && v.Y >= 7 {
-			index := m.listOffset + (v.Y-7)/2
-			if index < len(m.problems) && v.Y < m.height-2 {
+			if v.Y < top || v.Y >= top+a.viewport.Height {
+				return m, nil
+			}
+			if tea.MouseEvent(v).IsWheel() {
 				m.followActive = false
-				m.selected = index
-			}
-		} else if p.activity != nil && tea.MouseEvent(v).IsWheel() {
-			m.followActive = false
-			p.activity.viewport, _ = p.activity.viewport.Update(v)
-		} else if p.activity != nil && v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft {
-			// Header has six rows, and the selected problem has nine rows above
-			// its activity viewport. Fold targets use viewport content coordinates.
-			const top = 15
-			x := v.X - 1
-			if left > 0 {
-				x -= left + 3
-			}
-			a := p.activity
-			y := v.Y - top + a.viewport.YOffset
-			if v.Y >= top && v.Y < top+a.viewport.Height {
+				a.viewport, _ = a.viewport.Update(v)
+			} else if v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft {
+				x, y := v.X-1, v.Y-top+a.viewport.YOffset
 				for _, target := range append(append([]foldTarget{}, a.folds.targets...), a.folds.hints...) {
 					if y == target.row && x >= target.column && x < target.column+2 {
 						m.followActive = false
@@ -402,27 +457,42 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *evalModel) listWidth() int {
-	if m.width < 90 {
+// All hit targets and viewport sizing use the same measurements as View.
+func (m *evalModel) detailWidth() int { return max(1, m.width-2) }
+func (m *evalModel) activityTop() int { return 9 }
+func (m *evalModel) queueColumns() int {
+	if m.width >= 100 {
+		return 2
+	}
+	return 1
+}
+func (m *evalModel) queueRows() int {
+	if !m.queueOpen {
 		return 0
 	}
-	return 32
+	return max(0, min(3, (m.height-18)/2, (len(m.problems)+m.queueColumns()-1)/m.queueColumns()))
 }
-func (m *evalModel) detailWidth() int {
-	width := m.width - 2
-	if left := m.listWidth(); left > 0 {
-		width -= left + 3
+func (m *evalModel) queueHeight() int {
+	if m.queueOpen {
+		return 3 + m.queueRows()
 	}
-	return max(1, width)
+	return 2
 }
-func (m *evalModel) evalPlanBudget() int { return max(0, min(12, m.height-24)) }
+func (m *evalModel) footerHeight() int {
+	if m.metricsOpen {
+		return 5
+	}
+	return 2
+}
+func (m *evalModel) queueTop() int       { return max(0, m.height-m.footerHeight()-m.queueHeight()) }
+func (m *evalModel) evalPlanBudget() int { return max(0, min(14, m.queueTop()-m.activityTop()-4)) }
 func (m *evalModel) resizeActivity(p *evalProblem) {
 	if p.activity == nil {
 		return
 	}
 	a := p.activity
 	width := m.detailWidth()
-	height := max(1, m.height-18-len(a.planLines(width, m.evalPlanBudget())))
+	height := max(1, m.queueTop()-m.activityTop()-len(a.planLines(width, m.evalPlanBudget())))
 	if a.viewport.Width == width && a.viewport.Height == height {
 		return
 	}
@@ -434,13 +504,129 @@ func (m *evalModel) resizeActivity(p *evalProblem) {
 	a.renderTranscript(false)
 	a.restoreStreamPosition(position)
 }
-
+func (m *evalModel) resizeActivities() {
+	for _, p := range m.problems {
+		m.resizeActivity(p)
+	}
+}
+func (m *evalModel) toggleQueue() {
+	m.queueOpen = !m.queueOpen
+	if m.queueOpen {
+		m.queueCursor = m.selected
+		if a := m.current(); a != nil && a.activity != nil {
+			a.activity.plans.focused = false
+			a.activity.folds.focused = false
+		}
+	}
+	m.resizeActivities()
+}
+func (m *evalModel) queueWindow() (int, int) {
+	capacity := m.queueRows() * m.queueColumns()
+	if capacity == 0 {
+		return 0, 0
+	}
+	m.queueCursor = max(0, min(m.queueCursor, len(m.problems)-1))
+	if m.queueCursor < m.listOffset {
+		m.listOffset = m.queueCursor
+	}
+	if m.queueCursor >= m.listOffset+capacity {
+		m.listOffset = m.queueCursor - capacity + 1
+	}
+	m.listOffset = max(0, min(m.listOffset, max(0, len(m.problems)-capacity)))
+	return m.listOffset, min(len(m.problems), m.listOffset+capacity)
+}
+func (m *evalModel) queueLines() []string {
+	queued := 0
+	var next []string
+	for _, p := range m.problems {
+		if p.phase == eval.Queued {
+			queued++
+			if len(next) < 2 {
+				next = append(next, inlineText(strings.TrimPrefix(p.task.ID, p.task.Tier+"-")))
+			}
+		}
+	}
+	arrow := "▸"
+	if m.queueOpen {
+		arrow = "▾"
+	}
+	line := titleStyle.Render(fmt.Sprintf("%s Queue · %d", arrow, queued))
+	if len(next) > 0 {
+		line += dimStyle.Render("   Up next  " + strings.Join(next, " · "))
+	} else {
+		line += dimStyle.Render("   No upcoming tests")
+	}
+	rows := []string{dimStyle.Render(strings.Repeat("─", m.detailWidth())), line}
+	if !m.queueOpen {
+		return rows
+	}
+	start, end := m.queueWindow()
+	cols := m.queueColumns()
+	cell := max(1, (m.detailWidth()-2*(cols-1))/cols)
+	for r := 0; r < m.queueRows(); r++ {
+		var cells []string
+		for c := 0; c < cols; c++ {
+			i := start + r*cols + c
+			label := ""
+			if i < end {
+				p := m.problems[i]
+				mark := "○"
+				if p.active() {
+					mark = "●"
+				}
+				if p.result != nil {
+					if p.result.Passed {
+						mark = "✓"
+					} else {
+						mark = "×"
+					}
+				}
+				label = mark + " " + inlineText(p.task.ID) + " · " + string(p.phase)
+				if i == m.queueCursor {
+					label = accentStyle.Render("› " + label)
+				} else {
+					label = dimStyle.Render("  " + label)
+				}
+			}
+			cells = append(cells, fitStreamCell(label, cell))
+		}
+		rows = append(rows, strings.Join(cells, "  "))
+	}
+	rows = append(rows, dimStyle.Render(fmt.Sprintf("All tests %d–%d / %d · ↑↓ browse · Enter view · Esc close", min(start+1, end), end, len(m.problems))))
+	return rows
+}
+func (m *evalModel) metrics(p *evalProblem) []string {
+	contextLabel := "context tokens unavailable"
+	if p.activity != nil {
+		id := p.activity.streamUI.selected
+		if id == "" {
+			id = p.root
+		}
+		if c := p.activity.ensureStream(id).context; c != nil {
+			contextLabel = c.label()
+		}
+		if id != "" {
+			contextLabel += " · " + string(id)
+		}
+	}
+	tools := fmt.Sprintf("Tools: %d · %d running · %d errors · %d model calls", len(p.tools), p.runningTools(), len(p.toolErrors), len(p.outputs))
+	usage := "Tokens in/out: unavailable"
+	if p.usageCalls > 0 {
+		usage = fmt.Sprintf("Tokens in/out: %s / %s", tokenDigits(p.input), tokenDigits(p.output))
+		if p.missingUsage {
+			usage += " (partial)"
+		}
+	}
+	if p.reused {
+		tools = "Live metrics unavailable · result reused"
+	}
+	return []string{contextLabel, tools, usage}
+}
 func (m *evalModel) View() string {
 	if m.width < 2 {
 		return " "
 	}
-	width := max(1, m.width-2)
-	clip := func(s string) string { return ansi.Truncate(s, width, "…") }
+	width := m.detailWidth()
 	done, passed, failed, active, reused := 0, 0, 0, 0, 0
 	for _, p := range m.problems {
 		if p.phase == eval.Finished {
@@ -458,123 +644,96 @@ func (m *evalModel) View() string {
 			reused++
 		}
 	}
-	state := "RUNNING"
+	state := "running"
 	if m.stopping {
-		state = "STOPPING"
+		state = "stopping"
 	}
-	header := titleStyle.Render("strap / eval") + fmt.Sprintf("  %s · %d workers · %s", safeText(m.opts.Config.Model.Model), max(1, m.opts.Parallel), state)
-	count := fmt.Sprintf("%d / %d problems complete · elapsed %s", done, len(m.problems), m.now().Sub(m.started).Round(time.Second))
-	barWidth := max(1, min(60, width))
-	filled := 0
+	header := titleStyle.Render("strap / eval") + dimStyle.Render(fmt.Sprintf("   %s · %d workers · %s · %s", inlineText(m.opts.Config.Model.Model), max(1, m.opts.Parallel), state, m.now().Sub(m.started).Round(time.Second)))
+	barWidth := max(1, min(40, width))
+	filled, passWidth := 0, 0
 	if len(m.problems) > 0 {
 		filled = barWidth * done / len(m.problems)
+		passWidth = barWidth * passed / len(m.problems)
 	}
-	passedWidth := 0
-	if len(m.problems) > 0 {
-		passedWidth = barWidth * passed / len(m.problems)
-	}
-	bar := successStyle.Render(strings.Repeat("━", passedWidth)) + errorStyle.Render(strings.Repeat("━", filled-passedWidth)) + dimStyle.Render(strings.Repeat("─", barWidth-filled))
-	counts := successStyle.Render(fmt.Sprintf("✓ %d passed", passed)) + " · " + errorStyle.Render(fmt.Sprintf("× %d failed", failed)) + fmt.Sprintf(" · %d active · %d queued", active, len(m.problems)-done-active)
+	bar := successStyle.Render(strings.Repeat("━", passWidth)) + errorStyle.Render(strings.Repeat("━", filled-passWidth)) + dimStyle.Render(strings.Repeat("─", barWidth-filled))
+	counts := fmt.Sprintf("%d / %d complete   ", done, len(m.problems)) + successStyle.Render(fmt.Sprintf("✓ %d passed", passed)) + dimStyle.Render(fmt.Sprintf(" · %d failed · %d active · %d queued", failed, active, len(m.problems)-done-active))
 	if reused > 0 {
-		counts += fmt.Sprintf(" · %d reused", reused)
+		counts += dimStyle.Render(fmt.Sprintf(" · %d reused", reused))
 	}
-	var tiers []string
-	for _, tier := range eval.Tiers() {
-		total, complete := 0, 0
-		for _, p := range m.problems {
-			if p.task.Tier == tier {
-				total++
-				if p.phase == eval.Finished {
-					complete++
-				}
+	lines := []string{header, bar, counts, ""}
+	p := m.current()
+	if p == nil {
+		lines = append(lines, "Loading task ladder…")
+	} else {
+		lines = append(lines, titleStyle.Render(inlineText(p.task.Title)))
+		status := m.problemStatus(p)
+		if p.active() {
+			status = "● " + status + " / " + p.task.SessionTimeout().String()
+		}
+		lines = append(lines, dimStyle.Render(inlineText(p.task.ID)+" · "+status), dimStyle.Render(strings.Repeat("─", width)))
+		stream, follow := "All activity", "following latest"
+		if p.activity != nil {
+			if p.activity.streamUI.selected != "" {
+				stream = "Activity / " + string(p.activity.streamUI.selected)
+			}
+			if !p.activity.viewport.AtBottom() {
+				follow = "scrolled · Ctrl+End to follow"
 			}
 		}
-		if total > 0 {
-			tiers = append(tiers, fmt.Sprintf("%s %d/%d", tier, complete, total))
+		if p.phase == eval.Finished {
+			follow = "recorded activity"
+		} else if !p.last.IsZero() && m.now().Sub(p.last) > 30*time.Second {
+			follow = "last event " + m.now().Sub(p.last).Round(time.Second).String() + " ago"
+		}
+		lines = append(lines, dimStyle.Render(stream+" · "+follow), "")
+		if p.activity != nil {
+			lines = append(lines, strings.Split(p.activity.viewport.View(), "\n")...)
+			lines = append(lines, planText(p.activity.planLines(width, m.evalPlanBudget()))...)
+		} else {
+			lines = append(lines, dimStyle.Render("Waiting for an available worker."))
 		}
 	}
-	lines := []string{header, "", count, bar, counts, dimStyle.Render(strings.Join(tiers, " · "))}
-	bodyHeight := max(1, m.height-8)
-	detail := m.detailLines(bodyHeight)
-	left := m.listWidth()
-	if left > 0 {
-		list := m.problemLines(bodyHeight)
-		for i := 0; i < bodyHeight; i++ {
-			lines = append(lines, fitStreamCell(list[i], left)+dimStyle.Render(" │ ")+detail[i])
-		}
-	} else {
-		lines = append(lines, detail...)
+	for len(lines) < m.queueTop() {
+		lines = append(lines, "")
 	}
-	footer := "↑↓ problems · f follow · ^T output · Tab agents · PgUp/Dn scroll · ^C stop"
-	if m.width < 80 {
-		footer = "↑↓ problems · ^T output · PgUp/Dn scroll · ^C stop"
-	}
-	if m.width < 55 {
-		footer = "↑↓ select · ^T output · ^C stop"
-	}
-	if p := m.current(); p != nil && p.activity != nil && p.activity.currentPlan() != nil {
-		footer = "↑↓ problems · ^P plan · F8 steps · ^T output · ^C stop"
+	lines = lines[:min(len(lines), m.queueTop())]
+	lines = append(lines, m.queueLines()...)
+	footer := "Q queue · ↑↓ problems · f follow · M metrics · ^P plan · F8 steps · F7 details · ^C stop"
+	if m.queueOpen {
+		footer = "Q / Esc close queue · ↑↓ browse · Enter view · f follow · ^C stop"
+	} else if p != nil && p.activity != nil {
 		if p.activity.plans.focused {
-			footer = "↑↓ steps · Enter details · [/] plans · Esc problems · ^C stop"
+			footer = "↑↓ steps · Enter details · PgUp/Dn more · Esc back · ^C stop"
+		} else if p.activity.folds.focused {
+			footer = "↑↓ activity · Enter details · Esc back · ^C stop"
 		}
 	}
-	if p := m.current(); p != nil && p.activity != nil && p.activity.folds.focused {
-		footer = "↑/↓ activity · Enter expand · Esc problems · PgUp/Dn scroll · Ctrl+C stop run"
+	statusLine := "READ ONLY"
+	if p != nil {
+		metrics := m.metrics(p)
+		statusLine += " · " + metrics[0] + fmt.Sprintf(" · %d tools · %d calls", len(p.tools), len(p.outputs))
+		if len(p.toolErrors) > 0 {
+			statusLine += fmt.Sprintf(" · %d tool errors", len(p.toolErrors))
+		}
+		if m.metricsOpen {
+			lines = append(lines, dimStyle.Render(metrics[1]), dimStyle.Render(metrics[2]), dimStyle.Render("Results → "+safeText(m.opts.Output)))
+		}
 	}
-	statusLine := "READ ONLY · results → " + safeText(m.opts.Output)
-	if m.lastLog != "" {
-		statusLine = "READ ONLY · " + inlineText(m.lastLog)
+	if p == nil && m.metricsOpen {
+		lines = append(lines, "", "", "")
 	}
-	lines = append(lines, dimStyle.Render(footer), dimStyle.Render(statusLine))
+	lines = append(lines, dimStyle.Render(statusLine), dimStyle.Render(footer))
 	if len(lines) > m.height {
 		lines = lines[:m.height]
 	}
 	for i := range lines {
-		lines[i] = " " + clip(lines[i])
+		lines[i] = " " + ansi.Truncate(lines[i], width, "…")
 	}
 	view := strings.Join(lines, "\n")
-	if p := m.current(); p != nil && p.activity != nil {
+	if p != nil && p.activity != nil {
 		return p.activity.overlayBadgePeek(view, m.width, m.height)
 	}
 	return view
-}
-
-func (m *evalModel) problemLines(height int) []string {
-	rows := make([]string, height)
-	rows[0] = titleStyle.Render("Problems") + dimStyle.Render("  easy → medium → hard")
-	capacity := max(1, (height-1)/2)
-	if m.selected < m.listOffset {
-		m.listOffset = m.selected
-	}
-	if m.selected >= m.listOffset+capacity {
-		m.listOffset = m.selected - capacity + 1
-	}
-	for i := m.listOffset; i < len(m.problems) && i < m.listOffset+capacity; i++ {
-		p := m.problems[i]
-		marker := "·"
-		if p.active() {
-			marker = m.spinner.View()
-		}
-		if p.result != nil {
-			if p.result.Passed {
-				marker = successStyle.Render("✓")
-			} else {
-				marker = errorStyle.Render("×")
-			}
-		}
-		label := marker + " " + safeText(strings.TrimPrefix(p.task.ID, p.task.Tier+"-"))
-		if i == m.selected {
-			label = titleStyle.Render("› " + strings.TrimSpace(label))
-		}
-		r := (i-m.listOffset)*2 + 1
-		if r < height {
-			rows[r] = label
-		}
-		if r+1 < height {
-			rows[r+1] = dimStyle.Render("  " + p.task.Tier + " · " + m.problemStatus(p))
-		}
-	}
-	return rows
 }
 
 func (m *evalModel) problemStatus(p *evalProblem) string {
@@ -591,80 +750,6 @@ func (m *evalModel) problemStatus(p *evalProblem) string {
 	return p.status + " · " + duration.Round(time.Second).String()
 }
 
-func (m *evalModel) detailLines(height int) []string {
-	rows := []string{}
-	p := m.current()
-	if p == nil {
-		rows = append(rows, "Loading task ladder…")
-	} else {
-		rows = append(rows, titleStyle.Render(safeText(p.task.Title)), dimStyle.Render(safeText(p.task.ID)))
-		status := m.problemStatus(p)
-		if p.active() {
-			status = m.spinner.View() + " " + status + " / " + p.task.SessionTimeout().String() + " budget"
-		}
-		rows = append(rows, status)
-		contextLabel := "Context: unavailable"
-		stream := "all agents"
-		if p.activity != nil {
-			id := p.activity.streamUI.selected
-			if id != "" {
-				stream = string(id)
-			}
-			// Context is a measurement for one agent, never a sum of call usage.
-			if id == "" {
-				id = p.root
-			}
-			if c := p.activity.ensureStream(id).context; c != nil {
-				contextLabel = "Context: " + c.label()
-				if !c.failed && !c.pending {
-					contextLabel += " (last measured)"
-				}
-			}
-			if id != "" {
-				contextLabel += " · " + string(id)
-			}
-		}
-		tools := fmt.Sprintf("Tools: %d · %d running · %d errors · %d model calls", len(p.tools), p.runningTools(), len(p.toolErrors), len(p.outputs))
-		if p.reused {
-			tools = "Live metrics unavailable · result reused"
-		}
-		rows = append(rows, contextLabel, tools)
-		usage := "Tokens in/out: unavailable"
-		if p.usageCalls > 0 {
-			usage = fmt.Sprintf("Tokens in/out: %s / %s", tokenDigits(p.input), tokenDigits(p.output))
-			if p.missingUsage {
-				usage += " (partial)"
-			}
-		}
-		rows = append(rows, dimStyle.Render(usage), "")
-		follow := "following latest"
-		if p.activity != nil && !p.activity.viewport.AtBottom() {
-			follow = "scrolled · Ctrl+End to follow"
-		}
-		if p.phase == eval.Finished {
-			follow = "recorded activity"
-		}
-		if !p.last.IsZero() && p.active() && m.now().Sub(p.last) > 30*time.Second {
-			follow = "last event " + m.now().Sub(p.last).Round(time.Second).String() + " ago"
-		}
-		rows = append(rows, "Activity / "+safeText(stream)+" · "+follow, "")
-		if p.activity != nil {
-			rows = append(rows, strings.Split(p.activity.viewport.View(), "\n")...)
-			rows = append(rows, planText(p.activity.planLines(m.detailWidth(), m.evalPlanBudget()))...)
-		} else {
-			rows = append(rows, dimStyle.Render("Waiting for an available worker."))
-		}
-	}
-	for len(rows) < height {
-		rows = append(rows, "")
-	}
-	rows = rows[:height]
-	for i := range rows {
-		rows[i] = ansi.Truncate(rows[i], m.detailWidth(), "…")
-	}
-	return rows
-}
-
 // Keep a bounded live tail for every problem. Full history remains in trace.jsonl.
 func trimEvalActivity(a *model) {
 	// Bound each stream fragment as well as the number and combined size of
@@ -679,6 +764,13 @@ func trimEvalActivity(a *model) {
 		if len(e.reasoning) > 16384 {
 			e.reasoning = evalDisplayText(e.reasoning, 16384)
 			e.renderWidth = 0
+		}
+		if e.reportDetail != nil {
+			if len(e.reportDetail.body) > 32768 {
+				e.reportDetail.body = evalDisplayText(e.reportDetail.body, 32768)
+				e.reportDetail.renderWidth = 0
+			}
+			bytes += len(e.reportDetail.body)
 		}
 		bytes += len(e.body) + len(e.reasoning)
 		if e.toolInfo != nil {

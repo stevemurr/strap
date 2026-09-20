@@ -106,7 +106,7 @@ func (m *model) composerHint() string {
 		return "↑/↓ select · Tab complete · Enter confirm · Esc dismiss"
 	}
 	if m.input.Focused() && m.input.Value() != "" {
-		return "/ commands · Enter send · Alt+Enter newline"
+		return "/ commands · Enter send · Shift+Enter newline"
 	}
 	if m.currentPlan() != nil {
 		return "Ctrl+P plan · F8 steps"
