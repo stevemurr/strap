@@ -151,6 +151,14 @@ func (r *Runner) containerTask(ctx context.Context, j *job, task eval.Task, atte
 		j.observe(p)
 		return nil
 	}); err != nil {
+		// Startup and session failures can still leave a useful result. Keep
+		// its timings and execution error instead of discarding it on exit 1.
+		if saved, readErr := readContainerResult(results, task.ID); readErr == nil {
+			result = saved
+			if saved.Error != "" {
+				err = fmt.Errorf("%w\nagent result: %s", err, saved.Error)
+			}
+		}
 		return result, err
 	}
 	result, err = readContainerResult(results, task.ID)
@@ -221,7 +229,7 @@ func (r *Runner) executeContainer(ctx context.Context, name string, args []strin
 	if observe == nil {
 		cmd.Stdout = log
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s container (see %s.log): %w", phase, phase, err)
+			return containerFailure(dir, phase, err)
 		}
 		return nil
 	}
@@ -253,7 +261,34 @@ func (r *Runner) executeContainer(ctx context.Context, name string, args []strin
 	}
 	runErr := cmd.Wait()
 	if err := errors.Join(runErr, scanErr, progressErr); err != nil {
-		return fmt.Errorf("%s container (see %s.log and progress.jsonl): %w", phase, phase, err)
+		return containerFailure(dir, phase, err)
 	}
 	return nil
+}
+
+// Keep the original exit error for errors.Is/As and surface a bounded stderr
+// tail in the page. The full log remains on disk; stdout may contain the
+// machine-readable progress protocol and is not substituted for stderr.
+func containerFailure(dir, phase string, cause error) error {
+	const limit = 4096
+	path := filepath.Join(dir, phase+".log")
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("%s container (see %s.log): %w", phase, phase, cause)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("%s container (see %s.log): %w", phase, phase, cause)
+	}
+	start := info.Size() - limit
+	if start < 0 {
+		start = 0
+	}
+	b, _ := io.ReadAll(io.NewSectionReader(f, start, limit))
+	tail := strings.TrimSpace(strings.ToValidUTF8(string(b), "�"))
+	if tail == "" {
+		return fmt.Errorf("%s container (see %s.log and progress.jsonl): %w", phase, phase, cause)
+	}
+	return fmt.Errorf("%s container: %w\n%s.log (last %d bytes):\n%s", phase, cause, phase, len(b), tail)
 }

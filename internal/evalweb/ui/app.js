@@ -600,7 +600,7 @@ async function renderJob(main, id) {
     mount(table,h('thead',{},h('tr',{},['Problem','Phase','Outcome','Time','Calls','Tools','Tool errors','Agents','Tokens in','Tokens out',''].map(l=>h('th',{},l)))),
       h('tbody',{},snap.tasks.map(t=>h('tr',{class:'row'+(selected===t.id?' selected':''),tabindex:0,'aria-selected':selected===t.id,onclick:()=>selectTask(t),onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectTask(t);}}},
         h('td',{},h('b',{},t.title||t.id),h('div',{class:'muted'},t.id)),h('td',{},h('span',{class:`phase ${t.phase}`},t.phase)),
-        h('td',{},t.outcome?outcomeTag(t):'',t.error?h('div',{class:'error'},clipText(t.error,120)):null),
+        h('td',{},t.outcome?outcomeTag(t):'',t.error?h('details',{class:'error'},h('summary',{},clipText(t.error.split('\n')[0],120)),h('pre',{},t.error)):null),
         h('td',{class:'num'},elapsed(t)),...['model_calls','tool_calls','tool_errors','agents','input_tokens','output_tokens'].map(k=>h('td',{class:'num'},num(t[k]))),
         h('td',{},t.results?h('a',{href:runHref(t.results),onclick:e=>e.stopPropagation()},'Results'):'')))));
   }

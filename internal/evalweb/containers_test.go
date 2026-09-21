@@ -137,9 +137,17 @@ func TestContainerHelperProcess(t *testing.T) {
 			fmt.Fprintln(os.Stdout, "not json")
 		}
 	}
+	if mode == "agent-result-fail" {
+		r.Outcome = eval.Errored
+		r.Error = "no model call completed: connection refused"
+	}
 	b, _ := json.Marshal(r)
 	_ = os.WriteFile(filepath.Join(results, "results.jsonl"), append(b, '\n'), 0600)
 	_ = os.WriteFile(filepath.Join(results, id, "result.json"), b, 0600)
+	if mode == "agent-result-fail" {
+		fmt.Fprintln(os.Stderr, "run stopped; artifacts retained")
+		os.Exit(1)
+	}
 	os.Exit(0)
 }
 
@@ -299,5 +307,37 @@ func TestContainerBuildFailureStopsPreparation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "build.log")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestContainerFailureSurfacesLogAndPreservesResult(t *testing.T) {
+	for _, mode := range []string{"agent-fail", "agent-result-fail"} {
+		t.Run(mode, func(t *testing.T) {
+			r, j, task, attempt, state, inputs := testContainerTask(t, mode)
+			result, err := r.containerTask(context.Background(), j, task, attempt, inputs)
+			if err == nil || !strings.Contains(err.Error(), "agent.log") {
+				t.Fatal("missing stderr diagnostic", err)
+			}
+			if mode == "agent-fail" && !strings.Contains(err.Error(), "agent failed") {
+				t.Fatal(err)
+			}
+			if mode == "agent-result-fail" && (result.TaskID != task.ID || result.Outcome != eval.Errored || !strings.Contains(err.Error(), "connection refused")) {
+				t.Fatal("saved result discarded", result, err)
+			}
+			if len(calls(t, state)) != 1 {
+				t.Fatal("failed agent unexpectedly graded")
+			}
+		})
+	}
+}
+
+func TestContainerFailureBoundsLogTail(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agent.log"), []byte(strings.Repeat("x", 20000)+"\nactual cause"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := containerFailure(dir, "agent", fmt.Errorf("exit status 1"))
+	if len(err.Error()) > 4300 || !strings.Contains(err.Error(), "actual cause") {
+		t.Fatal("log tail is missing or unbounded", len(err.Error()))
 	}
 }
