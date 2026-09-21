@@ -1,0 +1,760 @@
+[
+  {
+    "name": "shell",
+    "description": "Run a synchronous shell command in WORKSPACE_ROOT using /opt/homebrew/bin/bash. Use this tool to list directories, discover filenames, or create parent directories. Prefer commands using relative paths from this working directory. A cd affects this call only. Check output for discovery errors even if a pipeline exits zero. Returns combined stdout/stderr and exit status. Default timeout 30000 ms, maximum 300000 ms. Output is bounded, keeping both ends. No persistent shell or background jobs; descendants in the process group are stopped when the call ends. Runs with host permissions, without a sandbox.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "timeout_ms": {
+              "description": "Null: use the configured timeout",
+              "maximum": 300000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "command",
+            "timeout_ms"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "read_pdf",
+    "description": "Read an existing PDF file by rendering its pages as images for you to inspect. Use read_file for text and shell to list directories or discover filenames. Prefer workspace-relative paths and copy the observed filename exactly, including spaces. Accepts absolute paths; relative paths resolve from WORKSPACE_ROOT. Requires image input support. pages is a nullable list of 1-based page numbers in reading order, at most 6. When null, return the first 6 pages. Metadata reports total and omitted page counts; request remaining pages in later calls.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "pages": {
+              "description": "Null: read the default first pages",
+              "items": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 6,
+              "minItems": 1,
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "path": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "pages",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "read_file",
+    "description": "Read one existing UTF-8 text file. To list a directory or discover filenames, use shell. Prefer workspace-relative paths and copy observed filenames exactly, including spaces. Accepts absolute paths; relative paths resolve from WORKSPACE_ROOT. Returns numbered lines, starting at offset (1-based, default 1), up to limit (default 200, maximum 2000). Files are limited to 1048576 bytes and output to 65536 bytes. Symlinks resolve to their targets.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Null: use the default read limit",
+              "maximum": 2000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Null: start at the beginning",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "path": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "limit",
+            "offset",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "write_file",
+    "description": "Create or replace a UTF-8 text file. Prefer workspace-relative paths. Copy existing paths exactly; for a new file, use the requested name and verify its parent directory first. Accepts absolute paths; relative paths resolve from WORKSPACE_ROOT. Content is limited to 1048576 bytes. Content is literal text, including newlines; do not add Markdown fences or shell heredocs. Parent directories must exist; create a missing parent with shell before calling write_file. Symlinks resolve to their targets. Replacements are atomic and retain file permissions.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "path": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "content",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "edit_file",
+    "description": "Replace exactly one occurrence of old with new in an existing UTF-8 text file. Prefer workspace-relative paths and copy the observed file path exactly, including spaces. Accepts absolute paths; relative paths resolve from WORKSPACE_ROOT. Old must be nonempty and unique; include surrounding text if ambiguous. Symlinks resolve to their targets. The resulting file is limited to 1048576 bytes.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "new": {
+              "type": "string"
+            },
+            "old": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "path": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "new",
+            "old",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_status",
+    "description": "Inspect configured language servers, roots, running state and capabilities. Does not launch servers. Null path lists the session.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "description": "Null: list all configured servers",
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_symbols",
+    "description": "Find workspace declarations by name. Returns reusable refs and small source excerpts. Null path searches configured/discovered roots. A path filters where declarations are located, not their callers; use a symbol target for a known call site. Results reflect server build/index scope; use shell search for literal text and unsupported languages. Follow cursor with the same arguments. Search source symbol names, never location handles. A loc_ value is an opaque handle, not a symbol name. Pass an existing handle directly to lsp_inspect, lsp_navigate or lsp_references as ref; do not search for it with this tool.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "description": "Null: start a new query",
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "description": "Null: use the default of 50 items",
+              "maximum": 200,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "Null: search configured session roots",
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "query": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "cursor",
+            "limit",
+            "path",
+            "query"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_outline",
+    "description": "List declarations in one file with reusable refs. Depth defaults to 1 (top-level); maximum 8. Results include identifier ranges and full declaration ranges where the server supplies them.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "description": "Null: start a new query",
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "depth": {
+              "description": "Null: top-level declarations only",
+              "maximum": 8,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "limit": {
+              "description": "Null: use the default of 50 items",
+              "maximum": 200,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "path": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "cursor",
+            "depth",
+            "limit",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_diagnostics",
+    "description": "Read language errors/warnings with explicit freshness and coverage. A nonempty paths list requests checks of those files; null reads cached session publications, never a whole-project clean bill. Unknown/pending or empty cache does not mean no errors. Follow cursor with unchanged arguments.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "description": "Null: start a new query",
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "description": "Null: use the default of 50 items",
+              "maximum": 200,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "paths": {
+              "description": "Null: read cached session diagnostics only",
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "cursor",
+            "limit",
+            "paths"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_inspect",
+    "description": "Read hover types, documentation and source at the supplied location. To find where something is defined, call lsp_navigate with relation=definition directly; inspection does not follow a call to its definition. References expire when their file changes; rediscover stale references. For a symbol target, supply path, 1-based line, the unqualified symbol and nullable context; Strap calculates the column. Source defaults to included, bounded to 80 lines. An existing loc_ handle needs no discovery step: set input.target_kind to reference and input.ref to the unchanged handle.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "Use a ref returned by a semantic query.",
+              "properties": {
+                "include_source": {
+                  "description": "Null: include a bounded source excerpt",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "ref": {
+                  "description": "Copy a handle actually supplied by the user or a previous tool result. Never invent a handle. If none is available for this target, use target_kind=symbol or discover it first.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "target_kind": {
+                  "enum": [
+                    "reference"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "include_source",
+                "ref",
+                "target_kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Use an exact identifier on a known source line. Strap calculates its position; context disambiguates repeated identifiers.",
+              "properties": {
+                "context": {
+                  "description": "Verbatim single-line source fragment containing only the desired occurrence when the identifier repeats on the line, e.g. RateFor(\"vip\"); otherwise null Null: the identifier occurs only once on this line",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "include_source": {
+                  "description": "Null: include a bounded source excerpt",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "line": {
+                  "description": "1-based source line containing the identifier; no character columns are needed",
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "path": {
+                  "description": "Prefer a session-relative source path copied exactly from the user or observed results, including spaces. A package name does not imply a directory. Use shell to discover an unknown file path; never reconstruct an absolute workspace prefix.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "symbol": {
+                  "description": "Exact unqualified identifier from the source, e.g. RateFor, not pricing.RateFor or an entire declaration",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "target_kind": {
+                  "enum": [
+                    "symbol"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "context",
+                "include_source",
+                "line",
+                "path",
+                "symbol",
+                "target_kind"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_navigate",
+    "description": "Find where a called or referenced symbol is defined. Call directly with relation=definition; no preceding inspection is needed, including for local or shadowed variables. Also supports declaration, type_definition and implementation relations. Use a returned ref or target_kind=symbol with path, 1-based line, the unqualified identifier and nullable context. Strap calculates the column. Returns locations with source excerpts and new refs. Unsupported capabilities are errors, not empty results. To find a definition from an existing loc_ handle, call this tool directly with input.target_kind=reference, input.ref equal to the unchanged handle, and input.relation=definition. Supply limit and cursor as null for defaults. A handle is not a symbol name; do not search for it with lsp_symbols.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "Navigate from a returned ref.",
+              "properties": {
+                "cursor": {
+                  "description": "Null: start a new query",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "limit": {
+                  "description": "Null: use the default of 50 items",
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "ref": {
+                  "description": "Copy a handle actually supplied by the user or a previous tool result. Never invent a handle. If none is available for this target, use target_kind=symbol or discover it first.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "relation": {
+                  "enum": [
+                    "declaration",
+                    "definition",
+                    "implementation",
+                    "type_definition"
+                  ],
+                  "type": "string"
+                },
+                "target_kind": {
+                  "enum": [
+                    "reference"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cursor",
+                "limit",
+                "ref",
+                "relation",
+                "target_kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Navigate from an exact identifier on a source line; context disambiguates repeated identifiers.",
+              "properties": {
+                "context": {
+                  "description": "Verbatim single-line source fragment containing only the desired occurrence when the identifier repeats on the line, e.g. RateFor(\"vip\"); otherwise null Null: the identifier occurs only once on this line",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "cursor": {
+                  "description": "Null: start a new query",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "limit": {
+                  "description": "Null: use the default of 50 items",
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "line": {
+                  "description": "1-based source line containing the identifier; no character columns are needed",
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "path": {
+                  "description": "Prefer a session-relative source path copied exactly from the user or observed results, including spaces. A package name does not imply a directory. Use shell to discover an unknown file path; never reconstruct an absolute workspace prefix.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "relation": {
+                  "enum": [
+                    "declaration",
+                    "definition",
+                    "implementation",
+                    "type_definition"
+                  ],
+                  "type": "string"
+                },
+                "symbol": {
+                  "description": "Exact unqualified identifier from the source, e.g. RateFor, not pricing.RateFor or an entire declaration",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "target_kind": {
+                  "enum": [
+                    "symbol"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "context",
+                "cursor",
+                "limit",
+                "line",
+                "path",
+                "relation",
+                "symbol",
+                "target_kind"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lsp_references",
+    "description": "Find semantic usages of a symbol, with source excerpts and reusable location refs. Excludes its declaration by default. Scope depends on the server's workspace/build; strings, reflection and other build targets may require text search. Follow cursor with unchanged arguments. To find usages from an existing loc_ handle, call this tool directly with input.target_kind=reference and input.ref equal to the unchanged handle. Set include_declaration as requested; supply limit and cursor as null for defaults. A handle is not a symbol name; do not search for it with lsp_symbols.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "Find usages from a returned ref.",
+              "properties": {
+                "cursor": {
+                  "description": "Null: start a new query",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "include_declaration": {
+                  "description": "Null: exclude the declaration",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "limit": {
+                  "description": "Null: use the default of 50 items",
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "ref": {
+                  "description": "Copy a handle actually supplied by the user or a previous tool result. Never invent a handle. If none is available for this target, use target_kind=symbol or discover it first.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "target_kind": {
+                  "enum": [
+                    "reference"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cursor",
+                "include_declaration",
+                "limit",
+                "ref",
+                "target_kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Find usages of an exact identifier on a source line; context disambiguates repeated identifiers.",
+              "properties": {
+                "context": {
+                  "description": "Verbatim single-line source fragment containing only the desired occurrence when the identifier repeats on the line, e.g. RateFor(\"vip\"); otherwise null Null: the identifier occurs only once on this line",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "cursor": {
+                  "description": "Null: start a new query",
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "include_declaration": {
+                  "description": "Null: exclude the declaration",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "limit": {
+                  "description": "Null: use the default of 50 items",
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "line": {
+                  "description": "1-based source line containing the identifier; no character columns are needed",
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "path": {
+                  "description": "Prefer a session-relative source path copied exactly from the user or observed results, including spaces. A package name does not imply a directory. Use shell to discover an unknown file path; never reconstruct an absolute workspace prefix.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "symbol": {
+                  "description": "Exact unqualified identifier from the source, e.g. RateFor, not pricing.RateFor or an entire declaration",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "target_kind": {
+                  "enum": [
+                    "symbol"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "context",
+                "cursor",
+                "include_declaration",
+                "limit",
+                "line",
+                "path",
+                "symbol",
+                "target_kind"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    }
+  }
+]
