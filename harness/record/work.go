@@ -55,17 +55,7 @@ type WorkControl struct {
 
 func DescribeWork(e work.Event) WorkControl {
 	c := WorkControl{ID: e.ID, Kind: e.Kind}
-	change := work.Change{}
-	if e.Change != nil {
-		change = *e.Change
-	} else {
-		if e.Work.ID != "" {
-			change.Works = append(change.Works, e.Work)
-		}
-		if e.Plan != nil {
-			change.Plans = append(change.Plans, *e.Plan)
-		}
-	}
+	change := e.Changes()
 	for _, w := range change.Works {
 		c.Works = append(c.Works, WorkHeader{Assignee: w.Assignee, AssignedAtRevision: w.AssignedAtRevision, ID: w.ID, Kind: w.Kind, State: w.State, Revision: w.Revision})
 	}

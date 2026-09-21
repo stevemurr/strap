@@ -1,6 +1,7 @@
 package work
 
 import (
+	"cmp"
 	"github.com/stevemurr/strap/identity"
 	"slices"
 )
@@ -115,14 +116,6 @@ func (v *ReadModel) Works() []Work {
 	for _, w := range v.store.works {
 		out = append(out, w.Clone())
 	}
-	slices.SortFunc(out, func(a, b Work) int {
-		if a.ID < b.ID {
-			return -1
-		}
-		if a.ID > b.ID {
-			return 1
-		}
-		return 0
-	})
+	slices.SortFunc(out, func(a, b Work) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }

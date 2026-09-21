@@ -220,6 +220,21 @@ type Event struct {
 	Actionable   bool             `json:"actionable"`
 }
 
+// Changes flattens the event into the change set it carries.
+func (e Event) Changes() Change {
+	if e.Change != nil {
+		return *e.Change
+	}
+	c := Change{}
+	if e.Work.ID != "" {
+		c.Works = append(c.Works, e.Work)
+	}
+	if e.Plan != nil {
+		c.Plans = append(c.Plans, *e.Plan)
+	}
+	return c
+}
+
 func cloneSteps(v []Step) []Step {
 	v = slices.Clone(v)
 	for i := range v {
@@ -228,6 +243,13 @@ func cloneSteps(v []Step) []Step {
 	return v
 }
 func (p Plan) Clone() Plan { p.Steps = cloneSteps(p.Steps); return p }
+
+// visibleTo reports whether actor owns or is assigned the work. Anonymous
+// callers see nothing.
+func (w Work) visibleTo(actor identity.ActorID) bool {
+	return actor != "" && (w.Owner == actor || w.Assignee == actor)
+}
+
 func (w Work) Clone() Work {
 	if w.Scope != nil {
 		scope := *w.Scope

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -54,11 +53,7 @@ func TestToolRowsRemainSeparateWithAgentAttribution(t *testing.T) {
 		t.Fatal("message hid an earlier tool call")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 25, Height: 24})
-	for _, line := range strings.Split(m.View(), "\n") {
-		if lipgloss.Width(line) > 25 {
-			t.Fatal("tool overflow", line)
-		}
-	}
+	assertFits(t, m.View(), 25, 0)
 }
 
 func TestToolCallsDoNotChangeFrozenView(t *testing.T) {
@@ -115,11 +110,7 @@ func TestMarkdownResizeAndTerminalControls(t *testing.T) {
 	m.input.SetValue("draft")
 	for _, width := range []int{100, 40, 12, 1, 80} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
-		for _, line := range strings.Split(m.View(), "\n") {
-			if lipgloss.Width(line) > width {
-				t.Errorf("line exceeds %d: %q", width, line)
-			}
-		}
+		assertFits(t, m.View(), width, 0)
 		rendered := m.renderBody(&m.entries[len(m.entries)-1])
 		if strings.Contains(rendered, "\x1b[2J") || strings.Contains(rendered, "\x1b]52") {
 			t.Fatal("Markdown emitted untrusted terminal controls")

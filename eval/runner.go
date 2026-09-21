@@ -102,14 +102,8 @@ func Run(ctx context.Context, opts Options) (results []Result, runErr error) {
 	if err != nil {
 		return nil, err
 	}
-	var task Task
-	for _, candidate := range tasks {
-		if candidate.ID == opts.Problem {
-			task = candidate
-			break
-		}
-	}
-	if task.ID == "" {
+	task, ok := findTask(tasks, opts.Problem)
+	if !ok {
 		return nil, fmt.Errorf("unknown problem %q", opts.Problem)
 	}
 	// Validate both mounts before writing either. Never delete mounted contents.

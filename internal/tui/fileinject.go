@@ -24,6 +24,8 @@ const (
 	attachmentSuffix       = "</attached_files>"
 )
 
+var errTooManyEntries = errors.New("too many folder entries (limit 10000); narrow the folder reference")
+
 type fileMention struct {
 	start, end int // byte offsets in the original draft
 	path       string
@@ -144,7 +146,7 @@ func loadAttachments(ctx context.Context, text, cwd string) attachmentResult {
 		}
 		visited++
 		if visited > maxAttachmentEntries {
-			return errors.New("too many folder entries (limit 10000); narrow the folder reference")
+			return errTooManyEntries
 		}
 		skip := func(reason string) error {
 			if explicit {
@@ -188,7 +190,7 @@ func loadAttachments(ctx context.Context, text, cwd string) attachmentResult {
 				return fmt.Errorf("%s: %w", label, err)
 			}
 			if len(entries) > maxAttachmentEntries-visited {
-				return errors.New("too many folder entries (limit 10000); narrow the folder reference")
+				return errTooManyEntries
 			}
 			sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 			// Check a directory's children together rather than starting Git for every file.
@@ -205,7 +207,7 @@ func loadAttachments(ctx context.Context, text, cwd string) attachmentResult {
 				if ignored[paths[i]] || entry.Name() == ".git" {
 					visited++
 					if visited > maxAttachmentEntries {
-						return errors.New("too many folder entries (limit 10000); narrow the folder reference")
+						return errTooManyEntries
 					}
 					result.skipped = append(result.skipped, childLabel+": ignored")
 					continue

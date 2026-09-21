@@ -35,18 +35,13 @@ type profile struct {
 	Generation vllm.Generation `json:"generation"`
 }
 
-// Load resolves a model profile. An empty path discovers
-// $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json and falls
-// back to the bundled catalog; an explicit path must exist. An empty profile
-// selects the catalog default.
-func Load(path, profile string, timeout time.Duration) (harness.ModelConfig, error) {
-	model, _, err := Resolve(path, profile, timeout)
-	return model, err
-}
-
-// Resolve is Load that also returns the selected profile's name. The eval
-// runner names run directories by it: a model id alone cannot tell apart
-// profiles that share a model, such as thinking and no-thinking variants.
+// Resolve resolves a model profile and returns the selected profile's name.
+// An empty path discovers $XDG_CONFIG_HOME/strap/models.json or
+// ~/.config/strap/models.json and falls back to the bundled catalog; an
+// explicit path must exist. An empty profile selects the catalog default. The
+// eval runner names run directories by the profile name: a model id alone
+// cannot tell apart profiles that share a model, such as thinking and
+// no-thinking variants.
 func Resolve(path, profile string, timeout time.Duration) (harness.ModelConfig, string, error) {
 	explicit := path != ""
 	if !explicit {
@@ -144,6 +139,22 @@ func Flags(flags *flag.FlagSet, model *harness.ModelConfig) {
 	boolFlag("thinking", "Override thinking mode (-thinking=false disables it)", &model.Generation.EnableThinking)
 	boolFlag("force-nonempty-content", "Require assistant content with tool calls (requires chat-template support)", &model.Generation.ForceNonemptyContent)
 
+}
+
+// Apply resolves the selected profile into model, then reparses args so every
+// flag registered by Flags overrides the profile. It returns the profile name.
+// Call it after the first Parse, which discovered the catalog and profile.
+func Apply(flags *flag.FlagSet, args []string, model *harness.ModelConfig, path, profile string) (string, error) {
+	resolved, name, err := Resolve(path, profile, model.Timeout)
+	if err != nil {
+		return "", err
+	}
+	if WasSet(flags, "backend") && model.Backend == "chatcompletions" {
+		// The generic backend uses server defaults unless flags explicitly override.
+		resolved.Generation = vllm.Generation{}
+	}
+	*model = resolved
+	return name, flags.Parse(args)
 }
 
 // WasSet reports whether a flag was given explicitly on the command line.

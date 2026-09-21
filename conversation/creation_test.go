@@ -39,17 +39,10 @@ func (cancelOnDefinition) Call(context.Context, tool.Call) (tool.Result, error) 
 
 func TestAssignmentDeliveryFailureStopsNewAgent(t *testing.T) {
 	p := &idleProvider{}
-	c := conversation.New(context.Background())
+	c := emptyConversation(t)
 	if _, err := c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "Coordinate"}}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := c.Close(ctx); err != nil {
-			t.Error(err)
-		}
-	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Cancellation happens while the new agent is being configured, after the

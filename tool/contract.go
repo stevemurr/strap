@@ -17,8 +17,6 @@ type Contract struct{ root *parameterNode }
 func (p Parameters[A]) Contract() Contract      { return Contract{p.root} }
 func (f Func[A]) InputContract() Contract       { return f.Spec.Parameters.Contract() }
 func (t *composedTool) InputContract() Contract { return Contract{t.root} }
-func (s *Shell) InputContract() Contract        { return s.bound.InputContract() }
-func (p *PDF) InputContract() Contract          { return p.bound.InputContract() }
 func (c Contract) Schema() json.RawMessage {
 	if c.root == nil {
 		return nil

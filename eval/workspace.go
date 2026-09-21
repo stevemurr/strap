@@ -14,9 +14,6 @@ func Materialize(task Task, dest string) error {
 	if entries, err := os.ReadDir(dest); err == nil && len(entries) > 0 {
 		return fmt.Errorf("workspace %s is not empty", dest)
 	}
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
 	return copyTree(task.WorkspaceDir(), dest)
 }
 

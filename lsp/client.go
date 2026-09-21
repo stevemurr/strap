@@ -432,7 +432,7 @@ func (c *client) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.
 		if req.Params == nil || json.Unmarshal(*req.Params, &p) != nil {
 			return
 		}
-		c.storeDiagnostics(p.URI, diagnosticSet{Version: p.Version, Items: p.Diagnostics, Received: time.Now(), Epoch: c.epoch.Load()})
+		c.storeDiagnosticSet(p.URI, diagnosticSet{Version: p.Version, Items: p.Diagnostics, Received: time.Now(), Epoch: c.epoch.Load()}, false)
 		select {
 		case c.changed <- struct{}{}:
 		default:

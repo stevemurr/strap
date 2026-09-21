@@ -145,9 +145,6 @@ func goFiles(dir string) ([]string, error) {
 	return names, nil
 }
 
-// LoadTask reads one task directory.
-func LoadTask(dir string) (Task, error) { return loadTask(dir, true) }
-
 func loadTask(dir string, grading bool) (Task, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "task.json"))
 	if err != nil {
@@ -227,4 +224,13 @@ func loadLadder(dir string, grading bool) ([]Task, error) {
 		return tasks[i].Dir < tasks[j].Dir
 	})
 	return tasks, nil
+}
+
+func findTask(tasks []Task, id string) (Task, bool) {
+	for _, t := range tasks {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return Task{}, false
 }

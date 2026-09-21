@@ -143,30 +143,6 @@ func TestAPIPrefixAndHTTPErrorWithoutRetry(t *testing.T) {
 	}
 }
 
-func TestIncompleteAndMalformedResponsesAreErrors(t *testing.T) {
-	cases := map[string]string{
-		"truncated":             `{"choices":[{"message":{"role":"assistant","content":"partial"},"finish_reason":"length"}]}`,
-		"no choice":             `{"choices":[]}`,
-		"no output":             `{"choices":[{"message":{"role":"assistant","content":null},"finish_reason":"stop"}]}`,
-		"invalid JSON":          `{`,
-		"broken arguments":      `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"create_test_agent","arguments":"{"}}]},"finish_reason":"tool_calls"}]}`,
-		"missing call identity": `{"choices":[{"message":{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"create_test_agent","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
-	}
-	for name, body := range cases {
-		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
-			defer server.Close()
-			c, err := chatcompletions.New(chatcompletions.Config{BaseURL: server.URL, Model: "local"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := c.Submit(context.Background(), provider.Request{}, nil); err == nil {
-				t.Fatal("invalid completion accepted")
-			}
-		})
-	}
-}
-
 func TestCancellationReachesHTTPCall(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})

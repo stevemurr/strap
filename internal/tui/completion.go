@@ -87,11 +87,7 @@ func (m *model) completionKey(key string) bool {
 		if m.completionHeight() == 0 {
 			return false
 		}
-		delta := 1
-		if key == "up" {
-			delta = -1
-		}
-		m.completion.selected = (m.completion.selected + delta + len(matches)) % len(matches)
+		m.completion.selected = (m.completion.selected + keyStep(key, "up") + len(matches)) % len(matches)
 	case "tab":
 		m.input.SetValue(matches[m.completion.selected].name + " ")
 		m.input.CursorEnd()

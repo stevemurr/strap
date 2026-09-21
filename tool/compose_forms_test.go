@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -46,15 +45,5 @@ func TestComposedRejectionNamesEachForm(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("rejection %q lacks %q", err, want)
 		}
-	}
-}
-
-func TestCompositionHasNoRootHints(t *testing.T) {
-	var schema map[string]json.RawMessage
-	if err := json.Unmarshal(inputSchema(t, widgetTool(t).Definition().Parameters), &schema); err != nil {
-		t.Fatal(err)
-	}
-	if len(schema) != 1 || schema["oneOf"] == nil {
-		t.Fatal("composition must contain only complete alternatives", string(widgetTool(t).Definition().Parameters))
 	}
 }

@@ -29,21 +29,6 @@ func raceOptions(t *testing.T) Options {
 	return opts
 }
 
-func raceFixture(t *testing.T, dir string) fixture {
-	t.Helper()
-	body, err := os.ReadFile(filepath.Join(dir, raceScenario, "001", "manifest.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest struct {
-		Fixture fixture `json:"fixture"`
-	}
-	if err := json.Unmarshal(body, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	return manifest.Fixture
-}
-
 func raceReceipt(request provider.Request, callID string) (string, error) {
 	for i := len(request.Messages) - 1; i >= 0; i-- {
 		m := request.Messages[i]
@@ -76,7 +61,7 @@ func TestRevisionRaceScriptedConformanceAndSavedMetadata(t *testing.T) {
 	if r.Outcome != "passed" || !r.Behavior.RecoverySuccess || r.Behavior.CleanSuccess || r.Behavior.RejectedCalls != 1 || r.ModelCalls != 4 || r.ToolCalls != 4 || r.Harness.Passed != r.Harness.Total {
 		t.Fatalf("scripted read/conflict/refresh/retry must recover: %+v", r)
 	}
-	f := raceFixture(t, opts.Output)
+	f := manifestFixture(t, opts.Output, raceScenario)
 	assertRaceMetadata(t, r, f)
 	body, err := os.ReadFile(filepath.Join(opts.Output, raceScenario, "001", "result.json"))
 	if err != nil {
@@ -101,7 +86,7 @@ func TestRevisionRaceLiveProviderUsesActualConflictAndFreshRead(t *testing.T) {
 	var before, after work.Work
 	var proposed provider.ToolCall
 	opts.Provider = testProviderFunc(func(_ context.Context, request provider.Request, _ provider.Observer) (provider.Response, error) {
-		f := raceFixture(t, opts.Output)
+		f := manifestFixture(t, opts.Output, raceScenario)
 		switch calls.Add(1) {
 		case 1:
 			return provider.Response{ToolCalls: []provider.ToolCall{adversarialCall("read-before", "get_work", map[string]any{"work_id": f.Original.ID})}}, nil
@@ -147,7 +132,7 @@ func TestRevisionRaceLiveProviderUsesActualConflictAndFreshRead(t *testing.T) {
 	if r.Outcome != "passed" || !r.Behavior.RecoverySuccess || r.Behavior.CleanSuccess || r.Behavior.RejectedCalls != 1 || r.ModelCalls != 4 || r.ToolCalls != 4 || calls.Load() != 4 || r.Harness.Passed != r.Harness.Total {
 		t.Fatalf("live recovery did not use production receipts: %+v", r)
 	}
-	f := raceFixture(t, opts.Output)
+	f := manifestFixture(t, opts.Output, raceScenario)
 	assertRaceMetadata(t, r, f)
 	if !reflect.DeepEqual(r.RevisionRace.OriginalBefore, before) || !reflect.DeepEqual(r.RevisionRace.OriginalAfter, after) {
 		t.Fatal("model's real reads differ from recorded intervention states")
@@ -193,7 +178,7 @@ func TestRevisionRaceStaleRetryLoopIsBoundedBehaviorFailure(t *testing.T) {
 	var calls atomic.Int32
 	var stale work.Work
 	opts.Provider = testProviderFunc(func(_ context.Context, request provider.Request, _ provider.Observer) (provider.Response, error) {
-		f := raceFixture(t, opts.Output)
+		f := manifestFixture(t, opts.Output, raceScenario)
 		n := calls.Add(1)
 		if n == 1 {
 			return provider.Response{ToolCalls: []provider.ToolCall{adversarialCall("read-before", "get_work", map[string]any{"work_id": f.Original.ID})}}, nil
@@ -211,7 +196,7 @@ func TestRevisionRaceStaleRetryLoopIsBoundedBehaviorFailure(t *testing.T) {
 	if r.Outcome != "failed" || r.ErrorClass != "budget" || r.StopReason != "call_budget" || !r.Behavior.Scorable || r.Behavior.OutcomeCorrect || r.Behavior.RecoverySuccess || r.Behavior.RejectedCalls != 3 || r.ModelCalls != 4 || r.ToolCalls != 4 || calls.Load() != 4 || r.Harness.Passed != r.Harness.Total {
 		t.Fatalf("stale retries should exhaust actor budget with healthy harness: %+v", r)
 	}
-	assertRaceMetadata(t, r, raceFixture(t, opts.Output))
+	assertRaceMetadata(t, r, manifestFixture(t, opts.Output, raceScenario))
 	assertFailed(t, r, "race.recovered_with_current_revision")
 }
 
@@ -233,7 +218,7 @@ func TestRevisionRaceDiscardedReasoningLimitResponseCannotInject(t *testing.T) {
 	opts.Config.ReasoningLimit = 8
 	var calls atomic.Int32
 	opts.Provider = testProviderFunc(func(ctx context.Context, request provider.Request, observer provider.Observer) (provider.Response, error) {
-		f := raceFixture(t, opts.Output)
+		f := manifestFixture(t, opts.Output, raceScenario)
 		assignment := func(id string, w work.Work) provider.Response {
 			return provider.Response{ToolCalls: []provider.ToolCall{adversarialCall(id, "assign_audit", tool.AssignAuditArgs{Assignee: f.Auditor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: w.LatestSubmissionID})}}
 		}
@@ -280,7 +265,7 @@ func TestRevisionRaceDiscardedReasoningLimitResponseCannotInject(t *testing.T) {
 	if r.Outcome != "passed" || r.ErrorClass != "" || !r.Behavior.RecoverySuccess || r.Behavior.CleanSuccess || r.Behavior.OutputErrors != 1 || r.Behavior.RejectedCalls != 1 || r.ModelCalls != 5 || r.ToolCalls != 4 || calls.Load() != 5 || r.Harness.Passed != r.Harness.Total {
 		t.Fatalf("discarded reasoning output caused interference or hid recovery: %+v", r)
 	}
-	assertRaceMetadata(t, r, raceFixture(t, opts.Output))
+	assertRaceMetadata(t, r, manifestFixture(t, opts.Output, raceScenario))
 	if r.RevisionRace.TriggerCallID != "valid-trigger" {
 		t.Fatalf("discarded response triggered intervention: %+v", r.RevisionRace)
 	}

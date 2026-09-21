@@ -54,21 +54,6 @@ type Config struct {
 	Spec       Spec
 	Inbox      *inbox.Inbox[message.Message]
 	Outbox     message.Sender
-	OnConsumed func(message.Receipt)
-	// OnState enqueues state notifications; it must not block or reenter this agent.
-	OnState     func(State)
-	OnLifecycle func(StateSnapshot) // Ordered state and revision from the same lifecycle lock.
-	// OnCommentary enqueues assistant text accompanying a tool batch.
-	// It must not block on a consumer or reenter this agent.
-	OnCommentary func(string)
-	// OnTool enqueues execution notifications; it must not block on a consumer.
-	OnTool func(ToolActivity)
-	// OnToolBatch enqueues a complete tool batch's history boundary. It must
-	// not block on a consumer; counting is a separate host operation.
-	OnToolBatch func(ToolBatch)
-	// OnUsage enqueues one observation after each Submit returns, even on error.
-	// It must not block on a consumer. The observation owns its counts.
-	OnUsage func(UsageObservation)
 	// WakeContext attaches harness-owned state once per exchange; see WakeContext.
 	WakeContext WakeContext
 }
@@ -361,9 +346,6 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 			return err
 		}
 		if len(response.ToolCalls) == 0 {
-			if response.Content == "" {
-				return errors.New("model returned no text or tool calls")
-			}
 			_, err := a.config.Outbox.Send(ctx, message.Draft{
 				To: a.config.ReplyTo, Kind: message.Reply, ReplyTo: *last, Content: response.Content, Output: &output,
 			})
@@ -375,9 +357,6 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 		if strings.TrimSpace(response.Content) != "" {
 			if err := a.report(Commentary{Output: output, Text: response.Content}); err != nil {
 				return err
-			}
-			if a.config.OnCommentary != nil {
-				a.config.OnCommentary(response.Content)
 			}
 		}
 		var toolRevision uint64
@@ -408,7 +387,7 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 				result.Content = append(result.Content, tool.Text("Tool error: "+err.Error()).Content...)
 			}
 			if ctx.Err() != nil {
-				toolRevision, err = a.appendHistory(provider.Message{
+				_, err = a.appendHistory(provider.Message{
 					Role: "tool", Content: result.Content.Clone(), ToolCallID: call.ID,
 				}, nil)
 				if err != nil {
@@ -440,12 +419,8 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 			for i, call := range response.ToolCalls {
 				calls[i] = call.ID
 			}
-			batch := ToolBatch{Calls: calls, ContextRevision: toolRevision}
-			if err := a.report(batch); err != nil {
+			if err := a.report(ToolBatch{Calls: calls, ContextRevision: toolRevision}); err != nil {
 				return err
-			}
-			if a.config.OnToolBatch != nil {
-				a.config.OnToolBatch(batch)
 			}
 		}
 		if yielded {
@@ -467,31 +442,14 @@ func (a *Agent) consume(incoming message.Message) error {
 	if err != nil {
 		return err
 	}
-	if err := a.report(Consumed{Receipt: message.Receipt{MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed}}); err != nil {
-		return err
-	}
-	if a.config.OnConsumed != nil {
-		a.config.OnConsumed(message.Receipt{
-			MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed,
-		})
-	}
-	return nil
+	return a.report(Consumed{Receipt: message.Receipt{MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed}})
 }
 
 func (a *Agent) request() (provider.Request, uint64) {
-	definitions := append([]provider.ToolDefinition(nil), a.definitions...)
-	for i := range definitions {
-		definitions[i].Parameters = append(json.RawMessage(nil), definitions[i].Parameters...)
-	}
 	messages, revision := a.thread.requestMessages()
-	return provider.Request{
-		Agent: a.config.ID, Messages: messages, Tools: definitions,
-	}, revision
+	return provider.Request{Agent: a.config.ID, Messages: messages, Tools: a.Definitions()}, revision
 }
 
-func (a *Agent) call(ctx context.Context, call provider.ToolCall) (tool.Result, error) {
-	return a.invokeCall(ctx, call, nil)
-}
 func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected error) (result tool.Result, err error) {
 	started := time.Now()
 	a.nextInvocation++

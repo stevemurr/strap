@@ -2,7 +2,6 @@ package interaction
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
 )
@@ -68,17 +66,8 @@ func TestSchemaRunnerUsesEvaluatedRoleAndStopsAfterItsBatch(t *testing.T) {
 			opts.ScenarioIDs = []string{id}
 			var calls atomic.Int32
 			opts.Provider = testProviderFunc(func(ctx context.Context, request provider.Request, observer provider.Observer) (provider.Response, error) {
-				body, err := os.ReadFile(filepath.Join(opts.Output, id, "001", "manifest.json"))
+				manifest, err := readManifest(opts.Output, id)
 				if err != nil {
-					return provider.Response{}, err
-				}
-				var manifest struct {
-					Fixture    fixture                 `json:"fixture"`
-					Config     harness.EffectiveConfig `json:"config"`
-					PromptHash string                  `json:"prompt_sha256"`
-					ToolsHash  string                  `json:"tools_sha256"`
-				}
-				if err := json.Unmarshal(body, &manifest); err != nil {
 					return provider.Response{}, err
 				}
 				f := manifest.Fixture

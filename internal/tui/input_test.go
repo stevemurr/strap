@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/message"
@@ -112,14 +111,7 @@ func TestWrappedInputNavigationAndResizeKeepCursorVisible(t *testing.T) {
 	for _, size := range []tea.WindowSizeMsg{{Width: 14, Height: 10}, {Width: 80, Height: 24}, {Width: 10, Height: 5}, {Width: 1, Height: 1}} {
 		m.Update(size)
 		view := m.View()
-		if len(strings.Split(view, "\n")) > size.Height {
-			t.Fatalf("height overflow: %dx%d\n%s", size.Width, size.Height, view)
-		}
-		for _, row := range strings.Split(view, "\n") {
-			if lipgloss.Width(row) > size.Width {
-				t.Fatalf("width overflow: %q", row)
-			}
-		}
+		assertFits(t, view, size.Width, size.Height)
 		if size.Width > 1 && !strings.Contains(ansi.Strip(view), "LAST") {
 			t.Fatalf("cursor tail invisible after resize: %dx%d\n%s", size.Width, size.Height, view)
 		}
@@ -223,15 +215,7 @@ func TestUnicodeMultilineInputAndIndentationSurviveResize(t *testing.T) {
 		if m.input.Line() != 1 || info.StartColumn+info.ColumnOffset != 7 {
 			t.Fatalf("resize moved Unicode cursor: line %d column %d", m.input.Line(), info.StartColumn+info.ColumnOffset)
 		}
-		view := m.View()
-		if len(strings.Split(view, "\n")) > size.Height {
-			t.Fatal("height overflow", view)
-		}
-		for _, line := range strings.Split(view, "\n") {
-			if lipgloss.Width(line) > size.Width {
-				t.Fatal("width overflow", line)
-			}
-		}
+		assertFits(t, m.View(), size.Width, size.Height)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if len(s.sent) != 1 || s.sent[0] != want {

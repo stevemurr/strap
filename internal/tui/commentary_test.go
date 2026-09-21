@@ -18,7 +18,6 @@ func TestCommentarySeparatesToolGroupsAndKeepsAgentsWorking(t *testing.T) {
 			m, _ := setup(t)
 			m.entries = nil
 			m.observe(conversation.AgentStateChanged{Agent: actor, State: agent.Running})
-			started := m.busySince
 			addTool(m, actor, "read_file")
 			m.Update(received{event: conversation.CommentaryEvent{Agent: actor, Content: "This is a **DAW** in your browser."}})
 			label := "Message"
@@ -37,7 +36,7 @@ func TestCommentarySeparatesToolGroupsAndKeepsAgentsWorking(t *testing.T) {
 			if len(m.folds.targets) != 2 || strings.Index(view, "DAW") < strings.Index(view, "Read") || strings.Index(view, "DAW") > strings.LastIndex(view, "Read") {
 				t.Fatal("commentary did not separate tool groups", view)
 			}
-			if !m.working[actor] || m.states[actor] != agent.Running || m.busySince != started || len(m.pending) != 0 {
+			if !m.working[actor] || m.states[actor] != agent.Running || !m.busy() || len(m.pending) != 0 {
 				t.Fatal("commentary changed activity or delivery state")
 			}
 		})

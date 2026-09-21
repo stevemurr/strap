@@ -264,16 +264,9 @@ func (s *JSONL) Read(ctx context.Context, q Query) (Page, error) {
 	defer s.endIO()
 	s.mu.Lock()
 	end := s.end
-	p := Page{Latest: s.latest, Next: q.After, Sealed: s.outcome != nil, Head: s.head()}
-	if s.latest > 0 {
-		p.Earliest = 1
-	}
-	if s.outcome != nil {
-		o := *s.outcome
-		p.Outcome = &o
-	}
+	p, err := s.page(q)
 	s.mu.Unlock()
-	if err := cursor(q, p.Earliest, p.Latest); err != nil {
+	if err != nil {
 		return p, err
 	}
 	if q.After == p.Latest {
@@ -304,10 +297,11 @@ func (s *JSONL) Read(ctx context.Context, q Query) (Page, error) {
 		if e.Sequence != p.Next+1 || e.Session != s.session {
 			return p, errors.New("corrupt event sequence")
 		}
-		if q.MaxBytes > 0 && bytes+e.Size() > q.MaxBytes {
-			if len(p.Events) == 0 {
-				return p, &PageBudgetError{Required: e.Size(), Budget: q.MaxBytes}
-			}
+		stop, err := overBudget(p, e, bytes, q)
+		if err != nil {
+			return p, err
+		}
+		if stop {
 			break
 		}
 		p.Events = append(p.Events, e)

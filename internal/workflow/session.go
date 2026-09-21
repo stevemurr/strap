@@ -246,6 +246,11 @@ func (s *Session) run() {
 	attempted := map[work.EventID]bool{}
 	published := map[work.EventID]bool{}
 	revoked := map[work.EventID]bool{}
+	forget := func(id work.EventID) {
+		delete(attempted, id)
+		delete(published, id)
+		delete(revoked, id)
+	}
 	notifications := map[message.MessageID][]work.EventID{}
 	queue := newNoticeQueue(s.progressConfig)
 	if s.progressCurrent == nil {
@@ -368,9 +373,7 @@ func (s *Session) run() {
 				b := binding{w.ID, w.AssignedAtRevision, w.Assignee, w.Owner}
 				if !s.current(b) {
 					_ = s.Store.AcknowledgeEvent(e.ID)
-					delete(attempted, e.ID)
-					delete(published, e.ID)
-					delete(revoked, e.ID)
+					forget(e.ID)
 					continue
 				}
 				if attempted[e.ID] {
@@ -410,9 +413,7 @@ func (s *Session) run() {
 				continue // Keep owner events pending until actually consumed.
 			}
 			_ = s.Store.AcknowledgeEvent(e.ID)
-			delete(attempted, e.ID)
-			delete(published, e.ID)
-			delete(revoked, e.ID)
+			forget(e.ID)
 		}
 	}
 	for {
@@ -468,9 +469,7 @@ func (s *Session) run() {
 							delete(outstanding, id)
 							_ = s.Store.AcknowledgeEvent(id)
 							delete(notifications, event.Receipt.MessageID)
-							delete(attempted, id)
-							delete(published, id)
-							delete(revoked, id)
+							forget(id)
 						} else if event.Receipt.Status == message.Undelivered {
 							delete(notifications, event.Receipt.MessageID)
 							s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work event %s remains pending: owner did not consume notification %s", id, event.Receipt.MessageID)}})

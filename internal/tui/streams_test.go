@@ -175,14 +175,7 @@ func TestFocusedLayoutFitsSmallTerminalsAndLargeRosters(t *testing.T) {
 		for _, focused := range []bool{false, true} {
 			m.focusRoster(focused)
 			view := m.View()
-			if len(strings.Split(view, "\n")) > size.Height {
-				t.Fatalf("height overflow %dx%d:\n%s", size.Width, size.Height, view)
-			}
-			for _, row := range strings.Split(view, "\n") {
-				if ansi.StringWidth(row) > size.Width {
-					t.Fatalf("width overflow %dx%d: %q", size.Width, size.Height, row)
-				}
-			}
+			assertFits(t, view, size.Width, size.Height)
 			if size.Width >= 80 && !strings.Contains(view, "agent-24") {
 				t.Fatal("selected agent scrolled out of the roster", view)
 			}

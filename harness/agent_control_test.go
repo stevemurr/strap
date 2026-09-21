@@ -33,7 +33,7 @@ func awaitAgentState(t *testing.T, s *harness.Session, id message.ActorID, want 
 // Each returns the agent's post-transition snapshot so a caller can act on the
 // state without a second inspection round trip.
 func TestSessionAgentControlTransitionsThroughPauseResumeStop(t *testing.T) {
-	s := newLifecycleSession(t, context.Background(), idle{})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	child := createWorker(t, s, roster.Implementor)
 
 	paused, err := s.PauseAgent(child)
@@ -75,7 +75,7 @@ func TestSessionAgentControlTransitionsThroughPauseResumeStop(t *testing.T) {
 // Control over an agent the session never created is reported as a lookup
 // failure rather than silently succeeding.
 func TestSessionAgentControlRejectsUnknownAgent(t *testing.T) {
-	s := newLifecycleSession(t, context.Background(), idle{})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	const missing message.ActorID = "no-such-agent"
 	for name, call := range map[string]func() (conversation.AgentInfo, error){
 		"pause":  func() (conversation.AgentInfo, error) { return s.PauseAgent(missing) },
@@ -94,7 +94,7 @@ func TestSessionAgentControlRefusedAfterClose(t *testing.T) {
 	ctx := context.Background()
 	cfg := harness.DefaultConfig()
 	cfg.LocalTools, cfg.Web = false, nil
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestSessionAgentControlRefusedAfterClose(t *testing.T) {
 // Receipt resolves a delivery record projected from the event log, and reports
 // absence rather than a zero receipt for an identifier that was never sent.
 func TestSessionReceiptResolvesDeliveryAndReportsAbsence(t *testing.T) {
-	s := newLifecycleSession(t, context.Background(), idle{})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	sent, err := s.Send(s.Root(), "hello")
 	if err != nil {
 		t.Fatal(err)

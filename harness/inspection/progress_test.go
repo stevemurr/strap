@@ -2,42 +2,20 @@ package inspection_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"testing"
 
-	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
-	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/work"
 )
 
 func TestProgressRecordedPrefixAndArchive(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "progress.jsonl")
-	log, err := eventlog.NewJSONL(path, "progress-session")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer log.Close(ctx)
-	if _, err := log.Append(ctx, eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"progress-session"}`)}); err != nil {
-		t.Fatal(err)
-	}
+	log, path := sessionLog(t, "progress-session")
 	var prefix eventlog.Cursor
-	s := work.New(work.WithReporter(work.ReporterFunc(func(ctx context.Context, e work.Event) error {
-		d, err := eventcodec.EncodeEvent(conversation.WorkEvent{Event: e})
-		if err != nil {
-			return err
-		}
-		r, err := log.Append(ctx, d)
-		if err == nil {
-			prefix = r.Cursor()
-		}
-		return err
-	})))
+	s := reportingStore(log, &prefix)
 	w, err := s.AssignWork("root", work.AssignRequest{Assignee: "worker", Task: "inspect source"})
 	if err != nil {
 		t.Fatal(err)

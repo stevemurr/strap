@@ -366,10 +366,7 @@ func (c *Controller) Agents() []AgentInfo {
 	defer c.mu.Unlock()
 	result := make([]AgentInfo, 0, len(c.order))
 	for _, id := range c.order {
-		info := c.agents[id].info
-		state := c.agents[id].agent.StateSnapshot()
-		info.State, info.StateRevision = state.State, state.Revision
-		result = append(result, info)
+		result = append(result, c.agents[id].info.at(c.agents[id].agent.StateSnapshot()))
 	}
 	return result
 }
@@ -407,9 +404,7 @@ func (c *Controller) InspectAgent(id message.ActorID, options InspectOptions) (A
 	}
 	info, runner := owned.info, owned.agent
 	c.mu.Unlock()
-	state := runner.StateSnapshot()
-	info.State, info.StateRevision = state.State, state.Revision
-	inspection := AgentInspection{AgentInfo: info, Usage: runner.Usage(), ContextRevision: runner.ContextRevision(), OutputTokenLimit: runner.OutputTokenLimit()}
+	inspection := AgentInspection{AgentInfo: info.at(runner.StateSnapshot()), Usage: runner.Usage(), ContextRevision: runner.ContextRevision(), OutputTokenLimit: runner.OutputTokenLimit()}
 	if options.Transcript != nil {
 		page, err := runner.Transcript(*options.Transcript)
 		if err != nil {
@@ -432,7 +427,15 @@ func (c *Controller) CountAgentTokens(ctx context.Context, id message.ActorID, r
 	return owned.agent.CountTokens(ctx, revision)
 }
 
-func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
+// at returns the info as of one lifecycle snapshot.
+func (i AgentInfo) at(s agent.StateSnapshot) AgentInfo {
+	i.State, i.StateRevision = s.State, s.Revision
+	return i
+}
+
+// controlAgent applies one lifecycle operation to an active agent outside the
+// coordination lock and reports the resulting state.
+func (c *Controller) controlAgent(id message.ActorID, op func(*agent.Agent) (agent.StateSnapshot, error)) (AgentInfo, error) {
 	c.mu.Lock()
 	if err := c.activeLocked(id); err != nil {
 		c.mu.Unlock()
@@ -440,24 +443,16 @@ func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
 	}
 	owned := c.agents[id]
 	c.mu.Unlock()
-	state, err := owned.agent.PauseSnapshot()
-	info := owned.info
-	info.State, info.StateRevision = state.State, state.Revision
-	return info, err
+	state, err := op(owned.agent)
+	return owned.info.at(state), err
+}
+
+func (c *Controller) PauseAgent(id message.ActorID) (AgentInfo, error) {
+	return c.controlAgent(id, (*agent.Agent).PauseSnapshot)
 }
 
 func (c *Controller) ResumeAgent(id message.ActorID) (AgentInfo, error) {
-	c.mu.Lock()
-	if err := c.activeLocked(id); err != nil {
-		c.mu.Unlock()
-		return AgentInfo{}, err
-	}
-	owned := c.agents[id]
-	c.mu.Unlock()
-	state, err := owned.agent.ResumeSnapshot()
-	info := owned.info
-	info.State, info.StateRevision = state.State, state.Revision
-	return info, err
+	return c.controlAgent(id, (*agent.Agent).ResumeSnapshot)
 }
 
 func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
@@ -470,9 +465,7 @@ func (c *Controller) StopAgent(id message.ActorID) (AgentInfo, error) {
 	c.mu.Unlock()
 	owned.cancel()
 	state, err := owned.agent.RequestStopSnapshot()
-	info := owned.info
-	info.State, info.StateRevision = state.State, state.Revision
-	return info, err
+	return owned.info.at(state), err
 }
 
 // Close asks every owned agent to stop at its next safe point and waits for the

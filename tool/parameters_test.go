@@ -23,9 +23,15 @@ type contractArgs struct {
 	Pages []int          `json:"pages"`
 }
 
+// contractConstraints prefixes the nullable declarations every contractArgs
+// contract needs with any extra constraints under test.
+func contractConstraints(extra ...Constraint) []Constraint {
+	return append([]Constraint{Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged")}, extra...)
+}
+
 func TestParametersValidateAndDecodeOneContract(t *testing.T) {
 	choices := []string{"pending", "ready"}
-	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("count", 1), Maximum("count", 10), MinItems("steps", 1), MinLength("steps[].step_id", 1), Enum("steps[].status", choices...), MinItems("pages", 1), MaxItems("pages", 2), Minimum("pages[]", 1))
+	params, err := NewParameters[contractArgs](contractConstraints(Minimum("count", 1), Maximum("count", 10), MinItems("steps", 1), MinLength("steps[].step_id", 1), Enum("steps[].status", choices...), MinItems("pages", 1), MaxItems("pages", 2), Minimum("pages[]", 1))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,23 +104,23 @@ func TestParametersRejectUnsupportedDefinitions(t *testing.T) {
 			return err
 		},
 		func() error {
-			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("missing", 1))
+			_, err := NewParameters[contractArgs](contractConstraints(Minimum("missing", 1))...)
 			return err
 		},
 		func() error {
-			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("title", 1))
+			_, err := NewParameters[contractArgs](contractConstraints(Minimum("title", 1))...)
 			return err
 		},
 		func() error {
-			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Maximum("count", 128))
+			_, err := NewParameters[contractArgs](contractConstraints(Maximum("count", 128))...)
 			return err
 		},
 		func() error {
-			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Minimum("count", 10), Maximum("count", 1))
+			_, err := NewParameters[contractArgs](contractConstraints(Minimum("count", 10), Maximum("count", 1))...)
 			return err
 		},
 		func() error {
-			_, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), MinItems("steps", 3), MaxItems("steps", 1))
+			_, err := NewParameters[contractArgs](contractConstraints(MinItems("steps", 3), MaxItems("steps", 1))...)
 			return err
 		},
 	}
@@ -155,7 +161,7 @@ func TestIntegerContractPreservesExactValues(t *testing.T) {
 }
 func TestFuncRejectsInvalidCallsBeforeHandler(t *testing.T) {
 	calls := 0
-	f := Func[contractArgs]{Spec: Definition[contractArgs]{Name: "example", Parameters: parameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))}, Invoke: func(_ context.Context, c Call, a contractArgs) (Result, error) {
+	f := Func[contractArgs]{Spec: Definition[contractArgs]{Name: "example", Parameters: parameters[contractArgs](contractConstraints()...)}, Invoke: func(_ context.Context, c Call, a contractArgs) (Result, error) {
 		calls++
 		if c.Actor != "root" || a.Title != "ok" {
 			t.Fatal(c, a)
@@ -243,7 +249,7 @@ func TestComposePreservesBranchesAndRejectsAmbiguity(t *testing.T) {
 	}
 }
 func TestParametersSharedAcrossCalls(t *testing.T) {
-	p := parameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))
+	p := parameters[contractArgs](contractConstraints()...)
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Add(1)
@@ -346,9 +352,8 @@ func TestNestedCompositionDoesNotNarrowMixedPropertyTypes(t *testing.T) {
 }
 
 func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
-	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"),
-		Reject("steps[]", "note", "notes come from worker progress"),
-		Reject("", "workdir", "prefix the command with cd"))
+	params, err := NewParameters[contractArgs](contractConstraints(Reject("steps[]", "note", "notes come from worker progress"),
+		Reject("", "workdir", "prefix the command with cd"))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +379,7 @@ func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
 		t.Fatalf("nested required phrasing changed: %v", err)
 	}
 	for _, bad := range []Constraint{Reject("", "title", "exists"), Reject("steps[]", "", "empty"), Reject("title", "x", "not an object"), Reject("", "x", "")} {
-		if _, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), bad); err == nil {
+		if _, err := NewParameters[contractArgs](contractConstraints(bad)...); err == nil {
 			t.Fatal("accepted invalid reject hint")
 		}
 	}
@@ -385,7 +390,7 @@ func TestRejectionNamesEveryDisallowedFieldWithHints(t *testing.T) {
 // rather than report a bare type mismatch. Every other wrong type keeps the
 // short phrasing.
 func TestStringifiedCompositeExplainsTheTrailingText(t *testing.T) {
-	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))
+	params, err := NewParameters[contractArgs](contractConstraints()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +411,7 @@ func TestStringifiedCompositeExplainsTheTrailingText(t *testing.T) {
 // the first bad element of an array costs one round trip per element. A single
 // failure keeps its unaggregated phrasing.
 func TestArrayRejectionNamesEveryFailingElement(t *testing.T) {
-	params, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"))
+	params, err := NewParameters[contractArgs](contractConstraints()...)
 	if err != nil {
 		t.Fatal(err)
 	}

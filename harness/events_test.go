@@ -12,7 +12,7 @@ import (
 )
 
 func TestSessionSubscribersSeeStartupAndFinalEvents(t *testing.T) {
-	s := newLifecycleSession(t, context.Background(), idle{})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	a, _ := s.Subscribe(context.Background(), harness.SubscribeOptions{})
 	b, _ := s.Subscribe(context.Background(), harness.SubscribeOptions{})
 	defer a.Close()
@@ -67,7 +67,7 @@ func TestCaptureFailureRejectsStartupAndReleasesStorage(t *testing.T) {
 	cfg.Web = nil
 	cfg.LocalTools = false
 	var store eventlog.Store
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}, EventStore: func(id string) (eventlog.Store, error) {
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready"), EventStore: func(id string) (eventlog.Store, error) {
 		m, e := eventlog.NewMemory(id, eventlog.Limits{})
 		store = m
 		return failedStore{m}, e

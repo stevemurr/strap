@@ -6,6 +6,7 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/tool"
 	"time"
 )
 
@@ -18,4 +19,11 @@ type OutputFinished struct {
 	Error            *eventlog.Problem            `json:"error,omitempty"`
 	RejectedToolCall *provider.ToolArgumentsError `json:"rejected_tool_call,omitempty"`
 	FinishedAt       time.Time                    `json:"finished_at"`
+}
+
+type ToolControl struct {
+	Execution  *tool.ExecutionBinding `json:"execution,omitempty"`
+	Invocation string                 `json:"invocation_id"`
+	FinishedAt time.Time              `json:"finished_at"`
+	Name       string                 `json:"name"`
 }

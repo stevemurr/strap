@@ -1,13 +1,11 @@
 package interaction
 
 import (
-	"bytes"
 	"context"
 	"reflect"
 	"testing"
 	"time"
 
-	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
@@ -139,29 +137,9 @@ func nextSchemaFixtureCall(t *testing.T, ctx context.Context, p provider.Provide
 
 func schemaFixtureAccepts(t *testing.T, tools []provider.ToolDefinition, call provider.ToolCall) bool {
 	t.Helper()
-	for _, definition := range tools {
-		if definition.Name != call.Name {
-			continue
-		}
-		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(definition.Parameters))
-		if err != nil {
-			t.Fatal(err)
-		}
-		compiler := jsonschema.NewCompiler()
-		compiler.DefaultDraft(jsonschema.Draft2020)
-		const location = "https://strap.test/schema-fixture.json"
-		if err := compiler.AddResource(location, doc); err != nil {
-			t.Fatal(err)
-		}
-		schema, err := compiler.Compile(location)
-		if err != nil {
-			t.Fatal(err)
-		}
-		value, err := jsonschema.UnmarshalJSON(bytes.NewReader(call.Arguments))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return schema.Validate(value) == nil
+	catalog, err := compileSchemaCatalog(tools)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return false
+	return schemaArgumentsValid(catalog[call.Name], call.Arguments)
 }

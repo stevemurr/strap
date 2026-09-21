@@ -10,10 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
-
-	"github.com/stevemurr/strap/agent"
-	"github.com/stevemurr/strap/conversation"
 
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
@@ -50,17 +46,7 @@ func sealedTrace(t *testing.T) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	// Let the turn finish so the trace holds its tool call and full answer.
-	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	for {
-		e, err := s.NextEvent(wait)
-		if err != nil {
-			t.Fatal("session never settled", err)
-		}
-		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Root() && c.State == agent.Idle {
-			break
-		}
-	}
+	awaitIdle(t, s)
 	if err := s.Close(ctx); err != nil {
 		t.Fatal(err)
 	}

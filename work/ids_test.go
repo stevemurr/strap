@@ -22,8 +22,8 @@ func TestIdsAreOpaqueUniqueAndKindPrefixed(t *testing.T) {
 		}
 		seen[id] = true
 	}
-	if s.next != 20000 {
-		t.Fatalf("issued count %d", s.next)
+	if len(s.issued) != 20000 {
+		t.Fatalf("issued count %d", len(s.issued))
 	}
 	// Two stores must not issue the same sequence; the suffix is not a counter.
 	a, b := New().id("plan"), New().id("plan")

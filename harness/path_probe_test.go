@@ -22,7 +22,7 @@ func TestPathComparisonChangesOnlyDescriptions(t *testing.T) {
 	if err := json.Unmarshal(raw, &original); err != nil {
 		t.Fatal(err)
 	}
-	ts, err := localTools(t.TempDir())
+	ts, err := localToolsWithChanges(t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

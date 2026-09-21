@@ -14,10 +14,9 @@ import (
 
 func TestResearcherCreationAndConfiguration(t *testing.T) {
 	ctx := context.Background()
-	cfg := harness.DefaultConfig()
-	cfg.Dir, cfg.Web = t.TempDir(), nil
+	cfg := testConfig(t, true)
 	cfg.Researcher.Prompt.Role = "Independent research configuration"
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,9 +55,8 @@ func TestResearcherCreationAndConfiguration(t *testing.T) {
 
 func TestResearchAssignmentAndListing(t *testing.T) {
 	ctx := context.Background()
-	cfg := harness.DefaultConfig()
-	cfg.Dir, cfg.Web, cfg.LocalTools = t.TempDir(), nil, false
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}})
+	cfg := testConfig(t, false)
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,12 +76,9 @@ func TestResearchAssignmentAndListing(t *testing.T) {
 }
 
 func TestResearchExecutionConfigurationIsDetached(t *testing.T) {
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
-	cfg.LocalTools = false
+	cfg := testConfig(t, false)
 	cfg.ResearchExecution.Env = []string{"RESEARCH_VALUE=original"}
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}

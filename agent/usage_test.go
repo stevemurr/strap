@@ -19,13 +19,15 @@ func TestUsageSnapshotsAndEventsOwnCounts(t *testing.T) {
 		t.Fatal(s)
 	}
 	var events []UsageObservation
-	a.config.OnUsage = func(o UsageObservation) {
-		// The callback can read a committed snapshot without holding a lock.
+	a.config.Reporter = ReporterFunc(func(_ context.Context, e Event) error {
+		o := e.(UsageObservation)
+		// The reporter can read a committed snapshot without holding a lock.
 		if a.Usage().Calls != o.Call {
 			t.Error("event preceded accounting")
 		}
 		events = append(events, o)
-	}
+		return nil
+	})
 	u := &provider.Usage{InputTokens: count(100), OutputTokens: count(10)}
 	a.recordUsage(2, u)
 	*u.InputTokens = 999

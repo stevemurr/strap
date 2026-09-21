@@ -65,13 +65,5 @@ func (a *Agent) recordUsage(revision uint64, reported *provider.Usage) error {
 	a.usage.mu.Unlock()
 	eventCopy := observation
 	eventCopy.Usage = observation.Usage.Clone()
-	if err := a.report(eventCopy); err != nil {
-		return err
-	}
-	if a.config.OnUsage != nil {
-		event := observation
-		event.Usage = observation.Usage.Clone()
-		a.config.OnUsage(event)
-	}
-	return nil
+	return a.report(eventCopy)
 }

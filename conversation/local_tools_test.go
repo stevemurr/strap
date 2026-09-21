@@ -44,18 +44,7 @@ func TestLocalToolsThroughRootAndChild(t *testing.T) {
 		t.Fatalf("shell result: %+v, %v", shellResult, err)
 	}
 	checked.tool("create_test_agent", `{"input":{"task":"Read and check result.txt","context":null,"expected_output":null}}`)
-	var root, child call
-	for range 2 {
-		got := m.next(t)
-		if got.request.Agent == c.Root() {
-			root = got
-		} else {
-			child = got
-		}
-	}
-	if root.answer == nil || child.answer == nil {
-		t.Fatal("missing root or child call")
-	}
+	root, child := rootAndChild(t, m, c.Root())
 	want := map[string]bool{"shell": true, "read_file": true, "write_file": true, "edit_file": true}
 	for _, definition := range child.request.Tools {
 		delete(want, definition.Name)

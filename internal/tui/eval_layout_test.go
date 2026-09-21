@@ -9,7 +9,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"github.com/stevemurr/strap/conversation"
@@ -62,10 +61,7 @@ func TestEvalBottomQueueNavigationAndGeometry(t *testing.T) {
 		m.Update(size)
 		for range 2 {
 			m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-			view := m.View()
-			if lipgloss.Width(view) > size.Width || lipgloss.Height(view) > size.Height {
-				t.Fatalf("layout overflow at %+v", size)
-			}
+			assertFits(t, m.View(), size.Width, size.Height)
 		}
 	}
 	if m.ctx.Err() != nil || a.input.Value() != "" {
@@ -177,9 +173,7 @@ func TestEvalMockRenderCapture(t *testing.T) {
 			for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 42}, {Width: 80, Height: 30}} {
 				m.Update(size)
 				view := m.View()
-				if lipgloss.Width(view) > size.Width || lipgloss.Height(view) > size.Height {
-					t.Fatal("overflow")
-				}
+				assertFits(t, view, size.Width, size.Height)
 				if dir := os.Getenv("STRAP_LAYOUT_CAPTURE"); dir != "" {
 					if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%t-%d.ansi", dark, size.Width)), []byte(view), 0600); err != nil {
 						t.Fatal(err)

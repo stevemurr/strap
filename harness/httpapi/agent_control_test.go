@@ -3,12 +3,10 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"testing"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
-	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/httpapi"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
@@ -26,26 +24,7 @@ func (counter) CountTokens(context.Context, provider.Request) (int64, error) {
 // countingSession serves a session whose provider can measure a request.
 func countingSession(t *testing.T) *testSession {
 	t.Helper()
-	ctx := context.Background()
-	var session *harness.Session
-	service, err := httpapi.New(ctx, httpapi.Options{DefaultConfig: config(), Authorize: httpapi.BearerToken("test-token"), Factory: func(ctx context.Context, c harness.Config) (*harness.Session, error) {
-		var err error
-		session, err = harness.New(ctx, c, harness.Dependencies{Provider: counter{}})
-		return session, err
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if w := request(t, service, "POST", "/sessions", httpapi.CreateRequest{}); w.Code != 201 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	t.Cleanup(func() {
-		if err := service.Close(ctx); err != nil {
-			t.Error(err)
-		}
-	})
-	var _ http.Handler = service
-	return &testSession{Session: session, http: service}
+	return servedSession(t, counter{}, httpapi.BearerToken("test-token"))
 }
 
 func agentInfo(t *testing.T, body []byte) conversation.AgentInfo {

@@ -222,11 +222,7 @@ func (m *model) transcriptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		agents := m.session.Agents()
 		for i, a := range agents {
 			if a.ID == v.inspection.ID {
-				delta := 1
-				if key.String() == "[" {
-					delta = -1
-				}
-				m.openTranscript(agents[(i+delta+len(agents))%len(agents)].ID)
+				m.openTranscript(agents[(i+keyStep(key.String(), "[")+len(agents))%len(agents)].ID)
 				break
 			}
 		}

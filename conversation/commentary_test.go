@@ -13,15 +13,7 @@ func TestWorkerCommentaryReachesHostWithoutEnteringParentInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.next(t).tool("create_test_agent", `{"input":{"task":"inspect files","expected_output":"findings","context":null}}`)
-	var root, child call
-	for range 2 {
-		next := p.next(t)
-		if next.request.Agent == c.Root() {
-			root = next
-		} else {
-			child = next
-		}
-	}
+	root, child := rootAndChild(t, p, c.Root())
 	root.text("Delegated.")
 	userReply(t, c, "Delegated.")
 	child.answer <- answer{response: provider.Response{

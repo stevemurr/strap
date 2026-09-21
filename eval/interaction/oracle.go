@@ -14,6 +14,7 @@ import (
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -66,36 +67,97 @@ func firstBoundary(facts []fact, after eventlog.Cursor, f fixture) (boundary, bo
 	if f.Schema != nil {
 		return schemaBoundary(facts, after, f)
 	}
-	assigned := false
+	assigned := func(a agent.ToolActivity) bool {
+		if a.Call.Name != "assign_audit" {
+			return false
+		}
+		r, err := tool.DecodeAssignment(a.Call.Name, a.Call.Arguments)
+		return err == nil && r.Kind == work.AuditWork && r.WorkID == f.Original.ID
+	}
+	return boundaryAfter(facts, after, f.Root, assigned, func(m message.Message) bool { return m.To == message.User && m.Kind == message.Reply })
+}
+
+func boundaryReason(kind string) string {
+	switch kind {
+	case "tool_batch":
+		return "batch"
+	case "agent_yielded":
+		return "yield"
+	case "agent_exited":
+		return "agent_exit"
+	case "message":
+		return "reply"
+	}
+	return ""
+}
+
+// boundaryAfter finds the actor's first boundary after the cursor. A settled
+// batch only counts once a successful call satisfied accepted; a message only
+// counts when reply accepts it.
+func boundaryAfter(facts []fact, after eventlog.Cursor, actor identity.ActorID, accepted func(agent.ToolActivity) bool, reply func(message.Message) bool) (boundary, bool) {
+	done := false
 	for _, x := range facts {
 		if x.record.Sequence <= after.Sequence {
 			continue
 		}
-		if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == f.Root && !e.Activity.FinishedAt.IsZero() && e.Activity.Err == nil && e.Activity.Call.Name == "assign_audit" {
-			r, err := tool.DecodeAssignment(e.Activity.Call.Name, e.Activity.Call.Arguments)
-			if err == nil && r.Kind == work.AuditWork && r.WorkID == f.Original.ID {
-				assigned = true
-			}
+		if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == actor && !e.Activity.FinishedAt.IsZero() && e.Activity.Err == nil && accepted(e.Activity) {
+			done = true
 		}
-		if x.record.Agent != string(f.Root) {
+		if x.record.Agent != string(actor) {
 			continue
 		}
-		switch x.record.Kind {
-		case "tool_batch":
-			if assigned {
-				return boundary{cursor: x.record.Cursor(), reason: "batch"}, true
+		reason := boundaryReason(x.record.Kind)
+		switch reason {
+		case "":
+			continue
+		case "batch":
+			if !done {
+				continue
 			}
-		case "agent_yielded":
-			return boundary{cursor: x.record.Cursor(), reason: "yield"}, true
-		case "agent_exited":
-			return boundary{cursor: x.record.Cursor(), reason: "agent_exit"}, true
-		case "message":
-			if e, ok := x.event.(conversation.MessageEvent); ok && e.Message.To == message.User && e.Message.Kind == message.Reply {
-				return boundary{cursor: x.record.Cursor(), reason: "reply"}, true
+		case "reply":
+			if e, ok := x.event.(conversation.MessageEvent); !ok || !reply(e.Message) {
+				continue
 			}
 		}
+		return boundary{cursor: x.record.Cursor(), reason: reason}, true
 	}
 	return boundary{}, false
+}
+
+// usageTally sums reported tokens; a single unreported count leaves that total unknown.
+type usageTally struct {
+	count                   int
+	input, output           int64
+	inputKnown, outputKnown bool
+}
+
+func (t *usageTally) add(u *provider.Usage) {
+	if t.count == 0 {
+		t.inputKnown, t.outputKnown = true, true
+	}
+	t.count++
+	if u == nil || u.InputTokens == nil {
+		t.inputKnown = false
+	} else {
+		t.input += *u.InputTokens
+	}
+	if u == nil || u.OutputTokens == nil {
+		t.outputKnown = false
+	} else {
+		t.output += *u.OutputTokens
+	}
+}
+
+// apply records totals and lets the trace own the final output-error count:
+// the runtime may reject streamed output after the provider has returned.
+func (t *usageTally) apply(result *Result, failedOutputs int) {
+	result.Behavior.OutputErrors = max(result.Behavior.OutputErrors, failedOutputs)
+	if t.count > 0 && t.inputKnown {
+		result.InputTokens = &t.input
+	}
+	if t.count > 0 && t.outputKnown {
+		result.OutputTokens = &t.output
+	}
 }
 
 type domain struct {
@@ -134,9 +196,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 	seeded := false
 	accepted, extraActions, newAgents := 0, 0, 0
 	var exercisedGuards []string
-	input, output := int64(0), int64(0)
-	inputKnown, outputKnown := true, true
-	usageCount := 0
+	var usage usageTally
 	failedOutputs := 0
 	raceRejected, raceRevisionKnown, raceRecovered := false, false, false
 	for _, x := range facts {
@@ -253,35 +313,15 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 				check(result, "audit.only_expected_effects", "harness", collateral, "original enters checking; existing records otherwise unchanged", domainDiff(before.before, after), x.record.Cursor(), a.InvocationID)
 			}
 		case conversation.UsageEvent:
-			if !observed || e.Agent != f.Root {
-				continue
-			}
-			usageCount++
-			u := e.Observation.Usage
-			if u == nil || u.InputTokens == nil {
-				inputKnown = false
-			} else {
-				input += *u.InputTokens
-			}
-			if u == nil || u.OutputTokens == nil {
-				outputKnown = false
-			} else {
-				output += *u.OutputTokens
+			if observed && e.Agent == f.Root {
+				usage.add(e.Observation.Usage)
 			}
 		}
 	}
 	if !seeded {
 		initial = domainAt(model, f)
 	}
-	// The runtime may reject streamed output after the provider has returned
-	// (for example a reasoning limit). The trace owns that final outcome.
-	result.Behavior.OutputErrors = max(result.Behavior.OutputErrors, failedOutputs)
-	if usageCount > 0 && inputKnown {
-		result.InputTokens = &input
-	}
-	if usageCount > 0 && outputKnown {
-		result.OutputTokens = &output
-	}
+	usage.apply(result, failedOutputs)
 	current := domainAt(model, f)
 	original := findWork(current.Works, f.Original.ID)
 	want := f.Original.Clone()
@@ -548,12 +588,16 @@ func addReplayAssertion(result *Result, f fixture, live, replay []fact) {
 	}
 	before, after := project(live), project(replay)
 	check(result, "trace.replay_consistency", "harness", reflect.DeepEqual(before, after), "identical relevant state at grading prefix", domainDiff(before, after), result.Through, "")
+	rescore(result)
+}
+
+// rescore recomputes scores after replay assertions. A budget failure keeps
+// its failed outcome rather than the fresh score.
+func rescore(result *Result) {
 	previous := result.Outcome
 	updateScores(result)
 	if result.ErrorClass == "budget" {
 		result.Outcome = previous
-		result.Behavior.OutcomeCorrect = false
-		result.Behavior.CleanSuccess = false
-		result.Behavior.RecoverySuccess = false
+		result.Behavior.failOutcome()
 	}
 }

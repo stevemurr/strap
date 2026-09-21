@@ -3,7 +3,9 @@ package inspection
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -131,30 +133,17 @@ func Handler(reader *Reader) http.Handler {
 				write(v, e)
 				return
 			}
-			if len(parts) == 3 || len(parts) == 4 && parts[3] == "text" {
-				call, e := strconv.ParseUint(parts[2], 10, 64)
-				if e != nil || call == 0 {
-					write(nil, ErrReadQuery)
-					return
-				}
-				id := identity.OutputID{Agent: identity.ActorID(parts[1]), Call: call}
-				if len(parts) == 3 {
-					v, e := view.InspectOutput(r.Context(), id)
-					write(v, e)
-					return
-				}
-				offset, e := number("offset", 0)
-				if e != nil {
+			if oq, text, ok, e := OutputPath(parts, q); ok {
+				switch {
+				case e != nil:
 					write(nil, e)
-					return
+				case text:
+					v, e := view.ReadOutputText(r.Context(), oq)
+					write(v, e)
+				default:
+					v, e := view.InspectOutput(r.Context(), oq.Output)
+					write(v, e)
 				}
-				budget, e := number("max_bytes", 64<<10)
-				if e != nil || budget < 1 || budget > 1<<20 {
-					write(nil, ErrReadQuery)
-					return
-				}
-				v, e := view.ReadOutputText(r.Context(), OutputTextQuery{Output: id, Channel: provider.OutputChannel(q.Get("channel")), Offset: offset, MaxBytes: int(budget)})
-				write(v, e)
 				return
 			}
 		case "records":
@@ -171,4 +160,34 @@ func Handler(reader *Reader) http.Handler {
 		}
 		write(nil, projection.ErrNotFound)
 	})
+}
+
+// OutputPath parses /outputs/{agent}/{call}[/text] with its channel, offset and
+// max_bytes query. ok is false when parts has another shape.
+func OutputPath(parts []string, q url.Values) (query OutputTextQuery, text, ok bool, err error) {
+	if !(len(parts) == 3 || len(parts) == 4 && parts[3] == "text") {
+		return
+	}
+	ok, text = true, len(parts) == 4
+	call, e := strconv.ParseUint(parts[2], 10, 64)
+	if e != nil || call == 0 {
+		return query, text, ok, fmt.Errorf("%w: output call", ErrReadQuery)
+	}
+	query = OutputTextQuery{Output: identity.OutputID{Agent: identity.ActorID(parts[1]), Call: call}, Channel: provider.OutputChannel(q.Get("channel")), MaxBytes: 64 << 10}
+	if !text {
+		return
+	}
+	if q.Has("offset") {
+		if query.Offset, e = strconv.ParseUint(q.Get("offset"), 10, 64); e != nil {
+			return query, text, ok, fmt.Errorf("%w: offset", ErrReadQuery)
+		}
+	}
+	if q.Has("max_bytes") {
+		n, e := strconv.Atoi(q.Get("max_bytes"))
+		if e != nil || n < 1 || n > 1<<20 {
+			return query, text, ok, fmt.Errorf("%w: max_bytes must be between 1 and 1048576", ErrReadQuery)
+		}
+		query.MaxBytes = n
+	}
+	return
 }

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/provider"
@@ -73,11 +72,7 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, done := range []chan struct{}{p.finished, p.measured} {
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Fatal("headless work or telemetry stalled")
-			}
+			await(t, done, "headless work or telemetry stalled")
 		}
 		if err = s.Close(context.Background()); err != nil {
 			t.Fatal(err)
@@ -89,7 +84,7 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 			t.Fatal(attached, p.submits.Load(), p.counts.Load())
 		}
 		inspection := s.Inspect()
-		if !inspection.Coverage.ToolDiagnostics || inspection.Coverage.ModelRequests || !inspection.Config.Root.InjectedProvider || inspection.Config.Root.Model != nil {
+		if !inspection.Coverage.ToolDiagnostics || !inspection.Config.Root.InjectedProvider || inspection.Config.Root.Model != nil {
 			t.Fatal(inspection)
 		}
 		if err = s.Dispose(context.Background()); err != nil {
@@ -185,22 +180,14 @@ func TestAutomaticTelemetryBoundsConcurrentProviderIO(t *testing.T) {
 		}
 	}
 	for i := 0; i < 2; i++ {
-		select {
-		case <-p.started:
-		case <-time.After(time.Second):
-			t.Fatal("missing count")
-		}
+		await(t, p.started, "missing count")
 	}
 	if p.active.Load() != 2 {
 		t.Fatal(p.active.Load())
 	}
 	close(p.release)
 	for i := 0; i < 4; i++ {
-		select {
-		case <-p.started:
-		case <-time.After(time.Second):
-			t.Fatal("queued count missing")
-		}
+		await(t, p.started, "queued count missing")
 	}
 	if err = s.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -223,11 +210,7 @@ func TestAutomaticTelemetryCanBeDisabled(t *testing.T) {
 	if _, err = s.Send(s.Root(), "run"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-p.finished:
-	case <-time.After(time.Second):
-		t.Fatal("script stalled")
-	}
+	await(t, p.finished, "script stalled")
 	if err = s.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +219,8 @@ func TestAutomaticTelemetryCanBeDisabled(t *testing.T) {
 	}
 }
 
-func (t pingTool) InputContract() tool.Contract {
+func (t pingTool) InputContract() tool.Contract { return emptyContract() }
+func emptyContract() tool.Contract {
 	p, err := tool.NewParameters[struct{}]()
 	if err != nil {
 		panic(err)

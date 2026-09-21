@@ -3,7 +3,6 @@ package conversation_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -19,14 +18,7 @@ type limitedCountingProvider struct {
 func (p *limitedCountingProvider) OutputTokenLimit() *int64 { return &p.limit }
 
 func TestInspectionExposesPerAgentLimitsAndCountsAfterOrdinaryReplies(t *testing.T) {
-	c := conversation.New(context.Background())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := c.Close(ctx); err != nil {
-			t.Error(err)
-		}
-	})
+	c := emptyConversation(t)
 	rootProvider := &limitedCountingProvider{countingProvider: &countingProvider{controlledProvider: &controlledProvider{calls: make(chan call, 16)}}, limit: 32768}
 	childProvider := &limitedCountingProvider{countingProvider: &countingProvider{controlledProvider: &controlledProvider{calls: make(chan call, 16)}}, limit: 8192}
 	root, err := c.CreateAgent(message.User, agent.Spec{Provider: rootProvider})

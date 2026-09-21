@@ -3,7 +3,7 @@ package harness
 import "testing"
 
 func TestLocalToolsIncludesShellAndFiles(t *testing.T) {
-	tools, err := localTools(t.TempDir())
+	tools, err := localToolsWithChanges(t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

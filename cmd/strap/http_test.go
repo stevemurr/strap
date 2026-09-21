@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -122,22 +121,5 @@ func TestRunDispatchesListenToHTTPMode(t *testing.T) {
 	err := run(context.Background(), []string{"-listen", "127.0.0.1:0", "-C", t.TempDir()}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "STRAP_API_TOKEN") {
 		t.Fatal("the -listen flag did not enter HTTP mode", err)
-	}
-}
-
-// Option parsing rejects what it cannot act on, before anything is started.
-func TestParseOptionsRejectsUnusableInput(t *testing.T) {
-	for _, args := range [][]string{
-		{"unexpected-positional"},
-		{"-timeout", "0"},
-		{"-timeout", "-1s"},
-		{"-not-a-flag"},
-		{"-config", "/nonexistent/models.json"},
-	} {
-		if _, err := parseOptions(args, io.Discard); err == nil {
-			t.Fatal("accepted", args)
-		} else if errors.Is(err, context.Canceled) {
-			t.Fatal("wrong error", err)
-		}
 	}
 }

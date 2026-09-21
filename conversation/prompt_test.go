@@ -1,12 +1,10 @@
 package conversation_test
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -38,13 +36,7 @@ func TestConfiguredPromptAndAssignmentStaySeparateAndCreationIsUnavailable(t *te
 		t.Fatal(got)
 	}
 	root.tool("create_test_agent", `{"input":{"task":"first task","context":"a quoted \"value\"","expected_output":"one line"}}`)
-	var delegated call
-	for range 2 {
-		next := m.next(t)
-		if next.request.Agent != c.Root() {
-			delegated = next
-		}
-	}
+	_, delegated := rootAndChild(t, m, c.Root())
 	want := prompt.Prompt{Role: "Complete the assignment.", Instructions: []string{"Complete assigned work."}}
 	if got := systemPrompt(t, delegated); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
@@ -148,16 +140,9 @@ func TestAssignmentEventsAndProviderSnapshotsAreIndependent(t *testing.T) {
 
 func TestApplicationSnapshotsCreationSpec(t *testing.T) {
 	m := &controlledProvider{calls: make(chan call, 16)}
-	c := conversation.New(context.Background())
+	c := emptyConversation(t)
 	spec := agent.Spec{Provider: m, Prompt: prompt.Prompt{Role: "Execute", Instructions: []string{"original"}}, Tools: []tool.Tool{tool.SendMessage()}}
 	create := creationTool(c, spec)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := c.Close(ctx); err != nil {
-			t.Error(err)
-		}
-	})
 	spec.Prompt.Instructions[0] = "modified"
 	spec.Tools[0] = nil
 	if _, err := c.CreateAgent(message.User, agent.Spec{Provider: m, Prompt: prompt.Prompt{Role: "Coordinate"}, Tools: []tool.Tool{create}}); err != nil {
@@ -167,13 +152,9 @@ func TestApplicationSnapshotsCreationSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.next(t).tool("create_test_agent", `{"input":{"task":"work","context":null,"expected_output":null}}`)
-	for range 2 {
-		next := m.next(t)
-		if next.request.Agent != c.Root() {
-			if systemPrompt(t, next).Instructions[0] != "original" || len(next.request.Tools) != 1 || next.request.Tools[0].Name != "send_message" {
-				t.Fatal("spec was not snapshotted")
-			}
-		}
+	_, child := rootAndChild(t, m, c.Root())
+	if systemPrompt(t, child).Instructions[0] != "original" || len(child.request.Tools) != 1 || child.request.Tools[0].Name != "send_message" {
+		t.Fatal("spec was not snapshotted")
 	}
 }
 

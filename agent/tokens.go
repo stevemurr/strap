@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/stevemurr/strap/provider"
@@ -41,9 +40,5 @@ func (a *Agent) CountTokens(ctx context.Context, revision uint64) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	definitions := append([]provider.ToolDefinition(nil), a.definitions...)
-	for i := range definitions {
-		definitions[i].Parameters = append(json.RawMessage(nil), definitions[i].Parameters...)
-	}
-	return counter.CountTokens(ctx, provider.Request{Agent: a.config.ID, Messages: messages, Tools: definitions})
+	return counter.CountTokens(ctx, provider.Request{Agent: a.config.ID, Messages: messages, Tools: a.Definitions()})
 }

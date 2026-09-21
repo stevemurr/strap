@@ -40,7 +40,7 @@ func TestBundledProfilesCarryTheirGenerationSettings(t *testing.T) {
 			}
 		})
 	}
-	if _, err := Load("models.json", "nemotron-lightning", time.Second); err != nil {
+	if _, _, err := Resolve("models.json", "nemotron-lightning", time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

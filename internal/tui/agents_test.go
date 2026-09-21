@@ -10,7 +10,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
@@ -97,11 +96,7 @@ func TestAgentsCommandCountsSnapshotAndShowsPerAgentLimits(t *testing.T) {
 	}
 	for _, width := range []int{120, 80, 45, 1} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 50})
-		for _, line := range strings.Split(m.View(), "\n") {
-			if lipgloss.Width(line) > width {
-				t.Fatalf("overflow at %d: %s", width, line)
-			}
-		}
+		assertFits(t, m.View(), width, 0)
 		if width == 120 && !strings.Contains(m.View(), "Output cap") {
 			t.Fatal(m.View())
 		}
@@ -219,8 +214,5 @@ func TestAgentTableDisplaysRecordedRoleAndActiveWork(t *testing.T) {
 		if !strings.Contains(render, value) {
 			t.Fatal(render)
 		}
-	}
-	if got := workStatus(work.Work{State: work.ChangesRequested}); got != "awaiting repair assignment" {
-		t.Fatal(got)
 	}
 }

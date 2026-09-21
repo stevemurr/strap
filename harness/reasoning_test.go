@@ -47,10 +47,7 @@ func TestReasoningRecoveryNeverEntersNextHTTPRequest(t *testing.T) {
 		fmt.Fprint(w, "data: "+`{"choices":[{"index":0,"delta":{"content":" done"},"finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.LocalTools = false
-	cfg.Web = nil
+	cfg := testConfig(t, false)
 	cfg.Telemetry.ContextTokens = false
 	cfg.Model.BaseURL = server.URL
 	cfg.Events.JSONLPath = filepath.Join(t.TempDir(), "reasoning.jsonl")

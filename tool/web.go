@@ -84,7 +84,7 @@ func (w *wkrenderSearch) Search(ctx context.Context, query string, limit int) ([
 	if len(page.HTML) > 5<<20 {
 		return nil, errors.New("search HTML exceeded 5 MiB")
 	}
-	return searchResults(page.HTML)
+	return parseSearchResults(strings.NewReader(page.HTML))
 }
 
 func (w *wkrenderSearch) Close(ctx context.Context) error { return w.worker.Close(ctx) }

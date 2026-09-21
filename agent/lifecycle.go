@@ -73,60 +73,48 @@ func (a *Agent) unlockAndReportState() {
 		return
 	}
 	_ = a.report(*p)
-	if a.config.OnLifecycle != nil {
-		a.config.OnLifecycle(*p)
-	}
-	if a.config.OnState != nil {
-		a.config.OnState(p.State)
-	}
 }
+
+// transition applies one control change under the emission and control locks
+// and publishes the resulting state. apply runs only on a live, uninterrupted agent.
+func (a *Agent) transition(apply func()) (StateSnapshot, error) {
+	a.emission.Lock()
+	defer a.emission.Unlock()
+	a.control.mu.Lock()
+	if a.control.interrupt != nil {
+		s := StateSnapshot{a.control.state, a.control.revision}
+		a.control.mu.Unlock()
+		return s, ErrInterrupted
+	}
+	if a.control.state.Terminal() || a.stopRequested.Load() {
+		s := StateSnapshot{a.control.state, a.control.revision}
+		a.control.mu.Unlock()
+		return s, errors.New("agent is stopping or stopped")
+	}
+	apply()
+	s := StateSnapshot{a.control.state, a.control.revision}
+	a.unlockAndReportState()
+	return s, a.reportError()
+}
+
 func (a *Agent) PauseSnapshot() (StateSnapshot, error) {
-	a.emission.Lock()
-	defer a.emission.Unlock()
-	a.control.mu.Lock()
-	if a.control.interrupt != nil {
-		s := StateSnapshot{a.control.state, a.control.revision}
-		a.control.mu.Unlock()
-		return s, ErrInterrupted
-	}
-	if a.control.state.Terminal() || a.stopRequested.Load() {
-		s := StateSnapshot{a.control.state, a.control.revision}
-		a.control.mu.Unlock()
-		return s, errors.New("agent is stopping or stopped")
-	}
-	if a.control.state != Paused && a.control.state != PauseRequested {
-		a.setStateLocked(PauseRequested)
-	}
-	if a.control.waitCancel != nil {
-		a.control.waitCancel()
-	}
-	s := StateSnapshot{a.control.state, a.control.revision}
-	a.unlockAndReportState()
-	return s, a.reportError()
+	return a.transition(func() {
+		if a.control.state != Paused && a.control.state != PauseRequested {
+			a.setStateLocked(PauseRequested)
+		}
+		if a.control.waitCancel != nil {
+			a.control.waitCancel()
+		}
+	})
 }
-func (a *Agent) Pause() (State, error) { s, e := a.PauseSnapshot(); return s.State, e }
+
 func (a *Agent) ResumeSnapshot() (StateSnapshot, error) {
-	a.emission.Lock()
-	defer a.emission.Unlock()
-	a.control.mu.Lock()
-	if a.control.interrupt != nil {
-		s := StateSnapshot{a.control.state, a.control.revision}
-		a.control.mu.Unlock()
-		return s, ErrInterrupted
-	}
-	if a.control.state.Terminal() || a.stopRequested.Load() {
-		s := StateSnapshot{a.control.state, a.control.revision}
-		a.control.mu.Unlock()
-		return s, errors.New("agent is stopping or stopped")
-	}
-	if a.control.state == Paused || a.control.state == PauseRequested {
-		a.setStateLocked(Running)
-	}
-	s := StateSnapshot{a.control.state, a.control.revision}
-	a.unlockAndReportState()
-	return s, a.reportError()
+	return a.transition(func() {
+		if a.control.state == Paused || a.control.state == PauseRequested {
+			a.setStateLocked(Running)
+		}
+	})
 }
-func (a *Agent) Resume() (State, error) { s, e := a.ResumeSnapshot(); return s.State, e }
 
 // errQuiesced unwinds the loop after a RequestQuiesce. It never reaches a
 // consumer: Run translates it to a clean exit.

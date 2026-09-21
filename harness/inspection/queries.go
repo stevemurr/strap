@@ -150,12 +150,7 @@ func (v *View) index(e eventlog.Record) error {
 	case "tool":
 		var t ToolView
 		if framed {
-			var c struct {
-				Execution  *tool.ExecutionBinding `json:"execution,omitempty"`
-				Invocation string                 `json:"invocation_id"`
-				Name       string                 `json:"name"`
-				FinishedAt time.Time              `json:"finished_at"`
-			}
+			var c record.ToolControl
 			if err := json.Unmarshal(raw, &c); err != nil {
 				return err
 			}
@@ -334,13 +329,23 @@ func (v *View) ListTools(ctx context.Context, q ToolQuery) (ToolPage, error) {
 	if err != nil {
 		return ToolPage{}, err
 	}
-	page := ToolPage{Through: v.through, Next: pq.After, Items: []ToolView{}}
-	for _, id := range v.indexes.toolOrder {
-		if err := ctx.Err(); err != nil {
-			return ToolPage{}, err
+	return paginate(ctx, v.through, pq, len(v.indexes.toolOrder), func(i int) (uint64, func() (ToolView, bool, error)) {
+		t := v.indexes.tools[v.indexes.toolOrder[i]]
+		return t.StartRecord.Sequence, func() (ToolView, bool, error) {
+			if q.Agent != "" && q.Agent != t.Agent || q.Name != "" && q.Name != t.Name {
+				return ToolView{}, false, nil
+			}
+			return cloneTool(t), true, nil
 		}
-		t := v.indexes.tools[id]
-		seq := t.StartRecord.Sequence
+	})
+}
+func paginate[T any](ctx context.Context, through eventlog.Cursor, pq PageQuery, n int, at func(i int) (uint64, func() (T, bool, error))) (Page[T], error) {
+	page := Page[T]{Through: through, Next: pq.After, Items: []T{}}
+	for i := range n {
+		if err := ctx.Err(); err != nil {
+			return Page[T]{}, err
+		}
+		seq, item := at(i)
 		if seq <= pq.After {
 			continue
 		}
@@ -348,13 +353,16 @@ func (v *View) ListTools(ctx context.Context, q ToolQuery) (ToolPage, error) {
 			return page, nil
 		}
 		page.Next = seq
-		if q.Agent != "" && q.Agent != t.Agent || q.Name != "" && q.Name != t.Name {
-			continue
+		v, ok, err := item()
+		if err != nil {
+			return page, err
 		}
-		page.Items = append(page.Items, cloneTool(t))
+		if ok {
+			page.Items = append(page.Items, v)
+		}
 	}
 	page.End = true
-	page.Next = v.through.Sequence
+	page.Next = through.Sequence
 	return page, nil
 }
 func (v *View) ListOutputs(ctx context.Context, q OutputQuery) (OutputPage, error) {
@@ -367,31 +375,16 @@ func (v *View) ListOutputs(ctx context.Context, q OutputQuery) (OutputPage, erro
 	if err != nil {
 		return OutputPage{}, err
 	}
-	page := OutputPage{Through: v.through, Next: pq.After, Items: []OutputView{}}
-	for _, id := range v.indexes.outputOrder {
-		if err := ctx.Err(); err != nil {
-			return OutputPage{}, err
+	return paginate(ctx, v.through, pq, len(v.indexes.outputOrder), func(i int) (uint64, func() (OutputView, bool, error)) {
+		id := v.indexes.outputOrder[i]
+		return v.indexes.outputs[id].StartRecord.Sequence, func() (OutputView, bool, error) {
+			if q.Agent != "" && q.Agent != id.Agent {
+				return OutputView{}, false, nil
+			}
+			o, err := v.output(id)
+			return o, err == nil, err
 		}
-		seq := v.indexes.outputs[id].StartRecord.Sequence
-		if seq <= pq.After {
-			continue
-		}
-		if len(page.Items) == pq.Limit {
-			return page, nil
-		}
-		page.Next = seq
-		if q.Agent != "" && q.Agent != id.Agent {
-			continue
-		}
-		o, err := v.output(id)
-		if err != nil {
-			return page, err
-		}
-		page.Items = append(page.Items, o)
-	}
-	page.End = true
-	page.Next = v.through.Sequence
-	return page, nil
+	})
 }
 func (v *View) ListAgents(ctx context.Context, q AgentQuery) (AgentPage, error) {
 	ctx, done, err := v.query(ctx)
@@ -408,26 +401,14 @@ func (v *View) ListAgents(ctx context.Context, q AgentQuery) (AgentPage, error) 
 		return AgentPage{}, err
 	}
 	works := model.Works()
-	page := AgentPage{Through: v.through, Next: q.After, Items: []projection.AgentInspection{}}
-	for _, id := range v.indexes.agentOrder {
-		if err := ctx.Err(); err != nil {
-			return AgentPage{}, err
+	return paginate(ctx, v.through, q, len(v.indexes.agentOrder), func(i int) (uint64, func() (projection.AgentInspection, bool, error)) {
+		id := v.indexes.agentOrder[i]
+		return v.indexes.agentStarts[id], func() (projection.AgentInspection, bool, error) {
+			base, err := v.projection.AgentInspection(id)
+			if err != nil {
+				return projection.AgentInspection{}, false, err
+			}
+			return v.projection.Enrich(base, works), true, nil
 		}
-		seq := v.indexes.agentStarts[id]
-		if seq <= q.After {
-			continue
-		}
-		if len(page.Items) == q.Limit {
-			return page, nil
-		}
-		page.Next = seq
-		base, err := v.projection.AgentInspection(id)
-		if err != nil {
-			return page, err
-		}
-		page.Items = append(page.Items, v.projection.Enrich(base, works))
-	}
-	page.End = true
-	page.Next = v.through.Sequence
-	return page, nil
+	})
 }

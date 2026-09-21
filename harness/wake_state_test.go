@@ -112,19 +112,12 @@ func (f wakeWorker) Submit(_ context.Context, r provider.Request, _ provider.Obs
 	}
 }
 
-type wakeIdle struct{}
-
-func (wakeIdle) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
-	return provider.Response{Content: "idle"}, nil
-}
-
 func TestAgentsWakeWithTheirCurrentStateBlock(t *testing.T) {
 	p := &wakeState{done: make(chan error, 1)}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cfg := harness.DefaultConfig()
-	cfg.Dir, cfg.LocalTools, cfg.Web = t.TempDir(), false, nil
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Root: harness.AgentDependencies{Provider: wakeRoot{p}}, Implementor: harness.AgentDependencies{Provider: wakeWorker{p}}, Provider: wakeIdle{}})
+	cfg := testConfig(t, false)
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Root: harness.AgentDependencies{Provider: wakeRoot{p}}, Implementor: harness.AgentDependencies{Provider: wakeWorker{p}}, Provider: textResponse("idle")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,12 +125,7 @@ func TestAgentsWakeWithTheirCurrentStateBlock(t *testing.T) {
 	if _, err = s.Send(s.Root(), "Plan and assign one step"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-p.done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err(), p.rootCalls.Load(), p.workerCalls.Load())
+	if err := await(t, p.done, "wake"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -78,6 +78,10 @@ type Behavior struct {
 	OutputErrors      int  `json:"output_errors"`
 }
 
+func (b *Behavior) failOutcome() {
+	b.OutcomeCorrect, b.CleanSuccess, b.RecoverySuccess = false, false, false
+}
+
 // SchemaBehavior distinguishes first-operation selection and argument validity
 // from eventual recovery. Reads before an operation do not consume an attempt.
 type SchemaBehavior struct {

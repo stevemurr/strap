@@ -40,7 +40,6 @@ func (m *model) finishAttachments(msg attachmentsLoaded) {
 		return
 	}
 	m.attachmentJob = nil
-	defer m.refreshActivity()
 	if m.input.Value() != msg.job.draft {
 		m.add("Files", "Draft changed while loading attachments. Send again to load the updated references.", true)
 		return

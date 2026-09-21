@@ -5,12 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/stevemurr/strap/roster"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stevemurr/strap/agent"
+	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/roster"
 
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/httpapi"
@@ -50,32 +54,21 @@ type testSession struct {
 	http http.Handler
 }
 
-func recoverySession(t *testing.T, viaHTTP bool) (context.Context, *testSession) {
+// servedSession creates one session over HTTP with the given provider and
+// serves it until the test ends.
+func servedSession(t *testing.T, p provider.Provider, authorize func(*http.Request, httpapi.Capability, string) error) *testSession {
 	t.Helper()
 	ctx := context.Background()
 	var session *harness.Session
-	if !viaHTTP {
-		s, err := harness.New(ctx, config(), harness.Dependencies{Provider: idle{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := s.Dispose(ctx); err != nil {
-				t.Error(err)
-			}
-		})
-		return ctx, &testSession{Session: s}
-	}
-	service, err := httpapi.New(ctx, httpapi.Options{DefaultConfig: config(), Authorize: httpapi.BearerToken("test-token"), Factory: func(ctx context.Context, c harness.Config) (*harness.Session, error) {
+	service, err := httpapi.New(ctx, httpapi.Options{DefaultConfig: config(), Authorize: authorize, Factory: func(ctx context.Context, c harness.Config) (*harness.Session, error) {
 		var err error
-		session, err = harness.New(ctx, c, harness.Dependencies{Provider: idle{}})
+		session, err = harness.New(ctx, c, harness.Dependencies{Provider: p})
 		return session, err
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := request(t, service, "POST", "/sessions", httpapi.CreateRequest{})
-	if w.Code != 201 {
+	if w := request(t, service, "POST", "/sessions", httpapi.CreateRequest{}); w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	t.Cleanup(func() {
@@ -83,7 +76,38 @@ func recoverySession(t *testing.T, viaHTTP bool) (context.Context, *testSession)
 			t.Error(err)
 		}
 	})
-	return ctx, &testSession{Session: session, http: service}
+	return &testSession{Session: session, http: service}
+}
+func recoverySession(t *testing.T, viaHTTP bool) (context.Context, *testSession) {
+	t.Helper()
+	ctx := context.Background()
+	if viaHTTP {
+		return ctx, servedSession(t, idle{}, httpapi.BearerToken("test-token"))
+	}
+	s, err := harness.New(ctx, config(), harness.Dependencies{Provider: idle{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Dispose(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	return ctx, &testSession{Session: s}
+}
+func awaitIdle(t *testing.T, s *harness.Session, what string) {
+	t.Helper()
+	wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		e, err := s.NextEvent(wait)
+		if err != nil {
+			t.Fatal(what, err)
+		}
+		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Root() && c.State == agent.Idle {
+			return
+		}
+	}
 }
 func operationResult[T any](t *testing.T, s *testSession, viaHTTP bool, actor identity.ActorID, name string, params any, direct func() (T, error)) T {
 	t.Helper()

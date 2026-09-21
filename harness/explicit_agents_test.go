@@ -21,12 +21,9 @@ import (
 
 func TestRegisteredViewsAndWorkDiscoveryReplayAtFixedPrefix(t *testing.T) {
 	ctx := context.Background()
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
-	cfg.LocalTools = false
+	cfg := testConfig(t, false)
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
-	s, e := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}})
+	s, e := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if e != nil {
 		t.Fatal(e)
 	}

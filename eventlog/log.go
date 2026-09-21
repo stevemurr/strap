@@ -54,8 +54,7 @@ type Option func(*Log)
 
 // WithFailureSink runs once independently of blocked backend I/O. It must return
 // promptly and must not synchronously wait for session/log finalization.
-func WithFailureSink(f func(error)) Option    { return func(l *Log) { l.failureSink = f } }
-func WithWriteTimeout(d time.Duration) Option { return func(l *Log) { l.writeTimeout = d } }
+func WithFailureSink(f func(error)) Option { return func(l *Log) { l.failureSink = f } }
 func New(store Store, limits Limits, options ...Option) (*Log, error) {
 	if store == nil {
 		return nil, errors.New("event store is required")
@@ -69,15 +68,19 @@ func New(store Store, limits Limits, options ...Option) (*Log, error) {
 	for _, option := range options {
 		option(l)
 	}
-	if l.writeTimeout <= 0 {
-		cw()
-		cr()
-		return nil, errors.New("write timeout must be positive")
-	}
 	go l.run()
 	return l, nil
 }
 func (l *Log) signal() { close(l.wake); l.wake = make(chan struct{}) }
+
+// withWriteBudget runs one backend write under the write timeout. Expiry fails
+// the log immediately, without waiting for the blocked write to return.
+func (l *Log) withWriteBudget(op func(context.Context) error) error {
+	run, cancel := context.WithTimeout(l.writeCtx, l.writeTimeout)
+	defer cancel()
+	defer context.AfterFunc(run, func() { l.Fail(run.Err()) })()
+	return op(run)
+}
 func (l *Log) fail(err error) {
 	if err == nil || l.err != nil {
 		return
@@ -191,11 +194,11 @@ func (l *Log) run() {
 			l.queue[0] = nil
 			l.queue = l.queue[1:]
 			l.mu.Unlock()
-			run, cancel := context.WithTimeout(l.writeCtx, l.writeTimeout)
-			stop := context.AfterFunc(run, func() { l.Fail(run.Err()) })
-			e, err := l.store.Append(run, j.data)
-			stop()
-			cancel()
+			var e Event
+			err := l.withWriteBudget(func(run context.Context) (err error) {
+				e, err = l.store.Append(run, j.data)
+				return err
+			})
 			l.mu.Lock()
 			if err != nil {
 				l.fail(err)
@@ -216,11 +219,7 @@ func (l *Log) run() {
 		if l.finishing {
 			o := l.outcome
 			l.mu.Unlock()
-			run, cancel := context.WithTimeout(l.writeCtx, l.writeTimeout)
-			stop := context.AfterFunc(run, func() { l.Fail(run.Err()) })
-			err := l.store.Seal(run, o)
-			stop()
-			cancel()
+			err := l.withWriteBudget(func(run context.Context) error { return l.store.Seal(run, o) })
 			l.mu.Lock()
 			if err != nil {
 				l.fail(err)
@@ -299,10 +298,7 @@ func (l *Log) Status() Status {
 func (l *Log) Read(ctx context.Context, q Query) (Page, error) {
 	run, done, err := l.reads.Begin(ctx)
 	if err != nil {
-		if errors.Is(err, admission.ErrClosed) {
-			err = ErrDisposed
-		}
-		return Page{}, err
+		return Page{}, readError(err)
 	}
 	defer done()
 	return l.store.Read(run, q)

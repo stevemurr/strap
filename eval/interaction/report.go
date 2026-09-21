@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -243,13 +244,8 @@ func reportMarkdown(dir string, report Report) string {
 	b.WriteString("## Errors and usage\n\n")
 	fmt.Fprintf(&b, "Trials with errors: %d/%d completed trials.\n\n", errors, len(report.Results))
 	if len(classes) > 0 {
-		keys := make([]string, 0, len(classes))
-		for class := range classes {
-			keys = append(keys, class)
-		}
-		sort.Strings(keys)
 		b.WriteString("| Error class | Affected/all trials |\n| --- | ---: |\n")
-		for _, class := range keys {
+		for _, class := range slices.Sorted(maps.Keys(classes)) {
 			fmt.Fprintf(&b, "| %s | %d/%d |\n", markdownText(class), classes[class], len(report.Results))
 		}
 		b.WriteByte('\n')

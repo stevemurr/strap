@@ -55,7 +55,6 @@ func transcriptSetup(t *testing.T) (*model, *transcriptSession) {
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	return m, s
 }
-func key(m *model, s string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
 
 func TestTranscriptCommandPagingSwitchAndNoDelivery(t *testing.T) {
 	m, s := transcriptSetup(t)
@@ -71,11 +70,11 @@ func TestTranscriptCommandPagingSwitchAndNoDelivery(t *testing.T) {
 	if len(s.queries) != 2 || s.queries[1].Before != 6 || len(m.transcript.inspection.Transcript.Entries) != 25 {
 		t.Fatal("older messages were not prepended")
 	}
-	key(m, "[")
+	typeText(m, "[")
 	if m.transcript.inspection.ID != "root" {
 		t.Fatal("agent switch failed")
 	}
-	key(m, "r")
+	typeText(m, "r")
 	if s.queries[len(s.queries)-1].Before != 0 {
 		t.Fatal("refresh did not select latest")
 	}
@@ -105,7 +104,7 @@ func TestTranscriptKeepsMainDraftViewportAndEventHandling(t *testing.T) {
 	if strings.Contains(m.View(), "arrived while browsing") {
 		t.Fatal("main events overwrote selected transcript")
 	}
-	key(m, "]")
+	typeText(m, "]")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 15})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -131,7 +130,7 @@ func TestTranscriptDisplaysArgumentsErrorsAndImageMetadataSafely(t *testing.T) {
 	if strings.Contains(text, "evil") {
 		t.Fatal("terminal control leaked")
 	}
-	key(m, "v")
+	typeText(m, "v")
 	m.transcript.viewport.GotoTop()
 	raw := m.transcript.viewport.View()
 	if !strings.Contains(raw, "Checking now.") || !strings.Contains(raw, "Arguments") {

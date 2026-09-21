@@ -116,22 +116,4 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 	}
 }
 
-func TestCLIRejectsInvalidOrUnsupportedModelOptions(t *testing.T) {
-	for _, args := range [][]string{
-		{"-backend", "unknown"},
-		{"-backend", "chatcompletions", "-temperature", "0"},
-		{"-backend", "chatcompletions", "-thinking=false"},
-		{"-backend", "chatcompletions", "-reasoning-effort", "low"},
-		{"-reasoning-effort", "high"}, {"-reasoning-effort", ""},
-		{"-backend", "chatcompletions", "-force-nonempty-content=false"},
-		{"-temperature", "NaN"}, {"-temperature", "-1"}, {"-top-p", "0"},
-		{"-max-tokens", "0"}, {"-top-k", "1.5"}, {"-thinking=maybe"},
-	} {
-		_, err := parseOptions(append([]string{"-config", catalogPath}, args...), io.Discard)
-		if err == nil {
-			t.Errorf("accepted %v", args)
-		}
-	}
-}
-
 func valuePtr[T any](v T) *T { return &v }

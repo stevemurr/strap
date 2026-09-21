@@ -27,6 +27,21 @@ type Generation struct {
 // no generation policy of its own can reject settings meant for another one.
 func (g Generation) Empty() bool { return reflect.DeepEqual(g, Generation{}) }
 
+// Clone returns an independent copy, preserving unset and explicit zero values.
+func (g Generation) Clone() Generation {
+	g.Temperature = copyValue(g.Temperature)
+	g.TopP = copyValue(g.TopP)
+	g.TopK = copyValue(g.TopK)
+	g.MinP = copyValue(g.MinP)
+	g.PresencePenalty = copyValue(g.PresencePenalty)
+	g.RepetitionPenalty = copyValue(g.RepetitionPenalty)
+	g.MaxTokens = copyValue(g.MaxTokens)
+	g.EnableThinking = copyValue(g.EnableThinking)
+	g.ReasoningEffort = copyValue(g.ReasoningEffort)
+	g.ForceNonemptyContent = copyValue(g.ForceNonemptyContent)
+	return g
+}
+
 type generationFields struct {
 	Temperature       *float64        `json:"temperature,omitempty"`
 	TopP              *float64        `json:"top_p,omitempty"`
@@ -85,13 +100,14 @@ func (g Generation) freeze() (generationFields, error) {
 			return generationFields{}, fmt.Errorf("reasoning_effort must be low, medium, or xhigh")
 		}
 	}
+	g = g.Clone()
 	fields := generationFields{
-		Temperature: copyValue(g.Temperature), TopP: copyValue(g.TopP), TopK: copyValue(g.TopK),
-		MinP: copyValue(g.MinP), PresencePenalty: copyValue(g.PresencePenalty),
-		RepetitionPenalty: copyValue(g.RepetitionPenalty), MaxTokens: copyValue(g.MaxTokens),
+		Temperature: g.Temperature, TopP: g.TopP, TopK: g.TopK,
+		MinP: g.MinP, PresencePenalty: g.PresencePenalty,
+		RepetitionPenalty: g.RepetitionPenalty, MaxTokens: g.MaxTokens,
 	}
 	if g.EnableThinking != nil || g.ForceNonemptyContent != nil || g.ReasoningEffort != nil {
-		fields.ChatTemplate = &templateFields{EnableThinking: copyValue(g.EnableThinking), ForceNonemptyContent: copyValue(g.ForceNonemptyContent), ReasoningEffort: copyValue(g.ReasoningEffort)}
+		fields.ChatTemplate = &templateFields{EnableThinking: g.EnableThinking, ForceNonemptyContent: g.ForceNonemptyContent, ReasoningEffort: g.ReasoningEffort}
 	}
 	return fields, nil
 }

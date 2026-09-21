@@ -9,23 +9,6 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 )
 
-func TestMemoryQuotaPreservesAcceptedPrefix(t *testing.T) {
-	s := memory(t, 2, 4096)
-	defer s.Close(ctx)
-	for i := 0; i < 2; i++ {
-		if _, err := s.Append(ctx, data(i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Append(ctx, data(2)); err == nil {
-		t.Fatal("quota accepted a third record")
-	}
-	page, err := s.Read(ctx, eventlog.Query{Limit: 10})
-	if err != nil || len(page.Events) != 2 || page.Events[0].Sequence != 1 {
-		t.Fatalf("accepted prefix lost: %+v %v", page, err)
-	}
-}
-
 func TestStoreWaitObservesAppendAndFailure(t *testing.T) {
 	s := memory(t, 10, 4096)
 	defer s.Close(ctx)

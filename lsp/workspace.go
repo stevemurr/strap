@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+	"slices"
 	"time"
 )
 
@@ -134,18 +134,11 @@ func (m *Manager) reconcile(ctx context.Context, s *instance) error {
 	}
 	s.files = files
 	s.scanned = true
-	paths := make([]string, 0, len(s.documents))
-	for p := range s.documents {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
+	for _, path := range slices.Sorted(maps.Keys(s.documents)) {
 		d := s.documents[path]
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if s.client.openClose {
-				if err = s.client.notify(ctx, "textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": fileURI(path)}}); err != nil {
-					return err
-				}
+			if err := s.client.closeDocument(ctx, path); err != nil {
+				return err
 			}
 			delete(s.documents, path)
 			continue
@@ -182,19 +175,15 @@ func (m *Manager) syncDocument(ctx context.Context, s *instance, path, language 
 					old, age = p, v.used
 				}
 			}
-			if c.openClose {
-				if err = c.notify(ctx, "textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": fileURI(old)}}); err != nil {
-					return nil, err
-				}
+			if err = c.closeDocument(ctx, old); err != nil {
+				return nil, err
 			}
 			delete(s.documents, old)
 		}
 		s.nextVersion++
 		d = &document{version: s.nextVersion, language: language}
-		if c.openClose {
-			if err = c.notify(ctx, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": fileURI(path), "languageId": language, "version": d.version, "text": text}}); err != nil {
-				return nil, err
-			}
+		if err = c.openDocument(ctx, path, language, d.version, text); err != nil {
+			return nil, err
 		}
 	} else {
 		copy := *d
@@ -209,13 +198,10 @@ func (m *Manager) syncDocument(ctx context.Context, s *instance, path, language 
 			if err = c.notify(ctx, "textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": fileURI(path), "version": d.version}, "contentChanges": []any{change}}); err != nil {
 				return nil, err
 			}
-		} else if c.openClose {
-			if err = c.notify(ctx, "textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": fileURI(path)}}); err != nil {
-				return nil, err
-			}
-			if err = c.notify(ctx, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": fileURI(path), "languageId": language, "version": d.version, "text": text}}); err != nil {
-				return nil, err
-			}
+		} else if err = c.closeDocument(ctx, path); err != nil {
+			return nil, err
+		} else if err = c.openDocument(ctx, path, language, d.version, text); err != nil {
+			return nil, err
 		}
 	}
 	if c.save {
@@ -236,9 +222,17 @@ func (m *Manager) syncDocument(ctx context.Context, s *instance, path, language 
 	return d, nil
 }
 
-func (m *Manager) target(ctx context.Context, t Target) (*instance, *document, string, wirePosition, error) {
+// resolvedTarget is a synchronized document position ready for a wire request.
+type resolvedTarget struct {
+	instance *instance
+	document *document
+	path     string
+	position wirePosition
+}
+
+func (m *Manager) target(ctx context.Context, t Target) (*resolvedTarget, error) {
 	if err := validateTarget(t); err != nil {
-		return nil, nil, "", wirePosition{}, err
+		return nil, err
 	}
 	var s *instance
 	var path, lang string
@@ -246,59 +240,52 @@ func (m *Manager) target(ctx context.Context, t Target) (*instance, *document, s
 	if t.Ref != "" {
 		r, ok := m.refs[t.Ref]
 		if !ok {
-			return nil, nil, "", wirePosition{}, failure("stale_reference", "reference expired; rediscover the location")
+			return nil, failure("stale_reference", "reference expired; rediscover the location")
 		}
 		s = m.instances[r.key]
 		if s == nil || s.client == nil || !s.client.alive() || s.generation != r.generation {
-			return nil, nil, "", wirePosition{}, failure("stale_reference", "server restarted; rediscover the location")
+			return nil, failure("stale_reference", "server restarted; rediscover the location")
 		}
 		path = r.path
 		t.Line = r.position.Line
 		t.Column = r.position.Column
 		b, e := readBounded(path, m.config.MaxFileBytes)
 		if e != nil || digest(b) != r.hash {
-			return nil, nil, "", wirePosition{}, failure("stale_reference", "document changed; rediscover the location")
+			return nil, failure("stale_reference", "document changed; rediscover the location")
 		}
 		lang = language(s.config, path)
 	} else {
 		path, err = m.path(t.Path)
 		if err != nil {
-			return nil, nil, "", wirePosition{}, err
+			return nil, err
 		}
 		s, lang, err = m.forFile(ctx, path)
 		if err != nil {
-			return nil, nil, "", wirePosition{}, err
+			return nil, err
 		}
 	}
 	if err = m.reconcile(ctx, s); err != nil {
-		return nil, nil, "", wirePosition{}, err
+		return nil, err
 	}
 	d, err := m.syncDocument(ctx, s, path, lang)
 	if err != nil {
-		return nil, nil, "", wirePosition{}, err
+		return nil, err
 	}
 	if t.Ref != "" && m.refs[t.Ref].hash != d.hash {
-		return nil, nil, "", wirePosition{}, failure("stale_reference", "document changed while synchronizing")
+		return nil, failure("stale_reference", "document changed while synchronizing")
 	}
 	if t.Symbol != "" {
 		position, err := symbolPosition(d.text, d.language, t.Line, t.Symbol, t.Context)
 		if err != nil {
-			return nil, nil, "", wirePosition{}, err
+			return nil, err
 		}
 		t.Column = position.Column
 	}
 	p, err := toWire(d.text, Position{t.Line, t.Column}, s.client.encoding)
 	if err != nil {
-		return nil, nil, "", wirePosition{}, err
+		return nil, err
 	}
-	if t.ExpectedText != nil {
-		ls := lines(d.text)
-		r := []rune(strings.TrimSuffix(ls[t.Line-1], "\r"))
-		if !strings.HasPrefix(string(r[t.Column-1:]), *t.ExpectedText) {
-			return nil, nil, "", wirePosition{}, failure("invalid_position", "expected_text does not match at this position")
-		}
-	}
-	return s, d, path, p, nil
+	return &resolvedTarget{s, d, path, p}, nil
 }
 
 func (m *Manager) checkHashes(items []Item, meta *Metadata) {
@@ -329,6 +316,18 @@ func require(c *client, cap string) error {
 }
 func documentParams(path string) map[string]any {
 	return map[string]any{"textDocument": map[string]string{"uri": fileURI(path)}}
+}
+func (c *client) openDocument(ctx context.Context, path, language string, version int, text string) error {
+	if !c.openClose {
+		return nil
+	}
+	return c.notify(ctx, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": fileURI(path), "languageId": language, "version": version, "text": text}})
+}
+func (c *client) closeDocument(ctx context.Context, path string) error {
+	if !c.openClose {
+		return nil
+	}
+	return c.notify(ctx, "textDocument/didClose", documentParams(path))
 }
 func positionParams(path string, p wirePosition) map[string]any {
 	v := documentParams(path)

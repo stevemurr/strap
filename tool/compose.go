@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -264,10 +263,6 @@ func composeBy(field string, def provider.ToolDefinition, branches ...Tool) Tool
 	return result
 }
 
-func (t *composedTool) snapshot() preparedTool {
-	copy := &composedTool{root: t.root, spec: t.spec, discriminator: t.discriminator, values: slices.Clone(t.values), byValue: maps.Clone(t.byValue)}
-	for _, branch := range t.branches {
-		copy.branches = append(copy.branches, branch.snapshot())
-	}
-	return copy
-}
+// snapshot returns the composition itself: branches were snapshotted when it
+// was built and nothing mutates it afterwards.
+func (t *composedTool) snapshot() preparedTool { return t }

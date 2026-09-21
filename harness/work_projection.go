@@ -25,18 +25,7 @@ func (s *Session) workView(ctx context.Context) (*work.ReadModel, error) {
 		if err = json.Unmarshal(e.Payload, &v); err != nil {
 			return nil, err
 		}
-		if v.Event.Change != nil {
-			view.Apply(*v.Event.Change)
-		} else {
-			c := work.Change{}
-			if v.Event.Work.ID != "" {
-				c.Works = append(c.Works, v.Event.Work)
-			}
-			if v.Event.Plan != nil {
-				c.Plans = append(c.Plans, *v.Event.Plan)
-			}
-			view.Apply(c)
-		}
+		view.Apply(v.Event.Changes())
 	}
 	return view, nil
 }

@@ -9,10 +9,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/stevemurr/strap/agent"
-	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
@@ -65,17 +62,7 @@ func tracedSession(t *testing.T) traceFixture {
 		t.Fatal(err)
 	}
 	// The root returns to Idle once its tool call and reply have been recorded.
-	wait, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	for {
-		e, err := s.NextEvent(wait)
-		if err != nil {
-			t.Fatal("session never settled", err)
-		}
-		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Root() && c.State == agent.Idle {
-			break
-		}
-	}
+	awaitIdle(t, s)
 	reader, err := s.Trace(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -89,10 +76,7 @@ func tracedSession(t *testing.T) traceFixture {
 }
 
 func (f traceFixture) get(t *testing.T, path string) *httptest.ResponseRecorder {
-	t.Helper()
-	w := httptest.NewRecorder()
-	f.handler.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
-	return w
+	return get(t, f.handler, path)
 }
 
 // decode asserts a 200 and unmarshals the body into T.

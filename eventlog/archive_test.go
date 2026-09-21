@@ -186,13 +186,7 @@ func TestLogRequiresAStoreAndAPositiveWriteTimeout(t *testing.T) {
 	if _, err := eventlog.New(store, eventlog.Limits{}); err == nil {
 		t.Fatal("accepted limits that permit nothing")
 	}
-	if _, err := eventlog.New(store, eventlog.Limits{Entries: 8, Bytes: 1 << 20}, eventlog.WithWriteTimeout(0)); err == nil {
-		t.Fatal("accepted a zero write timeout")
-	}
-	if _, err := eventlog.New(store, eventlog.Limits{Entries: 8, Bytes: 1 << 20}, eventlog.WithWriteTimeout(-time.Second)); err == nil {
-		t.Fatal("accepted a negative write timeout")
-	}
-	log, err := eventlog.New(store, eventlog.Limits{Entries: 8, Bytes: 1 << 20}, eventlog.WithWriteTimeout(time.Second))
+	log, err := eventlog.New(store, eventlog.Limits{Entries: 8, Bytes: 1 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}

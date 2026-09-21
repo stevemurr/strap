@@ -50,7 +50,7 @@ func TestRejectedArgumentsPreserveOriginalProtocolString(t *testing.T) {
 					}}})
 					body.Write(b)
 				}
-				c, err := chatwire.New("https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+				c, err := chatwire.New("", "https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body.String()))}, nil
 				})})
 				if err != nil {

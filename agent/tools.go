@@ -39,11 +39,5 @@ func (a *Agent) reportTool(activity ToolActivity) error {
 		d := activity.Diagnostic.Clone()
 		activity.Diagnostic = &d
 	}
-	if err := a.report(activity); err != nil {
-		return err
-	}
-	if a.config.OnTool != nil {
-		a.config.OnTool(activity)
-	}
-	return nil
+	return a.report(activity)
 }

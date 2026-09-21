@@ -27,14 +27,19 @@ func TestCommentaryPrecedesToolsWithoutAddingHistory(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var observed []string
-			if tc.observe {
-				c.OnCommentary = func(text string) { observed = append(observed, "commentary:"+text) }
-			}
-			c.OnTool = func(activity agent.ToolActivity) {
-				if activity.FinishedAt.IsZero() {
-					observed = append(observed, "tool:"+activity.Call.ID)
+			c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+				switch e := e.(type) {
+				case agent.Commentary:
+					if tc.observe {
+						observed = append(observed, "commentary:"+e.Text)
+					}
+				case agent.ToolActivity:
+					if e.FinishedAt.IsZero() {
+						observed = append(observed, "tool:"+e.Call.ID)
+					}
 				}
-			}
+				return nil
+			})
 			c.Spec.Tools = []tool.Tool{customTool{name: "read"}}
 			calls := 0
 			c.Spec.Provider = modelFunc(func(_ context.Context, r provider.Request) (provider.Response, error) {
@@ -82,8 +87,15 @@ func TestRejectedResponsesDoNotEmitCommentary(t *testing.T) {
 			c := config()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			c.OnCommentary = func(string) { t.Fatal("rejected response emitted commentary") }
-			c.OnTool = func(agent.ToolActivity) { t.Fatal("rejected response executed tools") }
+			c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+				switch e.(type) {
+				case agent.Commentary:
+					t.Fatal("rejected response emitted commentary")
+				case agent.ToolActivity:
+					t.Fatal("rejected response executed tools")
+				}
+				return nil
+			})
 			var a *agent.Agent
 			c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
 				response := provider.Response{Content: "Checking files.", ToolCalls: []provider.ToolCall{{ID: "one", Name: "read"}}}

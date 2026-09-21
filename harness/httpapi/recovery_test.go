@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
+	"testing"
+	"time"
+
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/httpapi"
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
-	"net/http/httptest"
-	"testing"
-	"time"
 )
 
 type streaming struct{ release chan struct{} }
@@ -33,24 +34,13 @@ func (p streaming) Submit(ctx context.Context, _ provider.Request, o provider.Ob
 }
 func TestHTTPReconnectRecoversActiveOutputAndMatchesSDK(t *testing.T) {
 	release := make(chan struct{})
-	var session *harness.Session
-	service, err := httpapi.New(context.Background(), httpapi.Options{DefaultConfig: config(), Authorize: httpapi.BearerToken("test-token"), Factory: func(ctx context.Context, c harness.Config) (*harness.Session, error) {
-		var err error
-		session, err = harness.New(ctx, c, harness.Dependencies{Provider: streaming{release: release}})
-		return session, err
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer service.Close(context.Background())
-	w := request(t, service, "POST", "/sessions", httpapi.CreateRequest{})
-	if w.Code != 201 {
-		t.Fatal(w.Code, w.Body.String())
-	}
+	s := servedSession(t, streaming{release: release}, httpapi.BearerToken("test-token"))
+	session, service := s.Session, s.http
 	server := httptest.NewServer(service)
 	defer server.Close()
 	base := "/sessions/" + session.ID()
-	if _, err = session.Send(session.Root(), "go"); err != nil {
+	_, err := session.Send(session.Root(), "go")
+	if err != nil {
 		t.Fatal(err)
 	}
 	response := openStream(t, server, base+"/events/stream")
@@ -87,7 +77,7 @@ func TestHTTPReconnectRecoversActiveOutputAndMatchesSDK(t *testing.T) {
 		t.Fatal(direct, err)
 	}
 	endpoint := fmt.Sprintf("%s/outputs/%s/1", base, session.Root())
-	w = request(t, service, "GET", endpoint, nil)
+	w := request(t, service, "GET", endpoint, nil)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

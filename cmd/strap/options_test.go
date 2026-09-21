@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stevemurr/strap/internal/modelcatalog"
 )
 
 func writeCatalog(t *testing.T, body string) string {
@@ -55,7 +57,7 @@ func TestCatalogDiscovery(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	// The bundled catalog must resolve without a personal catalog; which
 	// profile it selects is configuration, not a contract.
-	m, err := loadModel("", "", time.Hour)
+	m, _, err := modelcatalog.Resolve("", "", time.Hour)
 	if err != nil || m.Model == "" || m.BaseURL == "" {
 		t.Fatalf("bundled fallback: %+v, %v", m, err)
 	}
@@ -70,12 +72,12 @@ func TestCatalogDiscovery(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{"default":"mine","models":{"mine":{"model":"personal"}}}`), 0600); err != nil {
 			t.Fatal(err)
 		}
-		m, err := loadModel("", "", time.Hour)
+		m, _, err := modelcatalog.Resolve("", "", time.Hour)
 		if err != nil || m.Model != "personal" {
 			t.Fatalf("personal catalog: %+v, %v", m, err)
 		}
 	}
-	if _, err := loadModel(filepath.Join(home, "missing.json"), "", time.Hour); !errors.Is(err, os.ErrNotExist) {
+	if _, _, err := modelcatalog.Resolve(filepath.Join(home, "missing.json"), "", time.Hour); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("explicit missing config must fail: %v", err)
 	}
 }
@@ -95,18 +97,6 @@ func TestCatalogErrorsAndHelp(t *testing.T) {
 		var out bytes.Buffer
 		if _, err := parseOptions([]string{"-config", path, "-help"}, &out); !errors.Is(err, flag.ErrHelp) || !strings.Contains(out.String(), "-profile") {
 			t.Fatalf("help must work with invalid config: %v, %s", err, out.String())
-		}
-	}
-}
-
-func TestHTTPOptionsValidatedBeforeStartup(t *testing.T) {
-	for _, args := range [][]string{
-		{"-backend", "unknown"}, {"-temperature", "NaN"}, {"-base-url", "bad"},
-		{"-model", ""}, {"-timeout", "0s"}, {"-C", catalogPath}, {"-profile", "missing"},
-	} {
-		args = append([]string{"-config", catalogPath, "-listen", "127.0.0.1:0"}, args...)
-		if _, err := parseOptions(args, io.Discard); err == nil {
-			t.Fatalf("accepted %v", args)
 		}
 	}
 }

@@ -92,24 +92,24 @@ func TestTranscriptFormattingEmptyPagesAndErrors(t *testing.T) {
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	s.inspection.Transcript = &agent.TranscriptPage{}
-	key(m, "r")
+	typeText(m, "r")
 	if !strings.Contains(m.View(), "No messages") {
 		t.Fatal(m.View())
 	}
 	s.inspection.Transcript = &agent.TranscriptPage{HasEarlier: true, Entries: []agent.TranscriptEntry{{Position: 2, Message: provider.Message{Role: "user", Envelope: &message.Message{From: "root", To: "child", Content: "task", Work: &work.Work{Task: "delegated"}, Event: &work.Event{Kind: work.WorkAssigned}}}}, {Position: 3, Message: provider.Message{Role: "tool", ToolCallID: "call", Content: content.Content{{Image: &content.Image{MIMEType: "image/png", Data: []byte{1, 2}}}}}}}}
-	key(m, "r")
-	key(m, "v")
+	typeText(m, "r")
+	typeText(m, "v")
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
 	if !strings.Contains(m.transcript.viewport.View(), "Envelope") {
 		t.Fatal(m.View())
 	}
-	key(m, "v")
+	typeText(m, "v")
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
 	if !strings.Contains(m.transcript.viewport.View(), "binary data omitted") {
 		t.Fatal(m.View())
 	}
 	s.failure = errors.New("inspection unavailable")
-	key(m, "r")
+	typeText(m, "r")
 	if !strings.Contains(m.View(), "inspection unavailable") {
 		t.Fatal(m.View())
 	}
@@ -144,7 +144,7 @@ func TestTranscriptFormattingEmptyPagesAndErrors(t *testing.T) {
 func TestTranscriptQuitAndForwardSwitch(t *testing.T) {
 	m, _ := transcriptSetup(t)
 	enter(m, "/transcript root")
-	key(m, "]")
+	typeText(m, "]")
 	if m.transcript.inspection.ID != "agent-7" {
 		t.Fatal(m.View())
 	}

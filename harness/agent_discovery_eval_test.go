@@ -32,15 +32,12 @@ func TestAgentDiscoveryLive(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 			defer cancel()
-			cfg := harness.DefaultConfig()
-			cfg.Dir = t.TempDir()
-			cfg.Web = nil
-			cfg.LocalTools = false
+			cfg := testConfig(t, false)
 			cfg.Telemetry.ContextTokens = false
 			cfg.Model = harness.ModelConfig{Backend: "chatcompletions", BaseURL: url, Model: model, Timeout: 3 * time.Minute}
-			deps := harness.Dependencies{Implementor: harness.AgentDependencies{Provider: idle{}}, Auditor: harness.AgentDependencies{Provider: idle{}}}
+			deps := harness.Dependencies{Implementor: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: textResponse("ready")}}
 			if scenario == "worker_help" {
-				deps = harness.Dependencies{Root: harness.AgentDependencies{Provider: idle{}}, Auditor: harness.AgentDependencies{Provider: idle{}}}
+				deps = harness.Dependencies{Root: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: textResponse("ready")}}
 			}
 			s, e := harness.New(ctx, cfg, deps)
 			if e != nil {

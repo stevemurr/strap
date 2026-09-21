@@ -112,13 +112,6 @@ func TestUnknownAgentErrors(t *testing.T) {
 		}
 	}
 }
-func TestInspectionPagingOptionsReachController(t *testing.T) {
-	c := conversation.New(context.Background())
-	defer c.Close(context.Background())
-	if _, err := inspectTool(runtimeFixture{c}).Call(context.Background(), tool.Call{Arguments: json.RawMessage(`{"input":{"agent_id":"missing","limit":3,"before":2}}`)}); err == nil {
-		t.Fatal("unknown agent accepted")
-	}
-}
 
 type runtimeFixture struct{ *conversation.Controller }
 

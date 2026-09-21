@@ -21,7 +21,6 @@ type Store struct {
 	visibleEvents    int
 	failure          error
 	mu               sync.Mutex
-	next             uint64
 	issued           map[string]bool
 	plans            map[PlanID]Plan
 	works            map[ID]Work
@@ -62,7 +61,6 @@ func (s *Store) id(prefix string) string {
 		candidate := prefix + "-" + suffix
 		if !s.issued[candidate] {
 			s.issued[candidate] = true
-			s.next++
 			return candidate
 		}
 	}
@@ -129,7 +127,7 @@ func (s *Store) AcknowledgeEvent(id EventID) error {
 func (s *Store) knownWorks(actor identity.ActorID) string {
 	var parts []string
 	for _, w := range s.works {
-		if actor != "" && (w.Owner == actor || w.Assignee == actor) && live(w) {
+		if w.visibleTo(actor) && live(w) {
 			parts = append(parts, fmt.Sprintf("%s (%s, %s, revision %d)", w.ID, w.Kind, w.State, w.Revision))
 		}
 	}
@@ -147,12 +145,12 @@ func (s *Store) knownPlans(actor identity.ActorID) string {
 func (s *Store) knownBriefs(actor identity.ActorID) string {
 	var delivered, pending []string
 	for _, b := range s.researchBriefs {
-		if w, ok := s.works[b.WorkID]; ok && actor != "" && (w.Owner == actor || w.Assignee == actor) {
+		if w, ok := s.works[b.WorkID]; ok && w.visibleTo(actor) {
 			delivered = append(delivered, fmt.Sprintf("%s (%s)", b.ID, w.ID))
 		}
 	}
 	for _, w := range s.works {
-		if w.Kind == Research && live(w) && w.LatestResearchBriefID == "" && actor != "" && (w.Owner == actor || w.Assignee == actor) {
+		if w.Kind == Research && live(w) && w.LatestResearchBriefID == "" && w.visibleTo(actor) {
 			pending = append(pending, string(w.ID))
 		}
 	}
@@ -395,7 +393,7 @@ func (s *Store) GetWork(actor identity.ActorID, id ID) (Work, error) {
 	if !ok {
 		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, id, s.knownWorks(actor))
 	}
-	if actor == "" || (w.Owner != actor && w.Assignee != actor) {
+	if !w.visibleTo(actor) {
 		return Work{}, ErrForbidden
 	}
 	return w.Clone(), nil

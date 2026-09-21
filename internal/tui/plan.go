@@ -550,11 +550,7 @@ func (m *model) planMouse(event tea.MouseMsg, left, top, width, budget int) bool
 		if v := m.currentPlan(); v != nil {
 			v.expanded = true
 		}
-		delta := 1
-		if event.Button == tea.MouseButtonWheelUp || event.Button == tea.MouseButtonWheelLeft {
-			delta = -1
-		}
-		m.movePlanStep(delta)
+		m.movePlanStep(wheelStep(event.Button))
 		return true
 	}
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft {

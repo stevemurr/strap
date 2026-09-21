@@ -76,10 +76,7 @@ func (m *model) showAgents() tea.Cmd {
 		}
 		table.rows = append(table.rows, row)
 	}
-	m.add("Agents", table.render(0), true)
-	m.entries[len(m.entries)-1].agents = table
-	m.entries[len(m.entries)-1].renderWidth = 0
-	m.renderTranscript(true)
+	m.addEntry(entry{label: "Agents", body: table.render(0), agents: table}, true)
 	return tea.Batch(commands...)
 }
 
@@ -96,7 +93,7 @@ func (m *model) finishAgentTableCount(result agentTableCount) {
 	if result.agent != "" {
 		v := m.ensureStream(result.agent)
 		if v.context == nil || result.revision >= v.context.revision {
-			v.context = &contextTokens{revision: result.revision, count: result.count, failed: result.err != nil || result.count < 0}
+			v.context = measuredTokens(result.revision, result.count, result.err != nil)
 		}
 	}
 	for i := range m.entries {

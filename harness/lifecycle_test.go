@@ -99,7 +99,7 @@ func TestCloseTimeoutKeepsOwnershipAndDrainsTail(t *testing.T) {
 func TestCleanupFailureRetriesOnlyUnfinishedResources(t *testing.T) {
 	bad, good := &closer{}, &closer{}
 	bad.fail.Store(true)
-	s := newLifecycleSession(t, context.Background(), idle{}, harness.OwnedResource{Name: "bad", Resource: bad}, harness.OwnedResource{Name: "good", Resource: good})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"), harness.OwnedResource{Name: "bad", Resource: bad}, harness.OwnedResource{Name: "good", Resource: good})
 	if err := s.Close(context.Background()); err == nil {
 		t.Fatal("missing cleanup error")
 	}
@@ -121,8 +121,8 @@ func (c notifyCloser) Close(context.Context) error { close(c); return nil }
 func TestParentCancellationClosesSessionWithoutHostWait(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	closed := make(notifyCloser)
-	s := newLifecycleSession(t, ctx, idle{}, harness.OwnedResource{Name: "notify", Resource: closed})
-	other := newLifecycleSession(t, context.Background(), idle{})
+	s := newLifecycleSession(t, ctx, textResponse("ready"), harness.OwnedResource{Name: "notify", Resource: closed})
+	other := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	cancel()
 	select {
 	case <-closed:
@@ -138,7 +138,7 @@ func TestParentCancellationClosesSessionWithoutHostWait(t *testing.T) {
 }
 
 type blockedCounter struct {
-	idle
+	textResponse
 	started, cancelled, release chan struct{}
 }
 
@@ -151,7 +151,7 @@ func (p *blockedCounter) CountTokens(ctx context.Context, _ provider.Request) (i
 }
 
 func TestShutdownCancelsAndJoinsHostTokenCount(t *testing.T) {
-	p := &blockedCounter{started: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{})}
+	p := &blockedCounter{textResponse: "ready", started: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{})}
 	owned := &closer{}
 	s := newLifecycleSession(t, context.Background(), p, harness.OwnedResource{Name: "test", Resource: owned})
 	info, err := s.InspectAgent(s.Root(), conversation.InspectOptions{})
@@ -223,7 +223,7 @@ func TestTerminalOutcomeSurvivesStorageDisposal(t *testing.T) {
 func TestCleanupFailureIsInspectableBeforeRetryAndRecorded(t *testing.T) {
 	owned := &closer{}
 	owned.fail.Store(true)
-	s := newLifecycleSession(t, context.Background(), idle{}, harness.OwnedResource{Name: "test", Resource: owned})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"), harness.OwnedResource{Name: "test", Resource: owned})
 	if err := s.Close(context.Background()); err == nil {
 		t.Fatal("expected cleanup failure")
 	}

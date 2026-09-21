@@ -17,58 +17,39 @@ import (
 // is supplied by the host or bound tool runtime, never inferred from request data.
 // Cancellation is checked before ledger entry; it is not a rollback guarantee.
 func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work.PlanUpdate) (work.Plan, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.Plan{}, admitErr
-	}
-	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.Plan{}, err
-	}
-	if actor == "" || actor != s.Root() {
-		return work.Plan{}, work.ErrForbidden
-	}
-	return s.Store.UpdatePlan(actor, u)
+	return admitted(s, ctx, func(context.Context) (work.Plan, error) {
+		if actor == "" || actor != s.Root() {
+			return work.Plan{}, work.ErrForbidden
+		}
+		return s.Store.UpdatePlan(actor, u)
+	})
 }
 
 func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.Work{}, admitErr
-	}
-	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.Work{}, err
-	}
-	return s.Store.Cancel(actor, r)
+	return admitted(s, ctx, func(context.Context) (work.Work, error) { return s.Store.Cancel(actor, r) })
 }
 
 func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.SubmitReceipt, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.SubmitReceipt{}, admitErr
-	}
-	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.SubmitReceipt{}, err
-	}
-	return s.Store.SubmitWork(actor, r)
+	return admitted(s, ctx, func(context.Context) (work.SubmitReceipt, error) { return s.Store.SubmitWork(actor, r) })
 }
 
 func (s *Session) SubmitAudit(ctx context.Context, actor identity.ActorID, r work.AuditRequest) (work.Audit, error) {
-	run, done, admitErr := s.begin(ctx)
-	if admitErr != nil {
-		return work.Audit{}, admitErr
+	return admitted(s, ctx, func(context.Context) (work.Audit, error) { return s.Store.SubmitAudit(actor, r) })
+}
+
+// admitted runs op inside the admission window once the admitted context is
+// still live. Operations that must validate before checking liveness use begin.
+func admitted[T any](s *Session, ctx context.Context, op func(context.Context) (T, error)) (T, error) {
+	var zero T
+	run, done, err := s.begin(ctx)
+	if err != nil {
+		return zero, err
 	}
 	defer done()
-	ctx = run
-	if err := ctx.Err(); err != nil {
-		return work.Audit{}, err
+	if err = run.Err(); err != nil {
+		return zero, err
 	}
-	return s.Store.SubmitAudit(actor, r)
+	return op(run)
 }
 
 func (s *Session) GetPlan(ctx context.Context, actor identity.ActorID, id work.PlanID) (work.Plan, error) {
@@ -283,13 +264,5 @@ func (s *Session) executionHeld() bool {
 }
 
 func (s *Session) SubmitResearch(ctx context.Context, actor identity.ActorID, r work.SubmitResearchRequest) (work.SubmitResearchResult, error) {
-	run, done, err := s.begin(ctx)
-	if err != nil {
-		return work.SubmitResearchResult{}, err
-	}
-	defer done()
-	if err = run.Err(); err != nil {
-		return work.SubmitResearchResult{}, err
-	}
-	return s.Store.SubmitResearch(actor, r)
+	return admitted(s, ctx, func(context.Context) (work.SubmitResearchResult, error) { return s.Store.SubmitResearch(actor, r) })
 }

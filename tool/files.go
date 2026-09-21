@@ -252,9 +252,8 @@ func directory(dir string) (string, error) {
 	return path, nil
 }
 
-func (f *Files) resolve(path string) (string, error) { return resolveFile(f.config.Dir, path) }
-
-func resolveFile(dir, path string) (string, error) {
+func (f *Files) resolve(path string) (string, error) {
+	dir := f.config.Dir
 	if strings.TrimSpace(path) == "" {
 		return "", errors.New("path must name a file")
 	}

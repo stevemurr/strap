@@ -344,7 +344,7 @@ func (s *Store) GetWorkProgressReport(actor identity.ActorID, id ProgressReportI
 		return WorkProgressReport{}, ErrNotFound
 	}
 	w := s.works[r.WorkID]
-	if actor == "" || actor != w.Owner && actor != w.Assignee {
+	if !w.visibleTo(actor) {
 		return WorkProgressReport{}, ErrForbidden
 	}
 	return r.Clone(), nil
@@ -357,7 +357,7 @@ func (s *Store) GetProgressFinding(actor identity.ActorID, id ProgressFindingID)
 		return ProgressFinding{}, ErrNotFound
 	}
 	w := s.works[f.WorkID]
-	if actor == "" || actor != w.Owner && actor != w.Assignee {
+	if !w.visibleTo(actor) {
 		return ProgressFinding{}, ErrForbidden
 	}
 	return f.Clone(), nil

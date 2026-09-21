@@ -43,22 +43,13 @@ type HistoryView struct {
 	Output   *identity.OutputID `json:"output,omitempty"`
 	Record   eventlog.Cursor    `json:"record"`
 }
-type MessageView struct {
-	ID     identity.MessageID  `json:"id"`
-	From   identity.ActorID    `json:"from"`
-	To     identity.ActorID    `json:"to"`
-	Kind   message.MessageKind `json:"kind"`
-	Output *identity.OutputID  `json:"output,omitempty"`
-	Record eventlog.Cursor     `json:"record"`
-}
 type chunkState struct {
 	ref eventlog.ContentRef
 	sum hash.Hash
 }
 type toolState struct {
-	Agent     identity.ActorID
-	Finished  bool
-	StartedAt time.Time
+	Agent    identity.ActorID
+	Finished bool
 }
 type WorkView struct {
 	record.WorkHeader
@@ -73,7 +64,7 @@ type Projector struct {
 	workViews     map[work.ID]WorkView
 	toolStates    map[string]toolState
 	calls         map[identity.ActorID]uint64
-	messageIDs    map[identity.MessageID]MessageView
+	messageIDs    map[identity.MessageID]struct{}
 	workEvents    map[work.EventID]bool
 	usage         map[identity.ActorID]agent.UsageSnapshot
 	limits        map[identity.ActorID]*int64
@@ -84,7 +75,6 @@ type Projector struct {
 	outputs       map[identity.OutputID]OutputView
 	agents        map[identity.ActorID]conversation.AgentInfo
 	histories     map[identity.ActorID][]HistoryView
-	messages      []MessageView
 	receipts      map[identity.MessageID]message.Receipt
 	chunks        map[identity.ContentID]*chunkState
 	contents      map[identity.ContentID]eventlog.ContentRef
@@ -92,7 +82,7 @@ type Projector struct {
 }
 
 func New(session identity.SessionID) *Projector {
-	return &Projector{executionRefs: map[string]bool{}, bindings: map[string]identity.ActorID{}, lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]MessageView{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
+	return &Projector{executionRefs: map[string]bool{}, bindings: map[string]identity.ActorID{}, lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]struct{}{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
 }
 func (p *Projector) Cursor() eventlog.Cursor { p.mu.RLock(); defer p.mu.RUnlock(); return p.cursor }
 func (p *Projector) Apply(e eventlog.Record) error {
@@ -333,11 +323,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		if _, ok := p.messageIDs[m.ID]; ok {
 			return errors.New("duplicate message")
 		}
-		commit = func() {
-			v := MessageView{ID: m.ID, From: m.From, To: m.To, Kind: m.Kind, Output: e.Output, Record: e.Cursor()}
-			p.messages = append(p.messages, v)
-			p.messageIDs[m.ID] = v
-		}
+		commit = func() { p.messageIDs[m.ID] = struct{}{} }
 	case "ack":
 		var v conversation.AckEvent
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
@@ -382,13 +368,9 @@ func (p *Projector) Apply(e eventlog.Record) error {
 	case "tool":
 		var execution *tool.ExecutionBinding
 		var invocation string
-		var started, finished time.Time
+		var finished time.Time
 		if isFramed {
-			var v struct {
-				Execution  *tool.ExecutionBinding `json:"execution,omitempty"`
-				Invocation string                 `json:"invocation_id"`
-				FinishedAt time.Time              `json:"finished_at"`
-			}
+			var v record.ToolControl
 			if err := json.Unmarshal(e.Payload, &v); err != nil {
 				return err
 			}
@@ -406,7 +388,6 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			}
 			execution = t.Activity.Result.Execution
 			invocation = t.Activity.InvocationID
-			started = t.Activity.StartedAt
 			finished = t.Activity.FinishedAt
 		}
 		if invocation == "" {
@@ -423,7 +404,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			if exists {
 				return errors.New("duplicate tool start")
 			}
-			commit = func() { p.toolStates[invocation] = toolState{Agent: actor, StartedAt: started} }
+			commit = func() { p.toolStates[invocation] = toolState{Agent: actor} }
 		} else {
 			if !exists || prior.Finished || prior.Agent != actor {
 				return errors.New("tool finish without matching start")

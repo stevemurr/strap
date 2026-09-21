@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/stevemurr/strap/content"
-	"github.com/stevemurr/strap/provider"
 )
 
 // PDFConfig bounds a single rendering call. Rendering requires Poppler's
@@ -33,7 +32,7 @@ type PDFConfig struct {
 
 type PDF struct {
 	config PDFConfig
-	bound  Func[pdfArgs]
+	Func[pdfArgs]
 }
 type pdfArgs struct {
 	Path  string `json:"path"`
@@ -59,7 +58,7 @@ func NewPDF(config PDFConfig) (*PDF, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.bound = Func[pdfArgs]{
+	p.Func = Func[pdfArgs]{
 		Spec: Definition[pdfArgs]{
 			Name:        "read_pdf",
 			Description: p.description(),
@@ -70,12 +69,9 @@ func NewPDF(config PDFConfig) (*PDF, error) {
 	return p, nil
 }
 
-func (p *PDF) Definition() provider.ToolDefinition { return p.bound.Definition() }
-func (p *PDF) Validate() error                     { return p.bound.Validate() }
 func (p *PDF) description() string {
 	return fmt.Sprintf("Read a PDF by rendering its pages as images for you to inspect. Accepts absolute paths; relative paths resolve from %s. Requires image input support. pages is a nullable list of 1-based page numbers in reading order, at most %d. When null, return the first %d pages. Metadata reports total and omitted page counts; request remaining pages in later calls.", p.config.Dir, p.config.MaxPages, p.config.MaxPages)
 }
-func (p *PDF) Call(ctx context.Context, call Call) (Result, error) { return p.bound.Call(ctx, call) }
 
 type PDFMetadata struct {
 	Path         string `json:"path"`
@@ -220,15 +216,11 @@ func pdfCommand(ctx context.Context, limit int, program string, args ...string) 
 	stdout, stderr := &limitedBuffer{limit: limit}, &limitedBuffer{limit: 4096}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = 250 * time.Millisecond
-	if processGroupsSupported {
-		configureProcessGroup(cmd)
-	}
+	configureProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s (install Poppler to provide pdfinfo/pdftoppm): %w", program, err)
 	}
-	if processGroupsSupported {
-		defer stopProcessGroup(cmd)
-	}
+	defer stopProcessGroup(cmd)
 	err := cmd.Wait()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -241,10 +233,3 @@ func pdfCommand(ctx context.Context, limit int, program string, args ...string) 
 	}
 	return stdout.Bytes(), nil
 }
-
-func (p *PDF) prepare(ctx context.Context, call Call) (func() (Result, error), error) {
-	return p.bound.prepare(ctx, call)
-}
-func (p *PDF) snapshot() preparedTool { return p.bound.snapshot() }
-
-func (p *PDF) contract() *parameterNode { return p.bound.contract() }

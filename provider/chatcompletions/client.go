@@ -4,7 +4,6 @@ package chatcompletions
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -31,7 +30,7 @@ type Client struct {
 var _ provider.Provider = (*Client)(nil)
 
 func New(config Config) (*Client, error) {
-	wire, err := chatwire.New(config.BaseURL, config.HTTPClient)
+	wire, err := chatwire.New("chatcompletions", config.BaseURL, config.HTTPClient)
 	if err != nil {
 		return nil, fmt.Errorf("chatcompletions: %w", err)
 	}
@@ -43,27 +42,12 @@ func New(config Config) (*Client, error) {
 
 // HTTPError preserves the status and a bounded server diagnostic. No request is
 // retried automatically; retry policy does not belong in this first adapter.
-type HTTPError struct {
-	StatusCode int
-	Body       string
-}
-
-func (e *HTTPError) Error() string {
-	return fmt.Sprintf("chatcompletions: HTTP %d: %s", e.StatusCode, e.Body)
-}
+type HTTPError = chatwire.HTTPError
 
 func (c *Client) Submit(ctx context.Context, input provider.Request, observer provider.Observer) (provider.Response, error) {
 	wire, err := chatwire.Encode(c.model, input)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("chatcompletions: encode content: %w", err)
 	}
-	result, err := c.wire.Submit(ctx, wire, observer)
-	if err != nil {
-		var responseError *chatwire.HTTPError
-		if errors.As(err, &responseError) {
-			return provider.Response{}, &HTTPError{StatusCode: responseError.StatusCode, Body: responseError.Body}
-		}
-		return result, fmt.Errorf("chatcompletions: %w", err)
-	}
-	return result, nil
+	return c.wire.Submit(ctx, wire, observer)
 }

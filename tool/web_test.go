@@ -80,7 +80,7 @@ func TestSearchParsingRankingRedirectsAndFailures(t *testing.T) {
 <a class="result__a" href="https://duckduckgo.com/y.js?ad=1">ad</a>
 <a class="result__a" href="javascript:alert(1)">bad</a>
 <a class="result__a" href="https://docs.example.org/">Docs</a><a class="result__snippet">Documentation</a>`
-	hits, err := searchResults(page)
+	hits, err := parseSearchResults(strings.NewReader(page))
 	if err != nil || len(hits) != 2 || hits[0].Title != "A & B" || hits[0].URL != "https://example.com/a" || hits[1].Snippet != "Documentation" {
 		t.Fatalf("%+v, %v", hits, err)
 	}
@@ -90,7 +90,7 @@ func TestSearchParsingRankingRedirectsAndFailures(t *testing.T) {
 		{`<div class="anomaly-modal">Select images</div>`, "challenge"},
 		{`<html><body>Consent required</body></html>`, "unrecognized"},
 	} {
-		got, err := searchResults(tc.html)
+		got, err := parseSearchResults(strings.NewReader(tc.html))
 		if tc.want == "" {
 			if err != nil || got == nil || len(got) != 0 {
 				t.Fatalf("empty result: %+v %v", got, err)

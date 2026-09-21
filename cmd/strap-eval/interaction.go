@@ -109,18 +109,11 @@ func interactionOptions(args []string, stderr io.Writer) (interaction.Options, e
 	}
 	opts.Profile = "scripted"
 	if opts.Mode == interaction.Live {
-		model, profileName, err := modelcatalog.Resolve(*configPath, *profile, opts.Config.Model.Timeout)
+		profileName, err := modelcatalog.Apply(fs, args, &opts.Config.Model, *configPath, *profile)
 		if err != nil {
 			return opts, err
 		}
-		if modelcatalog.WasSet(fs, "backend") && opts.Config.Model.Backend == "chatcompletions" {
-			model.Generation = harness.ModelConfig{}.Generation
-		}
-		opts.Config.Model = model
 		opts.Profile = profileName
-		if err := fs.Parse(args); err != nil {
-			return opts, err
-		}
 	}
 	languages, err := languageFlags.Resolve()
 	if err != nil {

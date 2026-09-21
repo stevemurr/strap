@@ -14,7 +14,7 @@ func TestDuplicatePagesAreAnApplicationRule(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := json.RawMessage(`{"input":{"path":"pages.pdf","pages":[1,1]}}`)
-	args, err := pdf.bound.Spec.Parameters.Decode(raw)
+	args, err := pdf.Spec.Parameters.Decode(raw)
 	if err != nil || len(args.Pages) != 2 {
 		t.Fatalf("schema rejected or changed list: %v %v", args, err)
 	}

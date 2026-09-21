@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,11 +17,13 @@ import (
 )
 
 type Client struct {
+	adapter  string
 	endpoint string
 	http     *http.Client
 }
 
-func New(baseURL string, client *http.Client) (*Client, error) {
+// New builds a client for one adapter; adapter prefixes every error it returns.
+func New(adapter, baseURL string, client *http.Client) (*Client, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("base URL must be an absolute HTTP(S) URL")
@@ -37,42 +40,76 @@ func New(baseURL string, client *http.Client) (*Client, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &Client{endpoint: u.String(), http: client}, nil
+	return &Client{adapter: adapter, endpoint: u.String(), http: client}, nil
 }
 
 // HTTPError retains a bounded diagnostic without interpreting backend policy.
+// Adapter names the client that received it. No retry with altered
+// parameters is performed.
 type HTTPError struct {
+	Adapter    string
 	StatusCode int
 	Body       string
 }
 
 func (e *HTTPError) Error() string {
-	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+	if e.Adapter == "" {
+		return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+	}
+	return fmt.Sprintf("%s: HTTP %d: %s", e.Adapter, e.StatusCode, e.Body)
+}
+
+// fail prefixes transport and decoding errors with the adapter name; an
+// HTTPError already carries it.
+func (c *Client) fail(err error) error {
+	var status *HTTPError
+	if err == nil || c.adapter == "" || errors.As(err, &status) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", c.adapter, err)
+}
+
+// do posts wire as JSON and returns a successful response, whose body the
+// caller owns. A rejected status becomes an HTTPError with a bounded body.
+func (c *Client) do(ctx context.Context, endpoint string, wire any, accept string) (*http.Response, error) {
+	data, err := json.Marshal(wire)
+	if err != nil {
+		return nil, fmt.Errorf("encode request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("submit: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Preserve even a partial error body if reading the diagnostic fails.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		return nil, &HTTPError{Adapter: c.adapter, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+	}
+	return resp, nil
 }
 
 // Submit accepts an adapter-owned wire struct, including its typed extensions.
 // It never retries or rewrites options after an HTTP rejection.
 func (c *Client) Submit(ctx context.Context, wire any, observer provider.Observer) (provider.Response, error) {
+	result, err := c.submit(ctx, wire, observer)
+	return result, c.fail(err)
+}
 
-	data, err := json.Marshal(wire)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("encode request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(data))
+func (c *Client) submit(ctx context.Context, wire any, observer provider.Observer) (provider.Response, error) {
+	resp, err := c.do(ctx, c.endpoint, wire, "text/event-stream")
 	if err != nil {
 		return provider.Response{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("submit: %w", err)
-	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return provider.Response{}, &HTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-	}
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		return readStream(resp.Body, observer)
 	}
@@ -90,27 +127,13 @@ func (c *Client) Submit(ctx context.Context, wire any, observer provider.Observe
 // Post shares JSON transport with adapter-owned endpoints such as tokenization.
 // Adapters own endpoint selection, request fields, and response validation.
 func (c *Client) Post(ctx context.Context, endpoint string, wire, result any) error {
-	data, err := json.Marshal(wire)
+	resp, err := c.do(ctx, endpoint, wire, "")
 	if err != nil {
-		return fmt.Errorf("encode request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("submit: %w", err)
+		return c.fail(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Preserve even a partial error body if reading the diagnostic fails.
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &HTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-	}
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return c.fail(fmt.Errorf("decode response: %w", err))
 	}
 	return nil
 }

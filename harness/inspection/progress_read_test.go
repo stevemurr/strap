@@ -4,36 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/stevemurr/strap/conversation"
-	"github.com/stevemurr/strap/eventlog"
-	"github.com/stevemurr/strap/harness/eventcodec"
+	"strings"
+	"testing"
+
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/work"
-	"path/filepath"
-	"strings"
-	"testing"
 )
 
 func progressFixture(t *testing.T) (*work.Store, *inspection.ProgressReader, work.Work) {
 	t.Helper()
 	ctx := context.Background()
-	log, err := eventlog.NewJSONL(filepath.Join(t.TempDir(), "trace.jsonl"), "progress")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { log.Close(ctx) })
-	if _, err = log.Append(ctx, eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"progress"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	store := work.New(work.WithReporter(work.ReporterFunc(func(ctx context.Context, e work.Event) error {
-		d, err := eventcodec.EncodeEvent(conversation.WorkEvent{Event: e})
-		if err != nil {
-			return err
-		}
-		_, err = log.Append(ctx, d)
-		return err
-	})))
+	log, _ := sessionLog(t, "progress")
+	store := reportingStore(log, nil)
 	w, err := store.AssignResearch("root", work.ResearchAssignRequest{Assignee: "worker", Task: "inspect"})
 	if err != nil {
 		t.Fatal(err)

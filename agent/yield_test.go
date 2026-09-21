@@ -106,10 +106,4 @@ func TestMixedControlBatchHasNoEffectsAndContinues(t *testing.T) {
 	await(t, done)
 }
 
-func (t countedTool) InputContract() tool.Contract {
-	p, err := tool.NewParameters[struct{}]()
-	if err != nil {
-		panic(err)
-	}
-	return p.Contract()
-}
+func (t countedTool) InputContract() tool.Contract { return emptyContract() }

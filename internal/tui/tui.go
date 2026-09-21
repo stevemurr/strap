@@ -63,7 +63,7 @@ func Run(ctx context.Context, session Session, options Options) error {
 		return err
 	}
 	defer closeInput()
-	p := tea.NewProgram(m, tea.WithFilter(terminalKeyFilter), input, tea.WithOutput(composerOutput()), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, input, tea.WithOutput(composerOutput()), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	_, err = p.Run()
 	if ctx.Err() != nil {
 		return nil
@@ -86,14 +86,11 @@ type entry struct {
 	actors            []message.ActorID // Empty for local UI notices visible in every stream.
 	reasoning         string
 	contentStarted    bool
-	progress          bool
 	outputFailed      bool
-	outputFinished    bool
 	output            *identity.OutputID
 	message           identity.MessageID
 	hasAttachments    bool
 	label, meta, body string
-	at                time.Time
 	renderWidth       int
 	rendered          string
 	tool              toolKey
@@ -131,8 +128,6 @@ type model struct {
 	quitting          bool
 	spinner           spinner.Model
 	now               func() time.Time
-	busySince         time.Time
-	lastElapsed       time.Duration
 	activeTools       map[toolKey]agent.ToolActivity
 	selecting         bool
 	frozenEntries     []entry
@@ -153,7 +148,6 @@ var (
 	accentStyle = lipgloss.NewStyle().Foreground(accentColor)
 	titleStyle  = accentStyle.Bold(true)
 	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "241", Dark: "247"})
-	userStyle   = lipgloss.NewStyle().Bold(true).AlignHorizontal(lipgloss.Left)
 	errorStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"})
 )
 
@@ -254,7 +248,6 @@ func (m *model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			for id := range m.pending {
 				delete(m.pending, id)
 			}
-			m.refreshActivity()
 			if !errors.Is(msg.err, context.Canceled) {
 				m.add("System", "Event observation stopped: "+msg.err.Error()+".", false)
 			}
@@ -269,13 +262,10 @@ func (m *model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		if m.transcript != nil && m.transcript.copying {
 			return m, nil
 		}
-		if m.transcript == nil && m.badgeMouse(msg, 1, m.transcriptTop(), m.width, m.planTop()) {
-			return m, nil
-		}
-		if m.transcript == nil && m.streamMouse(msg) {
-			return m, nil
-		}
 		if m.transcript == nil {
+			if m.badgeMouse(msg, 1, m.transcriptTop(), m.width, m.planTop()) || m.streamMouse(msg) {
+				return m, nil
+			}
 			if m.planMouse(msg, 1, m.planTop(), m.viewport.Width, m.planBudget()) {
 				return m, nil
 			}
@@ -377,22 +367,14 @@ func (m *model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			if m.selecting {
 				return m, nil
 			}
-			direction := 1
-			if msg.String() == "alt+up" {
-				direction = -1
-			}
-			m.recall(direction)
+			m.recall(keyStep(msg.String(), "alt+up"))
 			return m, nil
 		case "up", "down":
 			if m.selecting {
 				return m, nil
 			}
 			if m.input.LineCount() == 1 && m.input.LineInfo().Height == 1 {
-				direction := 1
-				if msg.String() == "up" {
-					direction = -1
-				}
-				m.recall(direction)
+				m.recall(keyStep(msg.String(), "up"))
 				return m, nil
 			}
 		case "ctrl+v":
@@ -432,7 +414,6 @@ func (m *model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 }
 
 func (m *model) submit() (tea.Model, tea.Cmd) {
-	defer m.refreshActivity()
 	text := m.input.Value()
 	if strings.TrimSpace(text) == "" {
 		return m, nil
@@ -462,11 +443,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 				m.add("Error", "Usage: /transcript [agent-id]", true)
 				break
 			}
-			id := m.session.Root()
-			if len(fields) == 2 && fields[1] != "root" {
-				id = message.ActorID(fields[1])
-			}
-			m.openTranscript(id)
+			m.openTranscript(m.agentArg(fields))
 		case "/stop":
 			if len(fields) != 1 {
 				m.add("Error", "Usage: /stop (all current work). Use /terminate [agent-id] for permanent termination.", true)
@@ -478,10 +455,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 				m.add("Error", "Usage: "+fields[0]+" [agent-id]", true)
 				break
 			}
-			id := m.session.Root()
-			if len(fields) == 2 && fields[1] != "root" {
-				id = message.ActorID(fields[1])
-			}
+			id := m.agentArg(fields)
 			operation := func(id message.ActorID) (conversation.AgentInfo, error) {
 				inspection, err := m.session.InspectAgent(id, conversation.InspectOptions{})
 				return inspection.AgentInfo, err
@@ -547,7 +521,6 @@ func (m *model) sendDraft(draft, payload string) bool {
 }
 
 func (m *model) observe(event conversation.Event) {
-	defer m.refreshActivity()
 	defer m.markStreamRead()
 	m.observeStreamEvent(event)
 	switch e := event.(type) {
@@ -565,7 +538,6 @@ func (m *model) observe(event conversation.Event) {
 		if e.Output != nil {
 			if row := m.outputEntry(*e.Output); row != nil {
 				row.meta = string(e.Agent) + " · progress"
-				row.progress = true
 				row.renderWidth = 0
 				if !m.selecting {
 					m.renderTranscript(false)
@@ -604,8 +576,7 @@ func (m *model) observe(event conversation.Event) {
 			if change.Plan.Revision <= 1 {
 				title = "Plan created"
 			}
-		}
-		if change.Plan == nil {
+		} else {
 			for _, step := range change.Steps {
 				body += "\n" + string(step.Status) + " · " + step.Title
 			}
@@ -678,7 +649,6 @@ func (m *model) observe(event conversation.Event) {
 		}
 		if msg.Output != nil {
 			if row := m.outputEntry(*msg.Output); row != nil {
-				row.progress = false
 				row.meta = fmt.Sprintf("%s → %s · %s", msg.From, msg.To, msg.ID)
 				row.message = msg.ID
 				row.actors = []message.ActorID{msg.From, msg.To}
@@ -786,8 +756,17 @@ func (m *model) resize(width, height int) {
 	}
 }
 
+// agentArg reads the optional agent argument of a slash command; "root" and
+// no argument both name the root agent.
+func (m *model) agentArg(fields []string) message.ActorID {
+	if len(fields) == 2 && fields[1] != "root" {
+		return message.ActorID(fields[1])
+	}
+	return m.session.Root()
+}
+
 func (m *model) add(label, body string, follow bool) {
-	m.addDetail(label, "", body, follow)
+	m.addAttributed(label, "", body, follow)
 }
 
 func (m *model) renderTranscript(follow bool) {
@@ -901,9 +880,7 @@ func (m *model) renderView() string {
 		return strings.Join(rows, "\n")
 	}
 	lines := strings.Split(m.streamBody(), "\n")
-	for _, suggestion := range m.completionView() {
-		lines = append(lines, suggestion)
-	}
+	lines = append(lines, m.completionView()...)
 	lines = append(lines, planText(m.planLines(m.viewport.Width, m.planBudget()))...)
 	lines = append(lines, m.renderComposer()...)
 	lines = append(m.stackBar(), lines...)

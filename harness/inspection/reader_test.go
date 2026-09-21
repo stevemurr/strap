@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
-	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
@@ -19,28 +17,9 @@ import (
 
 func TestViewsPinLiveAndInterruptedArchivePrefixes(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "trace.jsonl")
-	store, err := eventlog.NewJSONL(path, "session")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close(ctx)
-	if _, err = store.Append(ctx, eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"session"}`)}); err != nil {
-		t.Fatal(err)
-	}
+	store, path := sessionLog(t, "session")
 	id := identity.OutputID{Agent: "agent", Call: 1}
-	appendEvent := func(e conversation.Event) eventlog.Cursor {
-		t.Helper()
-		d, err := eventcodec.EncodeEvent(e)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r, err := store.Append(ctx, d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return r.Cursor()
-	}
+	appendEvent := appender(t, store)
 	appendEvent(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "agent", Parent: "user", State: agent.Idle, StateRevision: 1}})
 	appendEvent(conversation.AgentEvent{Agent: "agent", Event: agent.HistoryAppended{Position: 1, Message: provider.Message{Role: "system"}}})
 	appendEvent(conversation.AgentEvent{Agent: "agent", Event: agent.OutputStarted{Output: id, ContextRevision: 1, StartedAt: time.Now()}})

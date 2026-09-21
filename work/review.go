@@ -264,12 +264,7 @@ func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (result Work
 func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason string) {
 	for _, child := range s.works {
 		if child.ParentID == w.ID && live(child) {
-			child.State = Cancelled
-			child.Blocker = ""
-			child.Revision++
-			child.Note = reason
-			s.putWork(child.ID, child)
-			s.emit(WorkCancelled, actor, child, true)
+			s.cancelWork(actor, child, reason)
 		}
 	}
 	if w.Scope != nil {
@@ -283,10 +278,13 @@ func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason stri
 		s.putPlan(p.ID, p)
 	}
 	w.ActiveRepairID = ""
-	w.State = Cancelled
-	w.Blocker = ""
+	s.cancelWork(actor, w, reason)
+}
+
+// cancelWork records the cancellation of one work item and emits it.
+func (s *Store) cancelWork(actor identity.ActorID, w Work, reason string) {
+	w.State, w.Blocker, w.Note = Cancelled, "", reason
 	w.Revision++
-	w.Note = reason
 	s.putWork(w.ID, w)
 	s.emit(WorkCancelled, actor, w, true)
 }
@@ -311,17 +309,9 @@ func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, er
 	case Repair:
 		s.cancelImplementation(actor, s.works[w.ParentID], r.Reason)
 	case Research:
-		w.State, w.Blocker, w.Note = Cancelled, "", r.Reason
-		w.Revision++
-		s.putWork(w.ID, w)
-		s.emit(WorkCancelled, actor, w, true)
+		s.cancelWork(actor, w, r.Reason)
 	case AuditWork:
-		w.State = Cancelled
-		w.Blocker = ""
-		w.Revision++
-		w.Note = r.Reason
-		s.putWork(w.ID, w)
-		s.emit(WorkCancelled, actor, w, true)
+		s.cancelWork(actor, w, r.Reason)
 		original := s.works[w.ParentID]
 		original.State = NeedsCheck
 		original.Revision++

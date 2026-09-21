@@ -2,7 +2,6 @@ package vllm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/stevemurr/strap/provider"
@@ -29,11 +28,7 @@ func (c *Client) CountTokens(ctx context.Context, input provider.Request) (int64
 		Count *int64 `json:"count"`
 	}
 	if err := c.wire.Post(ctx, c.tokenizeEndpoint, wire, &result); err != nil {
-		var responseError *chatwire.HTTPError
-		if errors.As(err, &responseError) {
-			err = &HTTPError{StatusCode: responseError.StatusCode, Body: responseError.Body}
-		}
-		return 0, fmt.Errorf("vllm: count tokens: %w", err)
+		return 0, fmt.Errorf("count tokens: %w", err)
 	}
 	if result.Count == nil || *result.Count < 0 {
 		return 0, fmt.Errorf("vllm: count tokens: response must contain a nonnegative integer count")

@@ -43,45 +43,45 @@ func TestSessionStartupValidatesConfiguration(t *testing.T) {
 
 	both := startupConfig()
 	both.Events.JSONLPath = filepath.Join(t.TempDir(), "trace.jsonl")
-	startupFails(t, both, harness.Dependencies{Provider: idle{}, EventStore: memory}, "two conflicting event stores")
+	startupFails(t, both, harness.Dependencies{Provider: textResponse("ready"), EventStore: memory}, "two conflicting event stores")
 
 	retention := startupConfig()
 	retention.Events.Retention = eventlog.Limits{Entries: 0, Bytes: 1}
-	startupFails(t, retention, harness.Dependencies{Provider: idle{}}, "unusable retention limits")
+	startupFails(t, retention, harness.Dependencies{Provider: textResponse("ready")}, "unusable retention limits")
 
 	queue := startupConfig()
 	queue.Events.Queue = eventlog.Limits{Entries: -1, Bytes: 1}
-	startupFails(t, queue, harness.Dependencies{Provider: idle{}}, "unusable queue limits")
+	startupFails(t, queue, harness.Dependencies{Provider: textResponse("ready")}, "unusable queue limits")
 
 	telemetry := startupConfig()
 	telemetry.Telemetry.Concurrency = 1000
-	startupFails(t, telemetry, harness.Dependencies{Provider: idle{}}, "out-of-range telemetry concurrency")
+	startupFails(t, telemetry, harness.Dependencies{Provider: textResponse("ready")}, "out-of-range telemetry concurrency")
 
 	telemetry = startupConfig()
 	telemetry.Telemetry.Timeout = -time.Second
-	startupFails(t, telemetry, harness.Dependencies{Provider: idle{}}, "a negative telemetry timeout")
+	startupFails(t, telemetry, harness.Dependencies{Provider: textResponse("ready")}, "a negative telemetry timeout")
 
 	unwritable := startupConfig()
 	unwritable.Events.JSONLPath = filepath.Join(t.TempDir(), "missing-dir", "trace.jsonl")
-	startupFails(t, unwritable, harness.Dependencies{Provider: idle{}}, "a trace path that cannot be created")
+	startupFails(t, unwritable, harness.Dependencies{Provider: textResponse("ready")}, "a trace path that cannot be created")
 
 	cancelled, stop := context.WithCancel(context.Background())
 	stop()
-	if _, err := harness.New(cancelled, startupConfig(), harness.Dependencies{Provider: idle{}}); !errors.Is(err, context.Canceled) {
+	if _, err := harness.New(cancelled, startupConfig(), harness.Dependencies{Provider: textResponse("ready")}); !errors.Is(err, context.Canceled) {
 		t.Fatal("startup ignored a cancelled context", err)
 	}
 }
 
 // Dependencies are checked before anything is built from them.
 func TestSessionStartupValidatesDependencies(t *testing.T) {
-	err := startupFails(t, startupConfig(), harness.Dependencies{Provider: idle{}, Resources: []harness.OwnedResource{{Name: "absent"}}}, "a nil owned resource")
+	err := startupFails(t, startupConfig(), harness.Dependencies{Provider: textResponse("ready"), Resources: []harness.OwnedResource{{Name: "absent"}}}, "a nil owned resource")
 	if !strings.Contains(err.Error(), "absent") {
 		t.Fatal("the failure did not name the offending resource", err)
 	}
-	startupFails(t, startupConfig(), harness.Dependencies{Provider: idle{}, EventStore: func(string) (eventlog.Store, error) {
+	startupFails(t, startupConfig(), harness.Dependencies{Provider: textResponse("ready"), EventStore: func(string) (eventlog.Store, error) {
 		return nil, nil
 	}}, "an event store factory that produced nothing")
-	startupFails(t, startupConfig(), harness.Dependencies{Provider: idle{}, EventStore: func(string) (eventlog.Store, error) {
+	startupFails(t, startupConfig(), harness.Dependencies{Provider: textResponse("ready"), EventStore: func(string) (eventlog.Store, error) {
 		return nil, errors.New("storage offline")
 	}}, "an event store factory that failed")
 }
@@ -90,11 +90,11 @@ func TestSessionStartupValidatesDependencies(t *testing.T) {
 // interleave two sessions' histories.
 func TestSessionStartupRequiresAnEmptyStoreForThisSession(t *testing.T) {
 	ctx := context.Background()
-	startupFails(t, startupConfig(), harness.Dependencies{Provider: idle{}, EventStore: func(string) (eventlog.Store, error) {
+	startupFails(t, startupConfig(), harness.Dependencies{Provider: textResponse("ready"), EventStore: func(string) (eventlog.Store, error) {
 		return eventlog.NewMemory("someone-else", eventlog.Limits{Entries: 8, Bytes: 1 << 20})
 	}}, "a store bound to another session")
 
-	startupFails(t, startupConfig(), harness.Dependencies{Provider: idle{}, EventStore: func(id string) (eventlog.Store, error) {
+	startupFails(t, startupConfig(), harness.Dependencies{Provider: textResponse("ready"), EventStore: func(id string) (eventlog.Store, error) {
 		store, err := eventlog.NewMemory(id, eventlog.Limits{Entries: 8, Bytes: 1 << 20})
 		if err != nil {
 			return nil, err
@@ -105,7 +105,7 @@ func TestSessionStartupRequiresAnEmptyStoreForThisSession(t *testing.T) {
 		return store, nil
 	}}, "a store that already holds records")
 
-	startupFails(t, startupConfig(), harness.Dependencies{Provider: idle{}, EventStore: func(id string) (eventlog.Store, error) {
+	startupFails(t, startupConfig(), harness.Dependencies{Provider: textResponse("ready"), EventStore: func(id string) (eventlog.Store, error) {
 		store, err := eventlog.NewMemory(id, eventlog.Limits{Entries: 8, Bytes: 1 << 20})
 		if err != nil {
 			return nil, err
@@ -121,7 +121,7 @@ func TestSessionWritesItsConfiguredTrace(t *testing.T) {
 	cfg := startupConfig()
 	cfg.Dir = t.TempDir()
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}

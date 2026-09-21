@@ -22,7 +22,7 @@ func WorkQuery(q url.Values) (work.ListQuery, error) {
 	}
 	if q.Has("limit") {
 		n, e := strconv.Atoi(q.Get("limit"))
-		if e != nil || n < 1 || n > 100 {
+		if e != nil || n < 1 {
 			return r, fmt.Errorf("%w: limit must be 1–100", work.ErrInvalid)
 		}
 		r.Limit = n

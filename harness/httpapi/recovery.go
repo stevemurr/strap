@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/identity"
-	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/work"
 	"net/http"
 	"strconv"
@@ -52,36 +52,26 @@ func serveRecovery(w http.ResponseWriter, r *http.Request, s *harness.Session, p
 		respond(w, page, err)
 		return true
 	}
-	if path[0] == "outputs" && (len(path) == 3 || len(path) == 4 && path[3] == "text") {
-		call, err := strconv.ParseUint(path[2], 10, 64)
-		if err != nil || call == 0 {
-			respond(w, nil, fmt.Errorf("%w: output call", work.ErrInvalid))
-			return true
-		}
-		id := identity.OutputID{Agent: identity.ActorID(path[1]), Call: call}
-		if len(path) == 3 {
-			v, err := s.InspectOutput(r.Context(), id)
-			respond(w, v, err)
-			return true
-		}
+	if path[0] != "outputs" {
+		return false
+	}
+	oq, text, ok, err := inspection.OutputPath(path, r.URL.Query())
+	switch {
+	case !ok:
+		return false
+	case err != nil:
+		respond(w, nil, err)
+	case !text:
+		v, err := s.InspectOutput(r.Context(), oq.Output)
+		respond(w, v, err)
+	default:
 		through, err := readUint(r, "through", true)
 		if err != nil {
 			respond(w, nil, err)
 			return true
 		}
-		offset, err := readUint(r, "offset", false)
-		if err != nil {
-			respond(w, nil, err)
-			return true
-		}
-		budget, err := readBudget(r)
-		if err != nil {
-			respond(w, nil, err)
-			return true
-		}
-		v, err := s.ReadOutputText(r.Context(), harness.OutputTextQuery{Channel: provider.OutputChannel(r.URL.Query().Get("channel")), Output: id, Through: eventlog.Cursor{Session: s.ID(), Sequence: through}, Offset: offset, MaxBytes: budget})
+		v, err := s.ReadOutputText(r.Context(), harness.OutputTextQuery{Channel: oq.Channel, Output: oq.Output, Through: eventlog.Cursor{Session: s.ID(), Sequence: through}, Offset: oq.Offset, MaxBytes: oq.MaxBytes})
 		respond(w, v, err)
-		return true
 	}
-	return false
+	return true
 }

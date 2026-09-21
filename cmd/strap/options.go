@@ -9,7 +9,7 @@ import (
 
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/lspconfig"
-	"github.com/stevemurr/strap/provider/vllm"
+	"github.com/stevemurr/strap/internal/modelcatalog"
 )
 
 type options struct {
@@ -26,7 +26,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	languageFlags := lspconfig.Flags(flags)
 	configPath := flags.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
 	profile := flags.String("profile", "", "Saved model profile (default selected by the catalog)")
-	modelFlags(flags, &o.config.Model)
+	modelcatalog.Flags(flags, &o.config.Model)
 	flags.StringVar(&o.config.Dir, "C", o.config.Dir, "Working directory for shell and file tools")
 	flags.IntVar(&o.config.ReasoningLimit, "reasoning-limit", o.config.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	flags.StringVar(&o.config.Events.JSONLPath, "record", "", "Record session events and tool diagnostics to a new JSONL file")
@@ -43,16 +43,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if flags.NArg() != 0 {
 		return options{}, errors.New("unexpected arguments; run strap and type into the prompt")
 	}
-	model, err := loadModel(*configPath, *profile, o.config.Model.Timeout)
-	if err != nil {
-		return options{}, err
-	}
-	if flagWasSet(flags, "backend") && o.config.Model.Backend == "chatcompletions" {
-		// The generic backend uses server defaults unless flags explicitly override.
-		model.Generation = vllm.Generation{}
-	}
-	o.config.Model = model
-	if err := flags.Parse(args); err != nil {
+	if _, err := modelcatalog.Apply(flags, args, &o.config.Model, *configPath, *profile); err != nil {
 		return options{}, err
 	}
 	if o.config.Model.Timeout <= 0 {
@@ -78,14 +69,4 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 		return options{}, err
 	}
 	return o, nil
-}
-
-func flagWasSet(flags *flag.FlagSet, name string) bool {
-	set := false
-	flags.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			set = true
-		}
-	})
-	return set
 }

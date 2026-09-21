@@ -200,16 +200,8 @@ func runMounted(ctx context.Context, args []string, stdout, stderr io.Writer, mo
 	if err != nil {
 		return err
 	}
-	model, profileName, err := modelcatalog.Resolve(*configPath, *profile, cfg.Model.Timeout)
+	profileName, err := modelcatalog.Apply(fs, args, &cfg.Model, *configPath, *profile)
 	if err != nil {
-		return err
-	}
-	if modelcatalog.WasSet(fs, "backend") && cfg.Model.Backend == "chatcompletions" {
-		// The generic backend uses server defaults unless flags explicitly override.
-		model.Generation = harness.ModelConfig{}.Generation
-	}
-	cfg.Model = model
-	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if _, err := cfg.Model.NewProvider(nil); err != nil {

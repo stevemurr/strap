@@ -27,9 +27,7 @@ func (p *waitScript) Submit(context.Context, provider.Request, provider.Observer
 }
 
 func TestRootWaitWithoutActiveWorkIsRejectedAndReplyFollows(t *testing.T) {
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	p := &waitScript{}
 	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p})
 	if err != nil {

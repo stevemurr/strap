@@ -5,13 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stevemurr/strap/conversation"
-	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -19,15 +15,7 @@ import (
 
 func schemaOracleFixture(t *testing.T, id string) (Scenario, fixture, Result, []fact) {
 	t.Helper()
-	dir := t.TempDir()
-	report, err := Run(context.Background(), Options{Mode: Scripted, Output: dir, ScenarioIDs: []string{id}, Timeout: 10 * time.Second})
-	if err != nil || len(report.Results) != 1 {
-		t.Fatalf("fixture run: %+v %v", report, err)
-	}
-	result := report.Results[0]
-	if result.Outcome != "passed" {
-		t.Fatalf("passing schema fixture required: %+v", result)
-	}
+	scenario, f, result, facts := oracleFixture(t, id)
 	if result.Schema == nil || result.Schema.Attempts != 2 || result.Schema.InvalidCalls != 1 || result.Schema.FirstArgumentsValid || !result.Behavior.RecoverySuccess || result.Behavior.CleanSuccess {
 		t.Fatalf("scripted probes must retain first-attempt failure after correction: %+v", result)
 	}
@@ -35,27 +23,7 @@ func schemaOracleFixture(t *testing.T, id string) (Scenario, fixture, Result, []
 	if result.Schema.FirstToolCorrect != wantToolCorrect {
 		t.Fatalf("wrong tool selection score: %+v", result.Schema)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, result.Manifest))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest struct {
-		Scenario Scenario `json:"scenario"`
-		Fixture  fixture  `json:"fixture"`
-	}
-	if err := json.Unmarshal(body, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	reader, err := inspection.OpenJSONL(context.Background(), filepath.Join(dir, result.Trace))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reader.Close(context.Background())
-	facts, err := readFacts(context.Background(), reader, result.Through)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return manifest.Scenario, manifest.Fixture, result, facts
+	return scenario, f, result, facts
 }
 
 func TestSchemaOracleRequiresRealRejectionAndProbe(t *testing.T) {
@@ -206,14 +174,8 @@ func runSchemaScenarioResponses(t *testing.T, id string, build func(fixture) []p
 	var script *fixtureScript
 	opts.Provider = testProviderFunc(func(ctx context.Context, request provider.Request, observer provider.Observer) (provider.Response, error) {
 		if script == nil {
-			body, err := os.ReadFile(filepath.Join(opts.Output, id, "001", "manifest.json"))
+			manifest, err := readManifest(opts.Output, id)
 			if err != nil {
-				return provider.Response{}, err
-			}
-			var manifest struct {
-				Fixture fixture `json:"fixture"`
-			}
-			if err := json.Unmarshal(body, &manifest); err != nil {
 				return provider.Response{}, err
 			}
 			script = &fixtureScript{responses: build(manifest.Fixture)}

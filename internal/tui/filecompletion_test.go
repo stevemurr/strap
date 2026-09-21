@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func typeFileQuery(t *testing.T, m *model, text string) {
@@ -165,15 +164,7 @@ func TestFilePickerNavigationAndSmallTerminalBounds(t *testing.T) {
 	}
 	for _, size := range []tea.WindowSizeMsg{{Width: 80, Height: 24}, {Width: 25, Height: 12}, {Width: 1, Height: 1}} {
 		m.Update(size)
-		lines := strings.Split(m.View(), "\n")
-		if len(lines) > size.Height {
-			t.Fatal("picker exceeds terminal height")
-		}
-		for _, line := range lines {
-			if lipgloss.Width(line) > size.Width {
-				t.Fatal("picker exceeds terminal width")
-			}
-		}
+		assertFits(t, m.View(), size.Width, size.Height)
 	}
 }
 

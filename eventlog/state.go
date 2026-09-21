@@ -68,6 +68,33 @@ func (s *storeState) writable() error {
 	}
 	return nil
 }
+
+// page starts a Read at q.After with the store's current position. The caller
+// holds s.mu.
+func (s *storeState) page(q Query) (Page, error) {
+	p := Page{Latest: s.latest, Next: q.After, Sealed: s.outcome != nil, Head: s.head()}
+	if s.latest > 0 {
+		p.Earliest = 1
+	}
+	if s.outcome != nil {
+		o := *s.outcome
+		p.Outcome = &o
+	}
+	return p, cursor(q, p.Earliest, p.Latest)
+}
+
+// overBudget reports whether appending e would exceed q.MaxBytes after used
+// bytes. A first event that does not fit is an error rather than an empty page.
+func overBudget(p Page, e Event, used int, q Query) (bool, error) {
+	if q.MaxBytes <= 0 || used+e.Size() <= q.MaxBytes {
+		return false, nil
+	}
+	if len(p.Events) == 0 {
+		return true, &PageBudgetError{Required: e.Size(), Budget: q.MaxBytes}
+	}
+	return true, nil
+}
+
 func (s *storeState) head() Head {
 	h := Head{Cursor: Cursor{s.session, s.latest}, State: Writable}
 	if s.failed != nil {

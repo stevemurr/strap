@@ -40,6 +40,24 @@ func (m *controlledProvider) Submit(ctx context.Context, request provider.Reques
 	}
 }
 
+// rootAndChild drains the next two model calls, one from root and one from a
+// delegated agent, and leaves both pending.
+func rootAndChild(t *testing.T, m *controlledProvider, root message.ActorID) (call, call) {
+	t.Helper()
+	var parent, child call
+	for range 2 {
+		got := m.next(t)
+		if got.request.Agent == root {
+			parent = got
+		} else {
+			child = got
+		}
+	}
+	if parent.answer == nil || child.answer == nil {
+		t.Fatal("delegation did not run both agents")
+	}
+	return parent, child
+}
 func (m *controlledProvider) next(t *testing.T) call {
 	t.Helper()
 	select {
@@ -134,18 +152,7 @@ func TestDelegationDoesNotBlockRootAndChildReplyReturnsThroughInbox(t *testing.T
 	c, m := setup(t)
 	_, _ = c.Send(c.Root(), "delegate this")
 	m.next(t).tool("create_test_agent", `{"input":{"task":"child task","context":"Background","expected_output":"A result"}}`)
-	var root, child call
-	for range 2 {
-		got := m.next(t)
-		if got.request.Agent == c.Root() {
-			root = got
-		} else {
-			child = got
-		}
-	}
-	if root.answer == nil || child.answer == nil {
-		t.Fatal("delegation did not run both agents")
-	}
+	root, child := rootAndChild(t, m, c.Root())
 	var creation struct {
 		conversation.Creation
 		Instruction *message.Receipt `json:"instruction"`

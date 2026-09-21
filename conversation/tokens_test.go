@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -25,14 +24,7 @@ func (p *countingProvider) CountTokens(ctx context.Context, r provider.Request) 
 
 func TestCountToolBatchUsesExactHistoryAndOwnsSnapshot(t *testing.T) {
 	p := &countingProvider{controlledProvider: &controlledProvider{calls: make(chan call, 16)}}
-	c := conversation.New(context.Background())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := c.Close(ctx); err != nil {
-			t.Error(err)
-		}
-	})
+	c := emptyConversation(t)
 	echo := tool.Func[struct{}]{
 		Spec:   tool.Definition[struct{}]{Parameters: testParameters[struct{}](t), Name: "echo"},
 		Invoke: func(context.Context, tool.Call, struct{}) (tool.Result, error) { return tool.Text("tool result"), nil },

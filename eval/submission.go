@@ -77,14 +77,8 @@ func GradeSubmission(ctx context.Context, mounts Mounts) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	var task Task
-	for _, candidate := range tasks {
-		if candidate.ID == r.TaskID {
-			task = candidate
-			break
-		}
-	}
-	if task.ID == "" {
+	task, ok := findTask(tasks, r.TaskID)
+	if !ok {
 		return Result{}, fmt.Errorf("unknown submitted problem %q", r.TaskID)
 	}
 	// Results must belong to this submission. Grading may be repeated using a

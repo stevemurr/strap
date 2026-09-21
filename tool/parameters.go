@@ -57,23 +57,21 @@ func Description(path, text string) Constraint {
 	return Constraint{path, func(p *parameterNode) error { p.description = text; return nil }}
 }
 
-func MinLength(path string, n int) Constraint { return countConstraint(path, "string", "minLength", n) }
-func MinItems(path string, n int) Constraint  { return countConstraint(path, "array", "minItems", n) }
-func MaxItems(path string, n int) Constraint  { return countConstraint(path, "array", "maxItems", n) }
-func countConstraint(path, kind, keyword string, n int) Constraint {
+func MinLength(path string, n int) Constraint {
+	return countConstraint(path, "string", "minLength", n, func(p *parameterNode) **int { return &p.minLength })
+}
+func MinItems(path string, n int) Constraint {
+	return countConstraint(path, "array", "minItems", n, func(p *parameterNode) **int { return &p.minItems })
+}
+func MaxItems(path string, n int) Constraint {
+	return countConstraint(path, "array", "maxItems", n, func(p *parameterNode) **int { return &p.maxItems })
+}
+func countConstraint(path, kind, keyword string, n int, slot func(*parameterNode) **int) Constraint {
 	return Constraint{path, func(p *parameterNode) error {
 		if p.kind != kind || n < 0 {
 			return fmt.Errorf("invalid %s constraint", keyword)
 		}
-		value := n
-		switch keyword {
-		case "minLength":
-			p.minLength = &value
-		case "minItems":
-			p.minItems = &value
-		case "maxItems":
-			p.maxItems = &value
-		}
+		*slot(p) = &n
 		return nil
 	}}
 }
@@ -460,13 +458,7 @@ func (p *parameterNode) objectOrValueSchema() map[string]any {
 }
 
 // Schema returns a fresh wire representation. Mutating it cannot affect Decode.
-func (p Parameters[A]) Schema() json.RawMessage {
-	if p.root == nil {
-		return nil
-	}
-	raw, _ := json.Marshal(p.root.schema())
-	return raw
-}
+func (p Parameters[A]) Schema() json.RawMessage { return p.Contract().Schema() }
 func (p Parameters[A]) Decode(raw json.RawMessage) (A, error) {
 	var args A
 	normalized, err := decodeParameterValue(p.root, raw)

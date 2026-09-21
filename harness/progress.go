@@ -40,19 +40,14 @@ func (s *Session) GetProgressFinding(ctx context.Context, actor identity.ActorID
 func progressQuery(a tool.ProgressReadArgs) inspection.ProgressQuery {
 	return inspection.ProgressQuery{Mode: a.Mode, WorkID: a.WorkID, ReportID: a.ReportID, FindingID: a.FindingID, BriefID: a.BriefID, EvidenceRef: a.EvidenceRef, Cursor: a.Cursor, Limit: a.Limit, MaxBytes: a.MaxBytes}
 }
-func (s *Session) readProgressTool(ctx context.Context, c tool.Call, a tool.ProgressReadArgs) (tool.Result, error) {
-	v, e := s.progressReads.ReadFamily(ctx, c.Actor, progressQuery(a), false)
-	if e != nil {
-		return tool.Result{}, e
+func (s *Session) progressReadTool(brief bool) func(context.Context, tool.Call, tool.ProgressReadArgs) (tool.Result, error) {
+	return func(ctx context.Context, c tool.Call, a tool.ProgressReadArgs) (tool.Result, error) {
+		v, e := s.progressReads.ReadFamily(ctx, c.Actor, progressQuery(a), brief)
+		if e != nil {
+			return tool.Result{}, e
+		}
+		return tool.JSON(v)
 	}
-	return tool.JSON(v)
-}
-func (s *Session) readBriefTool(ctx context.Context, c tool.Call, a tool.ProgressReadArgs) (tool.Result, error) {
-	v, e := s.progressReads.ReadFamily(ctx, c.Actor, progressQuery(a), true)
-	if e != nil {
-		return tool.Result{}, e
-	}
-	return tool.JSON(v)
 }
 func (s *Session) ReadWorkProgress(ctx context.Context, actor identity.ActorID, q inspection.ProgressQuery) (inspection.ProgressPage, error) {
 	return s.progressReads.ReadFamily(ctx, actor, q, false)

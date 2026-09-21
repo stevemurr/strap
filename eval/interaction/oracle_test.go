@@ -2,8 +2,6 @@ package interaction
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,7 +15,7 @@ import (
 // check that the oracle detects runtime faults even when the actor made the
 // correct request and a successful tool result was recorded.
 func TestOracleRejectsCorruptedDomainFacts(t *testing.T) {
-	scenario, f, baseline, facts := oracleFixture(t)
+	scenario, f, baseline, facts := oracleFixture(t, "audit-wrong-assignee")
 	control := oracleResult(baseline)
 	grade(&control, scenario, f, facts)
 	if control.Harness.Passed != control.Harness.Total || !control.Behavior.Scorable || !control.Behavior.OutcomeCorrect || control.Behavior.CleanSuccess || !control.Behavior.RecoverySuccess {
@@ -134,10 +132,10 @@ func TestOracleRejectsCorruptedDomainFacts(t *testing.T) {
 	})
 }
 
-func oracleFixture(t *testing.T) (Scenario, fixture, Result, []fact) {
+func oracleFixture(t *testing.T, scenarioID string) (Scenario, fixture, Result, []fact) {
 	t.Helper()
 	dir := t.TempDir()
-	report, err := Run(context.Background(), Options{Mode: Scripted, Output: dir, ScenarioIDs: []string{"audit-wrong-assignee"}, Timeout: 10 * time.Second})
+	report, err := Run(context.Background(), Options{Mode: Scripted, Output: dir, ScenarioIDs: []string{scenarioID}, Timeout: 10 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,15 +143,8 @@ func oracleFixture(t *testing.T) (Scenario, fixture, Result, []fact) {
 		t.Fatalf("passing fixture run required, got %#v", report.Results)
 	}
 	result := report.Results[0]
-	data, err := os.ReadFile(filepath.Join(dir, result.Manifest))
+	manifest, err := readManifest(dir, result.ScenarioID)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest struct {
-		Scenario Scenario `json:"scenario"`
-		Fixture  fixture  `json:"fixture"`
-	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	reader, err := inspection.OpenJSONL(context.Background(), filepath.Join(dir, result.Trace))

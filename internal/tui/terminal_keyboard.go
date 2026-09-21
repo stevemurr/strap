@@ -3,7 +3,6 @@ package tui
 import (
 	"bytes"
 	"io"
-	"reflect"
 	"strconv"
 	"strings"
 	"unicode"
@@ -45,21 +44,6 @@ func (w keyboardWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), err
-}
-
-// Bubble Tea v1 exposes unrecognized CSI input as an unexported []byte message.
-// Keep this compatibility bridge isolated and covered through the real input
-// reader. It leaves recognized keys, bracketed paste, and non-key CSI untouched.
-// Remove it when Bubble Tea provides native enhanced-keyboard events.
-func terminalKeyFilter(_ tea.Model, msg tea.Msg) tea.Msg {
-	t := reflect.TypeOf(msg)
-	if t == nil || t.PkgPath() != "github.com/charmbracelet/bubbletea" || t.Name() != "unknownCSISequenceMsg" {
-		return msg
-	}
-	if key, ok := decodeTerminalKey(string(reflect.ValueOf(msg).Bytes())); ok {
-		return key
-	}
-	return msg
 }
 
 func decodeTerminalKey(sequence string) (tea.KeyMsg, bool) {

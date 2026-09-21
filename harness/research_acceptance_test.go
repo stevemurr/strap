@@ -19,7 +19,6 @@ type researchAcceptance struct {
 	rootCalls, workerCalls atomic.Int32
 	done                   chan string
 	w                      work.Work
-	finding                work.ProgressFindingID
 	ref                    string
 }
 
@@ -119,11 +118,9 @@ func TestResearchEndToEndToolsAndCoveredTimer(t *testing.T) {
 	p := &researchAcceptance{done: make(chan string, 4)}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	cfg.WorkProgressReporting.BatchWindow = 2 * time.Second
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Root: harness.AgentDependencies{Provider: acceptanceRoot{p}}, Researcher: harness.AgentDependencies{Provider: acceptanceWorker{p}}, Provider: idle{}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Root: harness.AgentDependencies{Provider: acceptanceRoot{p}}, Researcher: harness.AgentDependencies{Provider: acceptanceWorker{p}}, Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,11 +128,7 @@ func TestResearchEndToEndToolsAndCoveredTimer(t *testing.T) {
 	if _, err = s.Send(s.Root(), "Investigate the fixture with a researcher"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-p.done:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
+	await(t, p.done, "research delivery")
 	// The old finding timer must not create an exchange after delivery and answer.
 	select {
 	case extra := <-p.done:

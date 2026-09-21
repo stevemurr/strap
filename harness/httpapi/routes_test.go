@@ -10,9 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/stevemurr/strap/agent"
 
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
@@ -145,24 +142,14 @@ func TestHTTPRequestBodyMustBeOneJSONValue(t *testing.T) {
 // An agent transcript is a paged read whose bounds are validated with the rest
 // of the query.
 func TestHTTPAgentTranscriptQuery(t *testing.T) {
-	ctx, s := recoverySession(t, true)
+	_, s := recoverySession(t, true)
 	base := "/sessions/" + s.ID() + "/agents/" + string(s.Root())
 
 	// Drive one turn so the root has a transcript to page through.
 	if w := request(t, s.http, "POST", "/sessions/"+s.ID()+"/messages", httpapi.SendRequest{To: s.Root(), Content: "hello"}); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	wait, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	for {
-		e, err := s.NextEvent(wait)
-		if err != nil {
-			t.Fatal("the root never finished its turn", err)
-		}
-		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Root() && c.State == agent.Idle {
-			break
-		}
-	}
+	awaitIdle(t, s.Session, "the root never finished its turn")
 
 	w := request(t, s.http, "GET", base+"?transcript=true", nil)
 	if w.Code != 200 {
@@ -335,31 +322,19 @@ func TestServiceShedsLoadBeyondItsRequestLimit(t *testing.T) {
 // Authorization is checked per capability, so a token that cannot dispose is
 // still allowed to read.
 func TestServiceAuthorizesPerCapability(t *testing.T) {
-	ctx := context.Background()
-	var session *harness.Session
 	seen := map[httpapi.Capability]bool{}
-	service, err := httpapi.New(ctx, httpapi.Options{DefaultConfig: config(), Factory: func(ctx context.Context, c harness.Config) (*harness.Session, error) {
-		var e error
-		session, e = harness.New(ctx, c, harness.Dependencies{Provider: idle{}})
-		return session, e
-	}, Authorize: func(_ *http.Request, c httpapi.Capability, _ string) error {
+	s := servedSession(t, idle{}, func(_ *http.Request, c httpapi.Capability, _ string) error {
 		seen[c] = true
 		if c == httpapi.Dispose {
 			return errors.New("disposal is not permitted")
 		}
 		return nil
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer service.Close(ctx)
+	})
+	session, service := s.Session, s.http
 	serve := func(method, path string) int {
 		w := httptest.NewRecorder()
 		service.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(`{}`)))
 		return w.Code
-	}
-	if code := serve("POST", "/sessions"); code != 201 {
-		t.Fatal(code)
 	}
 	base := "/sessions/" + session.ID()
 	if code := serve("GET", base); code != 200 {

@@ -11,14 +11,12 @@ import (
 )
 
 func TestLanguageAssembly(t *testing.T) {
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	languages := lsp.GoConfig()
 	languages.Servers[0].Command = []string{"missing-language-server"}
 	languages.Servers[0].Env = map[string]string{"SECRET": "never-record-this"}
 	cfg.LSP = &languages
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +55,11 @@ func TestLanguageAssembly(t *testing.T) {
 
 func TestDefaultLanguageToolsAndOptOut(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
-		cfg := harness.DefaultConfig()
-		cfg.Dir = t.TempDir()
-		cfg.Web = nil
+		cfg := testConfig(t, true)
 		if !enabled {
 			cfg.LSP = nil
 		}
-		s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}})
+		s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready")})
 		if err != nil {
 			t.Fatal(err)
 		}

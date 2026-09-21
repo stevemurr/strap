@@ -62,13 +62,19 @@ func (m *model) observeToolBatch(event conversation.ToolBatchEvent) {
 	}
 }
 
+// measuredTokens records a context count; a negative count or an error marks
+// the measurement as failed.
+func measuredTokens(revision uint64, count int64, errored bool) *contextTokens {
+	return &contextTokens{revision: revision, count: count, failed: errored || count < 0}
+}
+
 func (m *model) observeContextTokens(event conversation.ContextTokensEvent) {
 	for i := range m.entries {
 		e := &m.entries[i]
 		if e.tool.agent != event.Agent || e.tokens == nil || e.tokens.revision != event.Revision {
 			continue
 		}
-		e.tokens = &contextTokens{revision: event.Revision, count: event.Count, failed: event.Error != "" || event.Count < 0}
+		e.tokens = measuredTokens(event.Revision, event.Count, event.Error != "")
 		if !m.selecting {
 			m.renderTranscript(false)
 		}

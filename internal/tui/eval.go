@@ -290,13 +290,9 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch key {
 			case "esc":
 				m.toggleQueue()
-			case "up", "k":
+			case "up", "k", "left":
 				m.queueCursor = max(0, m.queueCursor-1)
-			case "down", "j":
-				m.queueCursor = min(len(m.problems)-1, m.queueCursor+1)
-			case "left":
-				m.queueCursor = max(0, m.queueCursor-1)
-			case "right":
+			case "down", "j", "right":
 				m.queueCursor = min(len(m.problems)-1, m.queueCursor+1)
 			case "home":
 				m.queueCursor = 0
@@ -399,11 +395,7 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.queueOpen {
 					m.toggleQueue()
 				}
-				delta := 1
-				if v.Button == tea.MouseButtonWheelUp {
-					delta = -1
-				}
-				m.queueCursor = max(0, min(len(m.problems)-1, m.queueCursor+delta))
+				m.queueCursor = max(0, min(len(m.problems)-1, m.queueCursor+wheelStep(v.Button)))
 				return m, nil
 			}
 			if v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft {
@@ -439,13 +431,9 @@ func (m *evalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.followActive = false
 				a.viewport, _ = a.viewport.Update(v)
 			} else if v.Action == tea.MouseActionPress && v.Button == tea.MouseButtonLeft {
-				x, y := v.X-1, v.Y-top+a.viewport.YOffset
-				for _, target := range append(append([]foldTarget{}, a.folds.targets...), a.folds.hints...) {
-					if y == target.row && x >= target.column && x < target.column+2 {
-						m.followActive = false
-						a.toggleFold(target.key)
-						break
-					}
+				if key, ok := a.folds.hit(v.X-1, v.Y-top+a.viewport.YOffset); ok {
+					m.followActive = false
+					a.toggleFold(key)
 				}
 			}
 		}

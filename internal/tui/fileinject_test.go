@@ -32,8 +32,7 @@ func initAttachmentRepo(t *testing.T, dir string) {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 }
-func loadFixture(t *testing.T, dir, prompt string) attachmentResult {
-	t.Helper()
+func loadFixture(dir, prompt string) attachmentResult {
 	return loadAttachments(context.Background(), prompt, dir)
 }
 
@@ -61,7 +60,7 @@ func TestAttachmentsPreservePromptAndDoNotExpandContent(t *testing.T) {
 	writeAttachmentFixture(t, dir, "a.txt", "mentions @b.txt\n")
 	writeAttachmentFixture(t, dir, "b.txt", "B\n")
 	prompt := "check @a.txt and @b.txt, then @a.txt again"
-	r := loadFixture(t, dir, prompt)
+	r := loadFixture(dir, prompt)
 	if len(r.errs) > 0 || len(r.included) != 2 || !strings.HasPrefix(r.text, prompt+"\n\n<attached_files>") {
 		t.Fatalf("%+v", r)
 	}
@@ -74,7 +73,7 @@ func TestAttachmentsAbsoluteAndQuotedPaths(t *testing.T) {
 	dir := t.TempDir()
 	writeAttachmentFixture(t, dir, "a file.txt", "hello")
 	for _, path := range []string{"a file.txt", filepath.Join(dir, "a file.txt")} {
-		r := loadFixture(t, dir, quoteFileMention(path))
+		r := loadFixture(dir, quoteFileMention(path))
 		if len(r.errs) > 0 || len(r.included) != 1 || !strings.Contains(r.text, "1\thello") {
 			t.Fatalf("%+v", r)
 		}
@@ -92,7 +91,7 @@ func TestAttachmentsRejectUnsupportedAndOversizedFiles(t *testing.T) {
 			dir := t.TempDir()
 			writeAttachmentFixture(t, dir, tc.name, tc.content)
 			prompt := "@" + tc.name
-			r := loadFixture(t, dir, prompt)
+			r := loadFixture(dir, prompt)
 			if len(r.errs) != 1 || !strings.Contains(r.errs[0], tc.want) || r.text != prompt {
 				t.Fatalf("%+v", r)
 			}
@@ -104,7 +103,7 @@ func TestAttachmentsAcceptTextWithoutExtensionsAndExactFileLimit(t *testing.T) {
 	dir := t.TempDir()
 	for name, data := range map[string]string{"Dockerfile": "FROM scratch\n", "unicode": "你好 🌍\ttext\r\n", "empty": "", "limit": strings.Repeat("x", maxAttachmentFileBytes)} {
 		writeAttachmentFixture(t, dir, name, data)
-		r := loadFixture(t, dir, "@"+name)
+		r := loadFixture(dir, "@"+name)
 		if len(r.errs) > 0 || len(r.included) != 1 {
 			t.Fatalf("%s: %+v", name, r.errs)
 		}
@@ -124,11 +123,11 @@ func TestAttachmentsFolderUsesGitIgnoreAndReportsSkips(t *testing.T) {
 	} {
 		writeAttachmentFixture(t, dir, name, data)
 	}
-	r := loadFixture(t, dir, "@.")
+	r := loadFixture(dir, "@.")
 	if len(r.errs) > 0 || strings.Contains(r.text, "secret") || len(r.skipped) < 7 || !strings.Contains(r.text, "1\tkeep") || !strings.Contains(r.text, "1\tpackage main") || !strings.Contains(r.text, "1\tnested") {
 		t.Fatalf("errs=%v included=%v skipped=%v payload=%s", r.errs, r.included, r.skipped, r.text)
 	}
-	r = loadFixture(t, dir, "@debug.log")
+	r = loadFixture(dir, "@debug.log")
 	if len(r.errs) != 1 || !strings.Contains(r.errs[0], "gitignored") {
 		t.Fatalf("%+v", r)
 	}
@@ -139,7 +138,7 @@ func TestAttachmentsBudgetFailureIsAtomic(t *testing.T) {
 	for i := range 5 {
 		writeAttachmentFixture(t, dir, fmt.Sprintf("%d.txt", i), strings.Repeat("a", maxAttachmentFileBytes))
 	}
-	r := loadFixture(t, dir, "@.")
+	r := loadFixture(dir, "@.")
 	if len(r.errs) != 1 || !strings.Contains(r.errs[0], "1 MiB") || r.text != "@." {
 		t.Fatalf("errs=%v", r.errs)
 	}
@@ -148,7 +147,7 @@ func TestAttachmentsBudgetFailureIsAtomic(t *testing.T) {
 func TestAttachmentsFormattedBudgetIsBounded(t *testing.T) {
 	dir := t.TempDir()
 	writeAttachmentFixture(t, dir, "lines", strings.Repeat("\n", maxAttachmentFileBytes))
-	r := loadFixture(t, dir, "@lines")
+	r := loadFixture(dir, "@lines")
 	if len(r.errs) != 1 || !strings.Contains(r.errs[0], "1 MiB") {
 		t.Fatalf("errs=%v", r.errs)
 	}
@@ -158,7 +157,7 @@ func TestAttachmentsExplicitSkippedFileStillErrorsAfterFolder(t *testing.T) {
 	dir := t.TempDir()
 	writeAttachmentFixture(t, dir, "data/bin", "\x00")
 	writeAttachmentFixture(t, dir, "data/text", "yes")
-	r := loadFixture(t, dir, "@data @data/bin")
+	r := loadFixture(dir, "@data @data/bin")
 	if len(r.errs) != 1 || r.text != "@data @data/bin" {
 		t.Fatalf("%+v", r)
 	}
@@ -167,7 +166,7 @@ func TestAttachmentsExplicitSkippedFileStillErrorsAfterFolder(t *testing.T) {
 func TestAttachmentsCancelMissingEmptyAndMalformed(t *testing.T) {
 	dir := t.TempDir()
 	for _, prompt := range []string{"@missing", "@.", "@\"unclosed"} {
-		r := loadFixture(t, dir, prompt)
+		r := loadFixture(dir, prompt)
 		if len(r.errs) == 0 || r.text != prompt {
 			t.Fatalf("%+v", r)
 		}
@@ -185,7 +184,7 @@ func TestAttachmentsSkipSymlinksAndDedupeOverlaps(t *testing.T) {
 	if err := os.Symlink(dir, filepath.Join(dir, "folder/loop")); err != nil {
 		t.Fatal(err)
 	}
-	r := loadFixture(t, dir, "@folder @folder/a")
+	r := loadFixture(dir, "@folder @folder/a")
 	if len(r.errs) > 0 || len(r.included) != 1 || len(r.skipped) != 1 {
 		t.Fatalf("%+v", r)
 	}
@@ -305,7 +304,7 @@ func TestAttachmentsFileCountLimitIsAtomic(t *testing.T) {
 	for i := range maxAttachmentFiles + 1 {
 		writeAttachmentFixture(t, dir, fmt.Sprintf("file-%03d", i), "")
 	}
-	r := loadFixture(t, dir, "@.")
+	r := loadFixture(dir, "@.")
 	if len(r.errs) != 1 || !strings.Contains(r.errs[0], "256 files") || r.text != "@." {
 		t.Fatal(r.errs)
 	}
@@ -324,7 +323,7 @@ func TestGitIgnoreHonorsNestedNegationAndRepositoryExcludes(t *testing.T) {
 	} {
 		writeAttachmentFixture(t, dir, name, data)
 	}
-	r := loadFixture(t, dir, "@.")
+	r := loadFixture(dir, "@.")
 	if len(r.errs) > 0 || !strings.Contains(r.text, "include this") || strings.Contains(r.text, "excluded content") {
 		t.Fatal(r.errs, r.text)
 	}

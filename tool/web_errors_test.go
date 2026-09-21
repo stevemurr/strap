@@ -89,7 +89,7 @@ func TestOpenRejectsInvalidRequestsAndPageMetadata(t *testing.T) {
 			w.browser = pageFunc(func(context.Context, string) (agentbrowser.Page, error) {
 				return agentbrowser.Page{URL: tc.final, ContentType: tc.contentType}, nil
 			})
-			_, err := w.Tools()[1].Call(context.Background(), Call{Arguments: mustWebJSON(t, map[string]any{"url": tc.url, "cursor": nil, "max_chars": nil})})
+			_, err := w.Tools()[1].Call(context.Background(), Call{Arguments: mustJSON(t, map[string]any{"url": tc.url, "cursor": nil, "max_chars": nil})})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
@@ -101,15 +101,6 @@ func TestOpenRejectsInvalidRequestsAndPageMetadata(t *testing.T) {
 			t.Fatal("accepted", raw)
 		}
 	}
-}
-
-func mustWebJSON(t *testing.T, value any) []byte {
-	t.Helper()
-	out, err := MarshalInput(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
 }
 
 func TestOpenBoundsLinksAndCacheCapacity(t *testing.T) {
@@ -127,7 +118,7 @@ func TestOpenBoundsLinksAndCacheCapacity(t *testing.T) {
 		t.Fatalf("limits not enforced: %+v", page)
 	}
 	w.config.CacheBytes = 1
-	_, err := w.open(context.Background(), Call{}, openArgs{URL: "https://example.com", MaxChars: ptrWeb(200)})
+	_, err := w.open(context.Background(), Call{}, openArgs{URL: "https://example.com", MaxChars: ptr(200)})
 	if err == nil || !strings.Contains(err.Error(), "cache capacity") {
 		t.Fatal(err)
 	}
@@ -135,8 +126,6 @@ func TestOpenBoundsLinksAndCacheCapacity(t *testing.T) {
 		t.Fatal("evicted cache accounting incorrect")
 	}
 }
-
-func ptrWeb(n int) *int { return &n }
 
 func TestOpenCursorOffsetsAndErrorsThroughTool(t *testing.T) {
 	w := testWeb(t, WebConfig{})
@@ -146,7 +135,7 @@ func TestOpenCursorOffsetsAndErrorsThroughTool(t *testing.T) {
 	p := openResult(t, w, "a", "https://example.com", "", 200)
 	id, _, _ := strings.Cut(p.NextCursor, ".")
 	for _, cursor := range []string{"bad", id + ".nope", id + ".-1", id + ".300", id + ".999999999999999999999999999999"} {
-		_, err := w.Tools()[1].Call(context.Background(), Call{Actor: "a", Arguments: mustWebJSON(t, openArgs{URL: "https://example.com", Cursor: &cursor})})
+		_, err := w.Tools()[1].Call(context.Background(), Call{Actor: "a", Arguments: mustJSON(t, openArgs{URL: "https://example.com", Cursor: &cursor})})
 		if err == nil || !strings.Contains(err.Error(), "cursor unavailable") {
 			t.Fatal(cursor, err)
 		}
@@ -165,7 +154,7 @@ func TestOpenCancellationAtBackendAndSnapshotBoundaries(t *testing.T) {
 				}
 				return agentbrowser.Page{URL: url, Content: strings.Repeat("a", 300)}, nil
 			})
-			args := openArgs{URL: "https://example.com", MaxChars: ptrWeb(200)}
+			args := openArgs{URL: "https://example.com", MaxChars: ptr(200)}
 			if mode == "continuation" {
 				cursor := openResult(t, w, "", "https://example.com", "", 200).NextCursor
 				args.Cursor = &cursor

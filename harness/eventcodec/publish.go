@@ -13,7 +13,6 @@ import (
 	"github.com/stevemurr/strap/harness/record"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/internal/jsonstream"
-	"github.com/stevemurr/strap/tool"
 	"hash"
 	"sync"
 	"time"
@@ -189,12 +188,7 @@ func control(e conversation.Event) (json.RawMessage, error) {
 		m.Event = nil
 		v = conversation.MessageEvent{Message: m}
 	case conversation.ToolEvent:
-		v = struct {
-			Execution  *tool.ExecutionBinding `json:"execution,omitempty"`
-			Invocation string                 `json:"invocation_id"`
-			FinishedAt time.Time              `json:"finished_at"`
-			Name       string                 `json:"name"`
-		}{e.Activity.Result.Execution, e.Activity.InvocationID, e.Activity.FinishedAt, e.Activity.Call.Name}
+		v = record.ToolControl{Execution: e.Activity.Result.Execution, Invocation: e.Activity.InvocationID, FinishedAt: e.Activity.FinishedAt, Name: e.Activity.Call.Name}
 	case conversation.WorkEvent:
 		v = record.DescribeWork(e.Event)
 	case conversation.CommentaryEvent:

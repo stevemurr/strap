@@ -30,19 +30,32 @@ func testOptions(t *testing.T) Options {
 	t.Helper()
 	return Options{Config: harness.DefaultConfig(), Output: filepath.Join(t.TempDir(), "run"), Mode: Live, ScenarioIDs: []string{"audit-independent"}, Timeout: 10 * time.Second}
 }
-func fixtureFromManifest(t *testing.T, dir string) fixture {
+
+// trialManifest is the recorded part of the first trial's manifest that tests
+// read back. Injected providers use it for actual fixture IDs.
+type trialManifest struct {
+	Scenario   Scenario                `json:"scenario"`
+	Fixture    fixture                 `json:"fixture"`
+	Config     harness.EffectiveConfig `json:"config"`
+	PromptHash string                  `json:"prompt_sha256"`
+	ToolsHash  string                  `json:"tools_sha256"`
+}
+
+func readManifest(dir, scenario string) (trialManifest, error) {
+	body, err := os.ReadFile(filepath.Join(dir, scenario, "001", "manifest.json"))
+	if err != nil {
+		return trialManifest{}, err
+	}
+	var m trialManifest
+	return m, json.Unmarshal(body, &m)
+}
+func manifestFixture(t *testing.T, dir, scenario string) fixture {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(dir, "audit-independent", "001", "manifest.json"))
+	m, err := readManifest(dir, scenario)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var manifest struct {
-		Fixture fixture `json:"fixture"`
-	}
-	if err = json.Unmarshal(b, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	return manifest.Fixture
+	return m.Fixture
 }
 func responseCall(name string, value any) provider.Response {
 	args, _ := tool.MarshalInput(value)
@@ -130,7 +143,7 @@ func TestLiveProviderStopsBeforeNextDecision(t *testing.T) {
 	opts := testOptions(t)
 	var calls atomic.Int32
 	opts.Provider = testProviderFunc(func(ctx context.Context, r provider.Request, _ provider.Observer) (provider.Response, error) {
-		f := fixtureFromManifest(t, opts.Output)
+		f := manifestFixture(t, opts.Output, "audit-independent")
 		switch calls.Add(1) {
 		case 1:
 			return responseCall("get_work", map[string]any{"work_id": f.Original.ID}), nil
@@ -186,7 +199,7 @@ func TestCallAndToolBudgets(t *testing.T) {
 				opts.MaxToolCalls = 1
 			}
 			opts.Provider = testProviderFunc(func(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
-				f := fixtureFromManifest(t, opts.Output)
+				f := manifestFixture(t, opts.Output, "audit-independent")
 				r := responseCall("get_work", map[string]any{"work_id": f.Original.ID})
 				if kind == "tool" {
 					r.ToolCalls = append(r.ToolCalls, provider.ToolCall{ID: "second", Name: "list_agents", Arguments: json.RawMessage(`{"input":{}}`)})
@@ -266,7 +279,7 @@ func TestReasoningLimitRecoveryIsNotCleanSuccess(t *testing.T) {
 		if calls.Add(1) == 1 {
 			return provider.Response{}, o.OnDelta(provider.Delta{Channel: provider.ChannelReasoning, Text: "too much reasoning"})
 		}
-		f := fixtureFromManifest(t, opts.Output)
+		f := manifestFixture(t, opts.Output, "audit-independent")
 		return f.script("audit-independent").Submit(ctx, r, o)
 	})
 	r := trialResult(t, opts)

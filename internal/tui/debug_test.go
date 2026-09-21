@@ -53,29 +53,26 @@ func TestDebugTraceShowsDelegationMessagesAndToolNames(t *testing.T) {
 	}
 }
 
-func TestSpinnerAndTimerFollowActivityIncludingDelegatedWork(t *testing.T) {
+func TestSpinnerFollowsActivityIncludingDelegatedWork(t *testing.T) {
 	m, _ := setup(t)
-	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	m.now = func() time.Time { return now }
 	enter(m, "do work")
 	before := m.spinner.View()
 	_, nextTick := m.Update(spinner.TickMsg{ID: m.spinner.ID()})
 	if before == m.spinner.View() || nextTick == nil {
 		t.Fatal("spinner did not advance and schedule next tick")
 	}
-	now = now.Add(3400 * time.Millisecond)
-	if !strings.Contains(m.activityLine(), "3.4s") {
-		t.Fatal(m.activityLine())
+	if !strings.Contains(m.composerActivity(), "Working") {
+		t.Fatal(m.composerActivity())
 	}
 	m.observe(conversation.AckEvent{Receipt: message.Receipt{MessageID: "1", Recipient: "root", Status: message.Consumed}})
 	m.observe(conversation.AgentStateChanged{Agent: "worker", State: agent.Running})
 	m.observe(conversation.AgentStateChanged{Agent: "root", State: agent.Idle})
-	if !m.busy() || !strings.Contains(m.activityLine(), "1 agent(s) processing") {
+	if !m.busy() || !strings.Contains(m.composerActivity(), "Working") {
 		t.Fatal("root idle hid worker activity")
 	}
 	m.observe(conversation.AgentStateChanged{Agent: "worker", State: agent.Idle})
-	if m.busy() || !strings.Contains(m.activityLine(), "last active 3.4s") {
-		t.Fatal(m.activityLine())
+	if m.busy() || m.composerActivity() != "" {
+		t.Fatal("idle composer still shows activity", m.composerActivity())
 	}
 	m.observe(conversation.AgentStateChanged{Agent: "root", State: agent.Paused})
 	enter(m, "queued while paused")
@@ -83,8 +80,8 @@ func TestSpinnerAndTimerFollowActivityIncludingDelegatedWork(t *testing.T) {
 		t.Fatal("paused inbox should not spin")
 	}
 	m.observe(conversation.AgentStateChanged{Agent: "root", State: agent.Running})
-	if !m.busy() || !strings.Contains(m.activityLine(), "0.0s") {
-		t.Fatal("resume did not start new timer")
+	if !m.busy() || !strings.Contains(m.composerActivity(), "Working") {
+		t.Fatal("resume did not show activity")
 	}
 	m.Update(received{err: context.Canceled})
 	if m.busy() {
@@ -97,7 +94,7 @@ func TestToolErrorsCancellationAndTerminalText(t *testing.T) {
 	m.resize(140, 60)
 	activity := agent.ToolActivity{Call: provider.ToolCall{ID: "call", Name: "shell\x1b[2J", Arguments: []byte(`{"input":{}}`)}, StartedAt: time.Now()}
 	m.observe(conversation.ToolEvent{Agent: "worker", Activity: activity})
-	if strings.Contains(m.activityLine(), "\x1b[2J") {
+	if strings.Contains(m.View(), "\x1b[2J") {
 		t.Fatal("tool name injected terminal controls")
 	}
 	activity.FinishedAt = activity.StartedAt.Add(time.Second)
@@ -164,23 +161,19 @@ func TestFreezePreservesSelectionWhileEventsContinue(t *testing.T) {
 	}
 }
 
-func TestTimerSurvivesReplyHandoff(t *testing.T) {
+func TestActivitySurvivesReplyHandoff(t *testing.T) {
 	m, _ := setup(t)
-	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	m.now = func() time.Time { return now }
 	m.observe(conversation.AgentStateChanged{Agent: "worker", State: agent.Running})
-	now = now.Add(10 * time.Second)
 	m.observe(conversation.MessageEvent{Message: message.Message{ID: "reply", From: "worker", To: "root", Kind: message.Reply, Content: "result"}})
 	m.observe(conversation.AgentStateChanged{Agent: "worker", State: agent.Idle})
-	if !m.busy() {
+	if !m.busy() || !strings.Contains(m.composerActivity(), "Working") {
 		t.Fatal("reply awaiting root consumption ended activity")
 	}
 	m.observe(conversation.AckEvent{Receipt: message.Receipt{MessageID: "reply", Recipient: "root", Status: message.Consumed}})
-	now = now.Add(time.Second)
 	m.observe(conversation.MessageEvent{Message: message.Message{ID: "done", From: "root", To: message.User, Kind: message.Reply, Content: "done"}})
 	m.observe(conversation.AckEvent{Receipt: message.Receipt{MessageID: "done", Recipient: message.User, Status: message.Queued}})
-	if m.busy() || !strings.Contains(m.activityLine(), "last active 11.0s") {
-		t.Fatal(m.activityLine())
+	if m.busy() || m.composerActivity() != "" {
+		t.Fatal("completed exchange still shows activity", m.composerActivity())
 	}
 }
 

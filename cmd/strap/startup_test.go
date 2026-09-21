@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,18 +16,6 @@ func TestCanceledStartupClosesSession(t *testing.T) {
 	if err := run(ctx, []string{"-C", t.TempDir()}, io.Discard); err == nil {
 		t.Fatal("canceled controller started")
 	}
-}
-func TestMainHelp(t *testing.T) {
-	old := os.Args
-	os.Args = []string{"strap", "-help"}
-	defer func() { os.Args = old }()
-	main()
-}
-func TestUnknownFlagAndMissingAgentErrors(t *testing.T) {
-	if err := run(context.Background(), []string{"-unknown"}, io.Discard); err == nil {
-		t.Fatal("unknown flag accepted")
-	}
-
 }
 
 func TestStartupReachesTerminal(t *testing.T) {

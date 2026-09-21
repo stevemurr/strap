@@ -41,10 +41,6 @@ type Definition[A any] struct {
 	Bookkeeping []string
 }
 
-func (d Definition[A]) ProviderDefinition() provider.ToolDefinition {
-	return provider.ToolDefinition{Name: d.Name, Description: d.Description, Parameters: d.Parameters.Schema()}
-}
-
 // Handler receives validated arguments; Call supplies runtime identity and routing.
 type Handler[A any] func(context.Context, Call, A) (Result, error)
 
@@ -55,7 +51,9 @@ type Func[A any] struct {
 	Invoke Handler[A]
 }
 
-func (f Func[A]) Definition() provider.ToolDefinition { return f.Spec.ProviderDefinition() }
+func (f Func[A]) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: f.Spec.Name, Description: f.Spec.Description, Parameters: f.Spec.Parameters.Schema()}
+}
 
 // Bookkeeping returns a copy of the tool that declares the named parameters as
 // bookkeeping; see Definition.Bookkeeping.

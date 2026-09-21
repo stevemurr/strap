@@ -142,14 +142,14 @@ func TestRetainedPagesAndStaleMetadata(t *testing.T) {
 }
 
 func TestDiagnosticReplacement(t *testing.T) {
-	c := &client{diagnostics: map[string]diagnosticSet{}, diagnosticLimit: 1024}
+	c := &client{diagnostics: map[string]diagnosticSet{}, pulledDiagnostics: map[string]diagnosticSet{}, diagnosticLimit: 1024}
 	v1, v2 := 1, 2
-	c.storeDiagnostics("file:///f", diagnosticSet{Version: &v2, Items: []wireDiagnostic{{Message: "current"}}})
-	c.storeDiagnostics("file:///f", diagnosticSet{Version: &v1, Items: []wireDiagnostic{{Message: "old"}}})
+	c.storeDiagnosticSet("file:///f", diagnosticSet{Version: &v2, Items: []wireDiagnostic{{Message: "current"}}}, false)
+	c.storeDiagnosticSet("file:///f", diagnosticSet{Version: &v1, Items: []wireDiagnostic{{Message: "old"}}}, false)
 	if c.diagnostics["file:///f"].Items[0].Message != "current" {
 		t.Fatal("old publication replaced new")
 	}
-	c.storeDiagnostics("file:///f", diagnosticSet{Version: &v2, Items: []wireDiagnostic{}})
+	c.storeDiagnosticSet("file:///f", diagnosticSet{Version: &v2, Items: []wireDiagnostic{}}, false)
 	if len(c.diagnostics["file:///f"].Items) != 0 {
 		t.Fatal("empty set didn't clear")
 	}
@@ -159,28 +159,28 @@ func TestDiagnosticReplacement(t *testing.T) {
 }
 
 func TestIndependentPushAndPullDiagnostics(t *testing.T) {
-	c := &client{diagnostics: map[string]diagnosticSet{}, diagnosticLimit: 4096}
+	c := &client{diagnostics: map[string]diagnosticSet{}, pulledDiagnostics: map[string]diagnosticSet{}, diagnosticLimit: 4096}
 	uri := "file:///lib.rs"
 	v1, v2 := 1, 2
 	compiler := wireDiagnostic{Source: "rustc", Message: "compiler error"}
 	analyzer := wireDiagnostic{Source: "rust-analyzer", Message: "analyzer error"}
-	c.storeDiagnostics(uri, diagnosticSet{Version: &v1, Items: []wireDiagnostic{compiler}})
-	c.storePulledDiagnostics(uri, diagnosticSet{Version: &v1, Items: []wireDiagnostic{}})
+	c.storeDiagnosticSet(uri, diagnosticSet{Version: &v1, Items: []wireDiagnostic{compiler}}, false)
+	c.storeDiagnosticSet(uri, diagnosticSet{Version: &v1, Items: []wireDiagnostic{}}, true)
 	sets, _ := c.diagnosticSnapshot()
 	if len(sets[uri].Items) != 1 || sets[uri].Items[0].Source != "rustc" || sets[uri].Version == nil {
 		t.Fatal("empty pull erased compiler diagnostics", sets[uri])
 	}
-	c.storePulledDiagnostics(uri, diagnosticSet{Version: &v1, Items: []wireDiagnostic{analyzer}})
+	c.storeDiagnosticSet(uri, diagnosticSet{Version: &v1, Items: []wireDiagnostic{analyzer}}, true)
 	sets, _ = c.diagnosticSnapshot()
 	if len(sets[uri].Items) != 2 {
 		t.Fatal("lost independent producer", sets[uri])
 	}
-	c.storeDiagnostics(uri, diagnosticSet{Version: &v2, Items: []wireDiagnostic{}})
+	c.storeDiagnosticSet(uri, diagnosticSet{Version: &v2, Items: []wireDiagnostic{}}, false)
 	sets, _ = c.diagnosticSnapshot()
 	if len(sets[uri].Items) != 1 || sets[uri].Version != nil {
 		t.Fatal("mixed document versions must not claim freshness", sets[uri])
 	}
-	c.storePulledDiagnostics(uri, diagnosticSet{Version: &v2, Items: []wireDiagnostic{}})
+	c.storeDiagnosticSet(uri, diagnosticSet{Version: &v2, Items: []wireDiagnostic{}}, true)
 	sets, _ = c.diagnosticSnapshot()
 	if len(sets[uri].Items) != 0 || sets[uri].Version == nil || c.diagnosticBytes != 4 {
 		t.Fatal("independent clears did not settle", sets[uri], c.diagnosticBytes)

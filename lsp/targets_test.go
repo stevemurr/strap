@@ -70,7 +70,6 @@ func TestTargetAlternatives(t *testing.T) {
 		{Ref: "loc_1", Symbol: "Alpha"}, {Ref: "loc_1", Context: &context},
 		{Path: "a.go", Line: 1, Column: 2, Symbol: "Alpha"},
 		{Path: "a.go", Line: 1, Column: 2, Context: &context},
-		{Path: "a.go", Line: 1, Symbol: "Alpha", ExpectedText: &context},
 	} {
 		if err := validateTarget(target); err == nil {
 			t.Fatalf("accepted mixed target: %+v", target)

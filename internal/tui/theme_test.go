@@ -119,9 +119,7 @@ func TestInterfaceThemeRendering(t *testing.T) {
 				shellTranscriptFixture(e.current().activity)
 				states["eval"] = e.View()
 				for name, view := range states {
-					if lipgloss.Height(view) > 40 || lipgloss.Width(view) > 104 {
-						t.Fatalf("%s overflows the screen", name)
-					}
+					assertFits(t, view, 104, 40)
 					if profile == termenv.Ascii && regexp.MustCompile(`\x1b\[(?:[0-9]+;)*(?:3[0-8]|4[0-8]|9[0-7]|10[0-7])(?:;[0-9]+)*m`).MatchString(view) {
 						t.Fatalf("%s emits styling with color disabled", name)
 					}

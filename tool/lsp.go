@@ -122,10 +122,10 @@ func LSPTools(service LanguageServices) ([]Tool, error) {
 	}
 	tools := []Tool{
 		builtin("lsp_status", "Inspect configured language servers, roots, running state and capabilities. Does not launch servers. Null path lists the session.", func(ctx context.Context, _ Call, a lspStatusArgs) (Result, error) {
-			return languageResult(service.Status(ctx, value(a.Path, "")))
+			return languageResult(service.Status(ctx, valueOrZero(a.Path)))
 		}, Nullable("path", "list all configured servers"), MinLength("path", 1)),
 		builtin("lsp_symbols", "Find workspace declarations by name. Returns reusable refs and small source excerpts. Null path searches configured/discovered roots. A path filters where declarations are located, not their callers; use a symbol target for a known call site. Results reflect server build/index scope; use shell search for literal text and unsupported languages. Follow cursor with the same arguments. Search source symbol names, never location handles. A loc_ value is an opaque handle, not a symbol name. Pass an existing handle directly to lsp_inspect, lsp_navigate or lsp_references as ref; do not search for it with this tool.", func(ctx context.Context, _ Call, a lspSymbolArgs) (Result, error) {
-			return languageResult(service.Symbols(ctx, lsp.SymbolQuery{Query: a.Query, Path: value(a.Path, ""), PageQuery: a.query()}))
+			return languageResult(service.Symbols(ctx, lsp.SymbolQuery{Query: a.Query, Path: valueOrZero(a.Path), PageQuery: a.query()}))
 		}, rules(pageRules, []Constraint{MinLength("query", 1), Nullable("path", "search configured session roots"), MinLength("path", 1)})...),
 		builtin("lsp_outline", "List declarations in one file with reusable refs. Depth defaults to 1 (top-level); maximum 8. Results include identifier ranges and full declaration ranges where the server supplies them.", func(ctx context.Context, _ Call, a lspOutlineArgs) (Result, error) {
 			return languageResult(service.Outline(ctx, lsp.OutlineQuery{Path: a.Path, Depth: value(a.Depth, 1), PageQuery: a.query()}))
@@ -161,10 +161,10 @@ func LSPTools(service LanguageServices) ([]Tool, error) {
 	referencesRules := []Constraint{Nullable("include_declaration", "exclude the declaration")}
 	references, err := ComposeBy("target_kind", provider.ToolDefinition{Name: "lsp_references", Description: "Find semantic usages of a symbol, with source excerpts and reusable location refs. Excludes its declaration by default. Scope depends on the server's workspace/build; strings, reflection and other build targets may require text search. Follow cursor with unchanged arguments. To find usages from an existing loc_ handle, call this tool directly with input.target_kind=reference and input.ref equal to the unchanged handle. Set include_declaration as requested; supply limit and cursor as null for defaults. A handle is not a symbol name; do not search for it with lsp_symbols."},
 		builtin("references_reference", "Find usages from a returned ref.", func(ctx context.Context, _ Call, a lspReferencesRef) (Result, error) {
-			return languageResult(service.References(ctx, lsp.ReferenceQuery{Target: a.target(), IncludeDeclaration: value(a.IncludeDeclaration, false), PageQuery: a.query()}))
+			return languageResult(service.References(ctx, lsp.ReferenceQuery{Target: a.target(), IncludeDeclaration: valueOrZero(a.IncludeDeclaration), PageQuery: a.query()}))
 		}, rules(refRules, pageRules, referencesRules)...),
 		builtin("references_symbol", "Find usages of an exact identifier on a source line; context disambiguates repeated identifiers.", func(ctx context.Context, _ Call, a lspReferencesSymbol) (Result, error) {
-			return languageResult(service.References(ctx, lsp.ReferenceQuery{Target: a.target(), IncludeDeclaration: value(a.IncludeDeclaration, false), PageQuery: a.query()}))
+			return languageResult(service.References(ctx, lsp.ReferenceQuery{Target: a.target(), IncludeDeclaration: valueOrZero(a.IncludeDeclaration), PageQuery: a.query()}))
 		}, rules(symbolRules, pageRules, referencesRules)...))
 	if err != nil {
 		return nil, err

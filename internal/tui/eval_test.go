@@ -93,15 +93,7 @@ func TestEvalSelectionAndTerminalSizes(t *testing.T) {
 	}
 	for _, size := range [][2]int{{140, 40}, {100, 24}, {80, 24}, {40, 15}, {20, 5}, {1, 1}} {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		lines := strings.Split(m.View(), "\n")
-		if len(lines) > size[1] {
-			t.Fatal(size, len(lines))
-		}
-		for _, line := range lines {
-			if ansi.StringWidth(line) > size[0] {
-				t.Fatalf("size %v: %q", size, line)
-			}
-		}
+		assertFits(t, m.View(), size[0], size[1])
 	}
 }
 
@@ -148,7 +140,11 @@ func TestEvalProgramRunsAndCancelsWithoutInput(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			dir := t.TempDir()
-			opts := eval.Options{Config: harness.DefaultConfig(), Deps: harness.Dependencies{Provider: evalFinalProvider{block: stop}}, Mounts: eval.Mounts{Problems: evalLadderPath(t), Results: dir, Workspace: t.TempDir(), Outbox: t.TempDir()}, Quiet: time.Millisecond, Problem: "easy-01-budget-pair"}
+			ladder, err := filepath.Abs("../../eval/ladder")
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := eval.Options{Config: harness.DefaultConfig(), Deps: harness.Dependencies{Provider: evalFinalProvider{block: stop}}, Mounts: eval.Mounts{Problems: ladder, Results: dir, Workspace: t.TempDir(), Outbox: t.TempDir()}, Quiet: time.Millisecond, Problem: "easy-01-budget-pair"}
 			if stop {
 				opts.Observe = func(e eval.Progress) {
 					if v, ok := e.Event.(conversation.AgentEvent); ok {
@@ -242,13 +238,4 @@ func TestEvalSessionHasNoControlCapabilities(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-}
-
-func evalLadderPath(t *testing.T) string {
-	t.Helper()
-	path, err := filepath.Abs("../../eval/ladder")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return path
 }

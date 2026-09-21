@@ -292,6 +292,9 @@ func (p *ProgressReader) Read(ctx context.Context, actor identity.ActorID, q Pro
 	if err != nil {
 		return ProgressPage{}, err
 	}
+	return p.read(ctx, c)
+}
+func (p *ProgressReader) read(ctx context.Context, c progressCursor) (ProgressPage, error) {
 	items, binding, err := p.records(ctx, &c)
 	if err != nil {
 		return ProgressPage{}, err
@@ -305,7 +308,8 @@ func (p *ProgressReader) Read(ctx context.Context, actor identity.ActorID, q Pro
 			return out, work.ErrInvalid
 		}
 		data := items[c.Index]
-		low, high, best := 1, len(data)-c.Offset, 0
+		var best ProgressPage
+		low, high := 1, len(data)-c.Offset
 		for low <= high {
 			n := (low + high) / 2
 			end := c.Offset + n
@@ -324,25 +328,16 @@ func (p *ProgressReader) Read(ctx context.Context, actor identity.ActorID, q Pro
 			candidate.Fragment = &RecordFragment{Offset: c.Offset, Encoding: "utf-8-json", Text: string(data[c.Offset:end]), Complete: complete}
 			candidate.NextCursor = p.next(ctx, next, len(items))
 			if end > c.Offset && fits(candidate, c.Budget) {
-				best = end - c.Offset
+				best = candidate
 				low = n + 1
 			} else {
 				high = n - 1
 			}
 		}
-		if best == 0 {
+		if best.Fragment == nil {
 			return out, fmt.Errorf("%w: response budget cannot hold fragment", work.ErrInvalid)
 		}
-		end := c.Offset + best
-		out.Fragment = &RecordFragment{Offset: c.Offset, Encoding: "utf-8-json", Text: string(data[c.Offset:end]), Complete: end == len(data)}
-		c.Offset = end
-		if end == len(data) {
-			c.Index++
-			c.Offset = 0
-			c.Chunk = false
-		}
-		out.NextCursor = p.next(ctx, c, len(items))
-		return out, nil
+		return best, nil
 	}
 	for c.Index < len(items) && len(out.Items) < c.Limit {
 		candidate := out
@@ -410,28 +405,31 @@ func (p *ProgressReader) ListWorkProgressReports(ctx context.Context, actor iden
 	if err != nil {
 		return work.ReportPage{}, err
 	}
-	out := work.ReportPage{Items: []work.WorkProgressReport{}, NextCursor: next}
-	for _, b := range raw {
-		var r work.WorkProgressReport
-		if err = json.Unmarshal(b, &r); err != nil {
-			return work.ReportPage{}, err
-		}
-		out.Items = append(out.Items, r)
+	items, err := decodeItems[work.WorkProgressReport](raw)
+	if err != nil {
+		return work.ReportPage{}, err
 	}
-	return out, nil
+	return work.ReportPage{Items: items, NextCursor: next}, nil
 }
 func (p *ProgressReader) ListWorkProgressFindings(ctx context.Context, actor identity.ActorID, q work.ReportQuery) (work.ProgressFindingPage, error) {
 	raw, next, err := p.collection(ctx, actor, q, "findings")
 	if err != nil {
 		return work.ProgressFindingPage{}, err
 	}
-	out := work.ProgressFindingPage{Items: []work.ProgressFinding{}, NextCursor: next}
+	items, err := decodeItems[work.ProgressFinding](raw)
+	if err != nil {
+		return work.ProgressFindingPage{}, err
+	}
+	return work.ProgressFindingPage{Items: items, NextCursor: next}, nil
+}
+func decodeItems[T any](raw []json.RawMessage) ([]T, error) {
+	out := []T{}
 	for _, b := range raw {
-		var f work.ProgressFinding
-		if err = json.Unmarshal(b, &f); err != nil {
-			return work.ProgressFindingPage{}, err
+		var v T
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
 		}
-		out.Items = append(out.Items, f)
+		out = append(out, v)
 	}
 	return out, nil
 }
@@ -444,5 +442,5 @@ func (p *ProgressReader) ReadFamily(ctx context.Context, actor identity.ActorID,
 	if (c.Mode == "brief") != brief {
 		return ProgressPage{}, work.ErrInvalid
 	}
-	return p.Read(ctx, actor, q)
+	return p.read(ctx, c)
 }

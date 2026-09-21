@@ -63,33 +63,10 @@ func (s schemaLedger) apply(c work.Change) {
 }
 
 func schemaBoundary(facts []fact, after eventlog.Cursor, f fixture) (boundary, bool) {
-	accepted := false
-	for _, x := range facts {
-		if x.record.Sequence <= after.Sequence {
-			continue
-		}
-		if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == f.actor() && !e.Activity.FinishedAt.IsZero() && e.Activity.Err == nil && e.Activity.Call.Name == f.Schema.Operation {
-			accepted = true
-		}
-		if x.record.Agent != string(f.actor()) {
-			continue
-		}
-		switch x.record.Kind {
-		case "tool_batch":
-			if accepted {
-				return boundary{cursor: x.record.Cursor(), reason: "batch"}, true
-			}
-		case "agent_yielded":
-			return boundary{cursor: x.record.Cursor(), reason: "yield"}, true
-		case "agent_exited":
-			return boundary{cursor: x.record.Cursor(), reason: "agent_exit"}, true
-		case "message":
-			if e, ok := x.event.(conversation.MessageEvent); ok && e.Message.From == f.actor() && e.Message.Kind == message.Reply {
-				return boundary{cursor: x.record.Cursor(), reason: "reply"}, true
-			}
-		}
-	}
-	return boundary{}, false
+	actor := f.actor()
+	return boundaryAfter(facts, after, actor,
+		func(a agent.ToolActivity) bool { return a.Call.Name == f.Schema.Operation },
+		func(m message.Message) bool { return m.From == actor && m.Kind == message.Reply })
 }
 
 func compileSchemaCatalog(definitions []provider.ToolDefinition) (map[string]*jsonschema.Schema, error) {
@@ -183,8 +160,7 @@ func gradeSchema(result *Result, scenario Scenario, f fixture, facts []fact) {
 	mixedControl := schemaMixedControlInvocations(f, facts, catalog["wait_for_input"] != nil)
 	var changes []work.Change
 	accepted, extraActions, newAgents, probes, failedOutputs := 0, 0, 0, 0, 0
-	input, output := int64(0), int64(0)
-	inputKnown, outputKnown, usageCount := true, true, 0
+	var usage usageTally
 	for _, x := range facts {
 		observed := x.record.Sequence > result.Start.Sequence
 		if observed && !seeded {
@@ -278,33 +254,15 @@ func gradeSchema(result *Result, scenario Scenario, f fixture, facts []fact) {
 				}
 			}
 		case conversation.UsageEvent:
-			if !observed || e.Agent != f.actor() {
-				continue
-			}
-			usageCount++
-			u := e.Observation.Usage
-			if u == nil || u.InputTokens == nil {
-				inputKnown = false
-			} else {
-				input += *u.InputTokens
-			}
-			if u == nil || u.OutputTokens == nil {
-				outputKnown = false
-			} else {
-				output += *u.OutputTokens
+			if observed && e.Agent == f.actor() {
+				usage.add(e.Observation.Usage)
 			}
 		}
 	}
 	if !seeded {
 		initial, expected = state.clone(), state.clone()
 	}
-	result.Behavior.OutputErrors = max(result.Behavior.OutputErrors, failedOutputs)
-	if usageCount > 0 && inputKnown {
-		result.InputTokens = &input
-	}
-	if usageCount > 0 && outputKnown {
-		result.OutputTokens = &output
-	}
+	usage.apply(result, failedOutputs)
 	check(result, "outcome.one_operation", "behavior", accepted == 1, 1, accepted, result.Through, "")
 	check(result, "outcome.exact_state", "behavior", accepted == 1 && schemaEqual(expected, state), "one requested transition and otherwise unchanged complete ledger", state, result.Through, "")
 	check(result, "effects.no_extra_actions", "behavior", extraActions == 0, 0, extraActions, result.Through, "")
@@ -554,12 +512,7 @@ func addSchemaReplayAssertion(result *Result, f fixture, live, replay []fact) {
 	before, beforeEvents := project(live)
 	after, afterEvents := project(replay)
 	check(result, "trace.replay_consistency", "harness", schemaEqual(before, after) && schemaEqual(beforeEvents, afterEvents), "identical complete ledger and domain event history at grading prefix", schemaEqual(before, after), result.Through, "")
-	previous := result.Outcome
-	updateScores(result)
-	if result.ErrorClass == "budget" {
-		result.Outcome = previous
-		result.Behavior.OutcomeCorrect, result.Behavior.CleanSuccess, result.Behavior.RecoverySuccess = false, false, false
-	}
+	rescore(result)
 }
 
 // JSON omitempty intentionally erases empty optional slices in saved traces.

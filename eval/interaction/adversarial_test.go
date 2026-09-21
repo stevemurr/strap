@@ -2,9 +2,6 @@ package interaction
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,14 +28,8 @@ func (p *adversarialProvider) Submit(ctx context.Context, r provider.Request, o 
 		}
 	}
 	if p.script == nil {
-		body, err := os.ReadFile(filepath.Join(p.dir, "audit-independent", "001", "manifest.json"))
+		manifest, err := readManifest(p.dir, "audit-independent")
 		if err != nil {
-			return provider.Response{}, err
-		}
-		var manifest struct {
-			Fixture fixture `json:"fixture"`
-		}
-		if err := json.Unmarshal(body, &manifest); err != nil {
 			return provider.Response{}, err
 		}
 		p.script = &fixtureScript{responses: p.build(manifest.Fixture)}

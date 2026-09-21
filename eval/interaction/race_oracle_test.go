@@ -1,23 +1,19 @@
 package interaction
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
-	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/work"
 )
 
 func TestRevisionRaceOracleCounterexamples(t *testing.T) {
-	scenario, f, baseline, facts := raceOracleFixture(t)
+	scenario, f, baseline, facts := oracleFixture(t, "audit-revision-race")
 	control := raceOracleResult(baseline)
 	grade(&control, scenario, f, facts)
 	if !control.Behavior.Scorable || !control.Behavior.RecoverySuccess || control.Behavior.CleanSuccess {
@@ -191,38 +187,4 @@ func raceOracleResult(baseline Result) Result {
 	result.Mode = Live
 	result.RevisionRace = baseline.RevisionRace
 	return result
-}
-
-func raceOracleFixture(t *testing.T) (Scenario, fixture, Result, []fact) {
-	t.Helper()
-	dir := t.TempDir()
-	report, err := Run(context.Background(), Options{Mode: Scripted, Output: dir, ScenarioIDs: []string{"audit-revision-race"}, Timeout: 10 * time.Second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(report.Results) != 1 || report.Results[0].Outcome != "passed" {
-		t.Fatalf("passing race fixture required, got %#v", report.Results)
-	}
-	result := report.Results[0]
-	data, err := os.ReadFile(filepath.Join(dir, result.Manifest))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest struct {
-		Scenario Scenario `json:"scenario"`
-		Fixture  fixture  `json:"fixture"`
-	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	reader, err := inspection.OpenJSONL(context.Background(), filepath.Join(dir, result.Trace))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reader.Close(context.Background())
-	facts, err := readFacts(context.Background(), reader, result.Through)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return manifest.Scenario, manifest.Fixture, result, facts
 }

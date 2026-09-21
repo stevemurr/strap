@@ -322,11 +322,7 @@ func (m *model) streamMouse(event tea.MouseMsg) bool {
 	if event.Button == tea.MouseButtonWheelUp || event.Button == tea.MouseButtonWheelDown {
 		m.mouseSelection = nil
 		m.focusRoster(true)
-		delta := 1
-		if event.Button == tea.MouseButtonWheelUp {
-			delta = -1
-		}
-		m.moveStream(delta)
+		m.moveStream(wheelStep(event.Button))
 		return true
 	}
 	if event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress {

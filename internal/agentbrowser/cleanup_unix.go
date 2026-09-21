@@ -68,16 +68,9 @@ func interruptBrowserWith(ctx context.Context, dir, namespace string, ops cleanu
 		}
 		rows = append(rows, processRow{p, parent, group, strings.Join(fields[3:], " ")})
 	}
-	groups, err := ownedBrowserGroups(pid, rows)
-	if err != nil {
+	groups, found, err := ownedBrowserGroups(pid, rows)
+	if err != nil || !found {
 		return false, err
-	}
-	found := false
-	for _, row := range rows {
-		found = found || row.pid == pid
-	}
-	if !found {
-		return false, nil
 	}
 	for _, group := range groups {
 		// Match ChromeProcess::kill in the backend: stop the leader
@@ -96,19 +89,20 @@ func interruptBrowserWith(ctx context.Context, dir, namespace string, ops cleanu
 	return true, nil
 }
 
-func ownedBrowserGroups(daemon int, rows []processRow) ([]int, error) {
-	found := false
+// ownedBrowserGroups lists the process groups led by descendants of the daemon.
+// found reports whether the daemon is still in the process table.
+func ownedBrowserGroups(daemon int, rows []processRow) (groups []int, found bool, err error) {
 	for _, row := range rows {
 		if row.pid != daemon {
 			continue
 		}
 		if row.group != daemon || !strings.HasPrefix(filepath.Base(row.command), "agent-browser") {
-			return nil, errors.New("owned daemon PID no longer identifies agent-browser; refusing process cleanup")
+			return nil, true, errors.New("owned daemon PID no longer identifies agent-browser; refusing process cleanup")
 		}
 		found = true
 	}
 	if !found {
-		return nil, nil
+		return nil, false, nil
 	}
 	descendants := map[int]bool{daemon: true}
 	for {
@@ -123,11 +117,10 @@ func ownedBrowserGroups(daemon int, rows []processRow) ([]int, error) {
 			break
 		}
 	}
-	var groups []int
 	for _, row := range rows {
 		if row.pid != daemon && row.pid > 1 && row.group == row.pid && descendants[row.pid] {
 			groups = append(groups, row.group)
 		}
 	}
-	return groups, nil
+	return groups, true, nil
 }

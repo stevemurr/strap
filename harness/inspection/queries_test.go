@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -12,35 +11,14 @@ import (
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
-	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/provider"
 )
 
 func TestToolQueriesPinStateAndMatchArchiveAndHTTP(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "trace.jsonl")
-	store, err := eventlog.NewJSONL(path, "session")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close(ctx)
-	_, err = store.Append(ctx, eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"session"}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	appendEvent := func(e conversation.Event) eventlog.Cursor {
-		t.Helper()
-		d, err := eventcodec.EncodeEvent(e)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r, err := store.Append(ctx, d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return r.Cursor()
-	}
+	store, path := sessionLog(t, "session")
+	appendEvent := appender(t, store)
 	appendEvent(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "agent", State: agent.Idle, StateRevision: 1}})
 	now := time.Now()
 	a := agent.ToolActivity{InvocationID: "agent/tool-1", Call: provider.ToolCall{ID: "reused", Name: "shell", Arguments: json.RawMessage(`{"input":{}}`)}, StartedAt: now}

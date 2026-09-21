@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -107,11 +106,7 @@ func TestTokenCountsRespectFreezeResizeAndClear(t *testing.T) {
 	}
 	for _, width := range []int{50, 25, 1, 80} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
-		for _, line := range strings.Split(m.View(), "\n") {
-			if lipgloss.Width(line) > width {
-				t.Fatalf("row exceeds %d: %q", width, line)
-			}
-		}
+		assertFits(t, m.View(), width, 0)
 	}
 	enter(m, "/clear")
 	m.Update(received{event: conversation.ContextTokensEvent{Agent: "root", Revision: 4, Count: 777}})

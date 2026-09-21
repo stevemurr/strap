@@ -47,11 +47,9 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	p := &evidenceScript{receipt: make(chan string, 2)}
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}, Researcher: harness.AgentDependencies{Provider: p}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Researcher: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,12 +59,7 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var raw string
-	select {
-	case raw = <-p.receipt:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
+	raw := await(t, p.receipt, "evidence receipt")
 	var receipt struct {
 		EvidenceRef string `json:"evidence_ref"`
 	}
@@ -152,12 +145,10 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 func TestStoppedResearcherRetainsExecutionEvidenceWithoutReport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
 	p := &evidenceScript{command: "printf partial-evidence; printf ready >ready; sleep 30", receipt: make(chan string, 2)}
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idle{}, Researcher: harness.AgentDependencies{Provider: p}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Researcher: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}

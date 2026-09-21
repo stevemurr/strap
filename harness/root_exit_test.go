@@ -50,9 +50,7 @@ func (p *rootDies) Submit(_ context.Context, r provider.Request, _ provider.Obse
 // receive their results, and in ladder runs they kept running and failing
 // their sends until the session budget ended.
 func TestWorkersStopWhenRootFails(t *testing.T) {
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	cfg.Telemetry.ContextTokens = false
 	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: &rootDies{}})
 	if err != nil {

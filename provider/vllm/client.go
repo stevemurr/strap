@@ -4,7 +4,6 @@ package vllm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -47,7 +46,7 @@ func (c *Client) OutputTokenLimit() *int64 {
 }
 
 func New(config Config) (*Client, error) {
-	wire, err := chatwire.New(config.BaseURL, config.HTTPClient)
+	wire, err := chatwire.New("vllm", config.BaseURL, config.HTTPClient)
 	if err != nil {
 		return nil, fmt.Errorf("vllm: %w", err)
 	}
@@ -66,15 +65,7 @@ func New(config Config) (*Client, error) {
 }
 
 // HTTPError preserves rejected options and other bounded server diagnostics.
-// No retry with altered parameters is performed.
-type HTTPError struct {
-	StatusCode int
-	Body       string
-}
-
-func (e *HTTPError) Error() string {
-	return fmt.Sprintf("vllm: HTTP %d: %s", e.StatusCode, e.Body)
-}
+type HTTPError = chatwire.HTTPError
 
 func (c *Client) Submit(ctx context.Context, input provider.Request, observer provider.Observer) (provider.Response, error) {
 	base, err := chatwire.Encode(c.model, input)
@@ -92,13 +83,5 @@ func (c *Client) Submit(ctx context.Context, input provider.Request, observer pr
 		generationFields
 		ToolChoice string `json:"tool_choice,omitempty"`
 	}{base, c.generation, toolChoice}
-	result, err := c.wire.Submit(ctx, wire, observer)
-	if err != nil {
-		var responseError *chatwire.HTTPError
-		if errors.As(err, &responseError) {
-			return provider.Response{}, &HTTPError{StatusCode: responseError.StatusCode, Body: responseError.Body}
-		}
-		return result, fmt.Errorf("vllm: %w", err)
-	}
-	return result, nil
+	return c.wire.Submit(ctx, wire, observer)
 }

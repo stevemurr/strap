@@ -168,17 +168,28 @@ func TestQuitReleasesPendingEventReader(t *testing.T) {
 	}
 }
 
+// assertFits fails when any line of view is wider than width or, when height
+// is positive, when view has more lines than height.
+func assertFits(t *testing.T, view string, width, height int) {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	if height > 0 && len(lines) > height {
+		t.Fatalf("view exceeds %d lines:\n%s", height, view)
+	}
+	for _, line := range lines {
+		if lipgloss.Width(line) > width {
+			t.Fatalf("line exceeds %d columns: %q", width, line)
+		}
+	}
+}
+
 func TestResizeWrapsTranscriptAndPreservesDraft(t *testing.T) {
 	m, _ := setup(t)
 	m.add("Strap", strings.Repeat("A longer answer with Unicode café 界. ", 20), true)
 	m.input.SetValue("still typing")
 	for _, size := range []tea.WindowSizeMsg{{Width: 100, Height: 30}, {Width: 40, Height: 12}, {Width: 1, Height: 1}, {Width: 80, Height: 24}} {
 		m.Update(size)
-		for _, line := range strings.Split(m.View(), "\n") {
-			if lipgloss.Width(line) > size.Width {
-				t.Fatalf("line exceeds %d columns: %q", size.Width, line)
-			}
-		}
+		assertFits(t, m.View(), size.Width, 0)
 		if m.input.Value() != "still typing" {
 			t.Fatal("resize destroyed draft")
 		}

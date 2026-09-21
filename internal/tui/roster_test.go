@@ -12,10 +12,6 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-func rune_(m *model, name string) {
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name)})
-}
-
 func pressed(m *model, k tea.KeyType) { m.Update(tea.KeyMsg{Type: k}) }
 
 // The roster is a keyboard-navigable list: F6 focuses it, the arrows and paging
@@ -56,11 +52,11 @@ func TestRosterKeyboardNavigation(t *testing.T) {
 		t.Fatal("page up did not clamp at the first stream", m.streamUI.focusID)
 	}
 	// Bracket keys mirror the arrows.
-	rune_(m, "]")
+	typeText(m, "]")
 	if m.streamUI.focusID != s.Root() {
 		t.Fatal("] did not advance the selection", m.streamUI.focusID)
 	}
-	rune_(m, "[")
+	typeText(m, "[")
 	if m.streamUI.focusID != "" {
 		t.Fatal("[ did not move the selection back", m.streamUI.focusID)
 	}
@@ -182,7 +178,7 @@ func TestWorkChangeUpdatesEveryNamedItem(t *testing.T) {
 // The roster renders each agent with its state, role and current work, and
 // shows a placeholder rather than an empty panel when nothing is running.
 func TestRosterRendersAgentDetail(t *testing.T) {
-	m, s := focusedSetup(t)
+	m, _ := focusedSetup(t)
 	m.observe(conversation.AgentStateChanged{Agent: "agent-2", State: agent.Running, Revision: 2})
 	m.rememberWork(work.Work{ID: "w-1", Kind: work.Implementation, State: work.Active, Assignee: "agent-2", Task: "build the thing"})
 	m.rememberWork(work.Work{ID: "w-2", Kind: work.Implementation, State: work.Active, Assignee: "agent-3", Task: "blocked thing", Blocker: "waiting on input"})
@@ -209,7 +205,6 @@ func TestRosterRendersAgentDetail(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.View()), "provider unreachable") {
 		t.Fatal("a selected stream error was not surfaced")
 	}
-	_ = s
 }
 
 // The roster responds to the mouse wheel by moving the selection.
@@ -239,5 +234,3 @@ func TestAgentsTablePlaceholder(t *testing.T) {
 		t.Fatal(got)
 	}
 }
-
-var _ = message.User

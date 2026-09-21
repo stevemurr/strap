@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/eventlog"
@@ -52,13 +51,8 @@ func TestDurableToolDiagnosticsCorrelateRepeatedProviderIDs(t *testing.T) {
 	if _, err = s.Send(s.Root(), "run"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case result := <-p.modelError:
-		if !strings.Contains(result, "old text was not found") || strings.Contains(result, "sha256") || strings.Contains(result, "original") {
-			t.Fatal(result)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("script did not reach error response")
+	if result := await(t, p.modelError, "script did not reach error response"); !strings.Contains(result, "old text was not found") || strings.Contains(result, "sha256") || strings.Contains(result, "original") {
+		t.Fatal(result)
 	}
 	if err = s.Close(context.Background()); err != nil {
 		t.Fatal(err)

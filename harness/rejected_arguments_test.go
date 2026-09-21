@@ -42,8 +42,7 @@ func TestRejectedArgumentsSurviveFramedJSONLArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := harness.DefaultConfig()
-	cfg.Dir, cfg.LocalTools, cfg.Web = t.TempDir(), false, nil
+	cfg := testConfig(t, false)
 	cfg.Telemetry.ContextTokens = false
 	cfg.Events.JSONLPath = filepath.Join(t.TempDir(), "rejected.jsonl")
 	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: p})
@@ -139,8 +138,7 @@ func TestRejectedCallNoticeKeepsProjectionReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := harness.DefaultConfig()
-	cfg.Dir, cfg.LocalTools, cfg.Web = t.TempDir(), false, nil
+	cfg := testConfig(t, false)
 	cfg.Telemetry.ContextTokens = false
 	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: p})
 	if err != nil {

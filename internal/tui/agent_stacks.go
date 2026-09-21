@@ -340,11 +340,7 @@ func (m *model) stackMouse(event tea.MouseMsg) bool {
 		if !m.streamUI.rosterFocused {
 			m.focusRoster(true)
 		}
-		delta := 1
-		if event.Button == tea.MouseButtonWheelUp || event.Button == tea.MouseButtonWheelLeft {
-			delta = -1
-		}
-		m.moveStream(delta)
+		m.moveStream(wheelStep(event.Button))
 		return true
 	}
 	l := m.stackLayout()

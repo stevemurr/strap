@@ -51,18 +51,24 @@ func (m *model) syncInputHeight() {
 		m.input.SetHeight(rows)
 		// Textarea retains its old scroll offset when its height changes.
 		// Re-anchor at the beginning, then restore the exact editing position.
-		m.input, _ = m.input.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
-		for range line {
-			m.input.CursorEnd()
-			m.input.CursorDown()
-		}
-		m.input.SetCursor(column)
+		m.setInputCursor(line, column)
 	}
 	// SetWidth/SetHeight and direct clipboard insertion do not reposition the
 	// textarea viewport themselves. Refresh its content before repositioning:
 	// scrolling against the previous render would clamp to its old line count.
 	_ = m.input.View()
 	m.input, _ = m.input.Update(nil)
+}
+
+// Re-anchor at the beginning, then walk down to the requested line so the
+// textarea viewport follows the cursor.
+func (m *model) setInputCursor(line, column int) {
+	m.input, _ = m.input.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	for range line {
+		m.input.CursorEnd()
+		m.input.CursorDown()
+	}
+	m.input.SetCursor(column)
 }
 
 func normalizeInput(text string) string {

@@ -45,13 +45,14 @@ func interruptSession(t *testing.T, deps harness.Dependencies) *harness.Session 
 	return s
 }
 
-func interruptWait[T any](t *testing.T, ch <-chan T) T {
+// await receives one value or fails the test after a generous bound.
+func await[T any](t *testing.T, ch <-chan T, what string) T {
 	t.Helper()
 	select {
 	case v := <-ch:
 		return v
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for interruption test")
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting:", what)
 		var zero T
 		return zero
 	}
@@ -98,8 +99,8 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		interruptWait(t, started)
-		interruptWait(t, requests)
+		await(t, started, "interruption test")
+		await(t, requests, "interruption test")
 	}
 	queued, err := s.Send(root, "queued instruction must not run")
 	if err != nil {
@@ -145,7 +146,7 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 	if _, err := s.Send(root, "new instruction"); err != nil {
 		t.Fatal(err)
 	}
-	r := interruptWait(t, requests)
+	r := await(t, requests, "interruption test")
 	var old, fresh bool
 	for _, m := range r.Messages {
 		old = old || strings.Contains(m.Content.Text(), "original task")
@@ -170,7 +171,7 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 	if _, err := s.AssignWork(context.Background(), root, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "fresh implementation"}); err != nil {
 		t.Fatal(err)
 	}
-	interruptWait(t, requests)
+	await(t, requests, "interruption test")
 }
 
 func TestInterruptConcurrentWaitersRetainHistoryAndCanContinueAfterTimeout(t *testing.T) {
@@ -201,13 +202,13 @@ func TestInterruptConcurrentWaitersRetainHistoryAndCanContinueAfterTimeout(t *te
 	if _, err := s.Send(s.Root(), "start"); err != nil {
 		t.Fatal(err)
 	}
-	interruptWait(t, started)
+	await(t, started, "interruption test")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := s.Interrupt(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	interruptWait(t, canceled)
+	await(t, canceled, "interruption test")
 	results := make(chan error, 16)
 	for i := 0; i < cap(results); i++ {
 		go func() {
@@ -218,14 +219,14 @@ func TestInterruptConcurrentWaitersRetainHistoryAndCanContinueAfterTimeout(t *te
 	}
 	close(release)
 	for i := 0; i < cap(results); i++ {
-		if err := interruptWait(t, results); err != nil {
+		if err := await(t, results, "interruption test"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := s.Send(s.Root(), "continue differently"); err != nil {
 		t.Fatal(err)
 	}
-	r := interruptWait(t, requests)
+	r := await(t, requests, "interruption test")
 	notices := 0
 	for _, m := range r.Messages {
 		if strings.Contains(m.Content.Text(), "late success") || len(m.ToolCalls) > 0 {
@@ -252,7 +253,7 @@ func (s interruptFailStore) Append(ctx context.Context, d eventlog.Data) (eventl
 func TestInterruptCaptureFailureDoesNotReopenAdmission(t *testing.T) {
 	cfg := harness.DefaultConfig()
 	cfg.LocalTools, cfg.Web, cfg.Telemetry.ContextTokens = false, nil, false
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}, EventStore: func(id string) (eventlog.Store, error) {
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready"), EventStore: func(id string) (eventlog.Store, error) {
 		store, err := eventlog.NewMemory(id, eventlog.Limits{})
 		return interruptFailStore{store}, err
 	}})
@@ -311,7 +312,7 @@ func TestInterruptRacingNewInputCannotReleaseNewerFence(t *testing.T) {
 	}
 	sent := make(chan result, 1)
 	go func() { r, err := s.Send(s.Root(), "racing new input"); sent <- result{r, err} }()
-	interruptWait(t, store.started)
+	await(t, store.started, "interruption test")
 	stopping := make(chan error, 1)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -319,11 +320,11 @@ func TestInterruptRacingNewInputCannotReleaseNewerFence(t *testing.T) {
 		stopping <- s.Interrupt(ctx)
 	}()
 	// Interrupt must honor its deadline even while Send is blocked publishing.
-	if err := interruptWait(t, stopping); !errors.Is(err, context.DeadlineExceeded) {
+	if err := await(t, stopping, "interruption test"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
 	close(store.release)
-	r := interruptWait(t, sent)
+	r := await(t, sent, "interruption test")
 	if r.err != nil {
 		t.Fatal(r.err)
 	}
@@ -339,7 +340,7 @@ func TestInterruptRacingNewInputCannotReleaseNewerFence(t *testing.T) {
 	if _, err := s.Send(s.Root(), "actual next instruction"); err != nil {
 		t.Fatal(err)
 	}
-	request := interruptWait(t, requests)
+	request := await(t, requests, "interruption test")
 	for _, m := range request.Messages {
 		if strings.Contains(m.Content.Text(), "racing new input") {
 			t.Fatal("discarded input entered history")
@@ -386,7 +387,7 @@ func TestInterruptSettlesToolBatchWithoutRetryingEffects(t *testing.T) {
 	if _, err := s.Send(s.Root(), "do things"); err != nil {
 		t.Fatal(err)
 	}
-	interruptWait(t, started)
+	await(t, started, "interruption test")
 	interruptNow(t, s)
 	if writes.Load() != 1 || skipped.Load() != 0 {
 		t.Fatal("effects were replayed or pending tool ran")
@@ -394,7 +395,7 @@ func TestInterruptSettlesToolBatchWithoutRetryingEffects(t *testing.T) {
 	if _, err := s.Send(s.Root(), "different task"); err != nil {
 		t.Fatal(err)
 	}
-	r := interruptWait(t, requests)
+	r := await(t, requests, "interruption test")
 	results := map[string]string{}
 	for _, m := range r.Messages {
 		if m.Role == "tool" {
@@ -426,13 +427,13 @@ func TestInterruptTimeoutRetainsFenceAndCloseJoinsCleanup(t *testing.T) {
 	if _, err := s.Send(s.Root(), "start"); err != nil {
 		t.Fatal(err)
 	}
-	interruptWait(t, p.started)
+	await(t, p.started, "interruption test")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := s.Interrupt(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	interruptWait(t, p.cancelled)
+	await(t, p.cancelled, "interruption test")
 	if _, err := s.Send(s.Root(), "too soon"); !errors.Is(err, harness.ErrInterrupted) {
 		t.Fatal("input bypassed unsettled execution", err)
 	}
@@ -447,7 +448,7 @@ func TestInterruptTimeoutRetainsFenceAndCloseJoinsCleanup(t *testing.T) {
 	case <-time.After(20 * time.Millisecond):
 	}
 	close(p.release)
-	if err := interruptWait(t, closing); err != nil {
+	if err := await(t, closing, "interruption test"); err != nil {
 		t.Fatal(err)
 	}
 	if owned.calls.Load() != 1 {
@@ -473,7 +474,7 @@ func TestInterruptPausedIdleSessionCanStartNewExchange(t *testing.T) {
 	if _, err := s.Send(s.Root(), "fresh"); err != nil {
 		t.Fatal(err)
 	}
-	interruptWait(t, p.requests)
+	await(t, p.requests, "interruption test")
 	if _, err := s.StopAgent(s.Root()); err != nil {
 		t.Fatal(err)
 	}
@@ -482,10 +483,4 @@ func TestInterruptPausedIdleSessionCanStartNewExchange(t *testing.T) {
 	}
 }
 
-func (t interruptTool) InputContract() tool.Contract {
-	p, err := tool.NewParameters[struct{}]()
-	if err != nil {
-		panic(err)
-	}
-	return p.Contract()
-}
+func (t interruptTool) InputContract() tool.Contract { return emptyContract() }

@@ -213,6 +213,11 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 		result.Duration = time.Since(result.StartedAt)
 		retErr = errors.Join(retErr, writeJSON(filepath.Join(dir, "result.json"), result))
 	}()
+	// Behavioral and environmental failures are results, not errors.
+	fail := func(class string, err error) (Result, error) {
+		result.ErrorClass, result.Error = class, err.Error()
+		return result, nil
+	}
 	trialCtx, cancelTrial := context.WithTimeout(ctx, opts.Timeout)
 	defer cancelTrial()
 	cfg := opts.Config
@@ -221,9 +226,7 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	}
 	workspace, err := os.MkdirTemp("", "strap-interaction-")
 	if err != nil {
-		result.ErrorClass = "setup"
-		result.Error = err.Error()
-		return result, nil
+		return fail("setup", err)
 	}
 	defer os.RemoveAll(workspace)
 	cfg.Dir, cfg.LocalTools, cfg.Web = workspace, false, nil
@@ -244,20 +247,17 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	case roster.Auditor:
 		deps.Auditor.Provider = gate
 	default:
-		result.ErrorClass, result.Error = "setup", "unsupported evaluated actor role"
-		return result, nil
+		return fail("setup", errors.New("unsupported evaluated actor role"))
 	}
 	// The owner context is independent of the trial deadline: freeze the grading
 	// prefix before cleanup introduces cancellation and session-close records.
 	s, err := harness.New(context.Background(), cfg, deps)
 	if err != nil {
-		result.ErrorClass = "setup"
-		result.Error = err.Error()
 		var startup *harness.StartupError
 		if errors.As(err, &startup) {
 			_ = startup.Close(context.Background())
 		}
-		return result, nil
+		return fail("setup", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -269,10 +269,8 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 			result.Error = err.Error()
 		}
 	}()
-	if err := pauseRoot(trialCtx, s); err != nil {
-		result.ErrorClass = "setup"
-		result.Error = err.Error()
-		return result, nil
+	if err := pauseActor(trialCtx, s, s.Root()); err != nil {
+		return fail("setup", err)
 	}
 	var f fixture
 	if schemaRole(scenario.ID) != "" {
@@ -281,14 +279,11 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 		f, err = seedAudit(trialCtx, s)
 	}
 	if err != nil {
-		result.ErrorClass = "setup"
-		result.Error = err.Error()
-		return result, nil
+		return fail("setup", err)
 	}
 	if f.actor() != s.Root() {
 		if err := pauseActor(trialCtx, s, f.actor()); err != nil {
-			result.ErrorClass, result.Error = "setup", err.Error()
-			return result, nil
+			return fail("setup", err)
 		}
 	}
 	actorConfig := effectiveRole(s.Configuration(), role)
@@ -297,16 +292,12 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	}
 	reader, err := s.Trace(trialCtx)
 	if err != nil {
-		result.ErrorClass = "capture"
-		result.Error = err.Error()
-		return result, nil
+		return fail("capture", err)
 	}
 	defer reader.Close(context.Background())
 	head, err := reader.Head(trialCtx)
 	if err != nil {
-		result.ErrorClass = "capture"
-		result.Error = err.Error()
-		return result, nil
+		return fail("capture", err)
 	}
 	result.Start = head.Cursor
 	var race *revisionRace
@@ -322,9 +313,7 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 		model := roleModel(cfg, role)
 		gate.inner, err = model.NewProvider(nil)
 		if err != nil {
-			result.ErrorClass = "provider"
-			result.Error = err.Error()
-			return result, nil
+			return fail("provider", err)
 		}
 	}
 	stimulus := f.stimulus(scenario.ID)
@@ -351,9 +340,7 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	}
 	sub, err := s.Subscribe(trialCtx, harness.SubscribeOptions{After: result.Start})
 	if err != nil {
-		result.ErrorClass = "capture"
-		result.Error = err.Error()
-		return result, nil
+		return fail("capture", err)
 	}
 	defer sub.Close()
 	boundaries := make(chan boundary)
@@ -372,15 +359,8 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 			if rec.Agent != string(f.actor()) {
 				continue
 			}
-			reason := ""
-			switch rec.Kind {
-			case "tool_batch":
-				reason = "batch"
-			case "agent_yielded":
-				reason = "yield"
-			case "agent_exited":
-				reason = "agent_exit"
-			case "message":
+			reason := boundaryReason(rec.Kind)
+			if reason == "reply" {
 				e, eerr := s.ResolveRecord(watchCtx, rec)
 				if eerr != nil {
 					select {
@@ -397,9 +377,8 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 					}
 					return
 				}
-				m, ok := fact.(conversation.MessageEvent)
-				if ok && m.Message.From == f.actor() && m.Message.Kind == message.Reply {
-					reason = "reply"
+				if m, ok := fact.(conversation.MessageEvent); !ok || m.Message.From != f.actor() || m.Message.Kind != message.Reply {
+					reason = ""
 				}
 			}
 			if reason != "" {
@@ -415,9 +394,7 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 		_, err = s.ResumeAgent(f.actor())
 	}
 	if err != nil {
-		result.ErrorClass = "harness"
-		result.Error = err.Error()
-		return result, nil
+		return fail("harness", err)
 	}
 	var facts []fact
 	observationFailed := func(err error) {
@@ -509,8 +486,8 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 			result.Error = e.Error()
 		}
 	}
-	result.ModelCalls, result.Behavior.OutputErrors, err, _ = gate.stats()
-	_, _, _, toolBudget := gate.stats()
+	var toolBudget bool
+	result.ModelCalls, result.Behavior.OutputErrors, err, toolBudget = gate.stats()
 	if err != nil && result.Error == "" {
 		result.ErrorClass = "provider"
 		result.Error = err.Error()
@@ -532,9 +509,7 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 			result.Outcome = "failed"
 			result.ErrorClass = "budget"
 			result.Error = "scenario did not finish within its declared budget"
-			result.Behavior.OutcomeCorrect = false
-			result.Behavior.CleanSuccess = false
-			result.Behavior.RecoverySuccess = false
+			result.Behavior.failOutcome()
 		}
 	}
 	// Seal the archive before reopening it, but compare the pre-cleanup prefix.
@@ -567,10 +542,6 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 		result.Behavior.Scorable = false
 	}
 	return result, nil
-}
-
-func pauseRoot(ctx context.Context, s *harness.Session) error {
-	return pauseActor(ctx, s, s.Root())
 }
 
 func pauseActor(ctx context.Context, s *harness.Session, actor identity.ActorID) error {

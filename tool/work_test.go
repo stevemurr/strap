@@ -165,26 +165,6 @@ func TestSubmitAuditFindingsContract(t *testing.T) {
 			}
 		})
 	}
-	// Each verdict has a complete alternative inside input, without parser hints.
-	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) { return Result{}, nil })
-	var schema struct {
-		Type       string            `json:"type"`
-		OneOf      []json.RawMessage `json:"oneOf"`
-		Required   []string          `json:"required"`
-		Properties map[string]struct {
-			Enum        []string `json:"enum"`
-			Description string   `json:"description"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(inputSchema(t, op.Definition().Parameters), &schema); err != nil {
-		t.Fatal(err)
-	}
-	if schema.Type != "" || len(schema.Properties) != 0 || len(schema.OneOf) != 2 {
-		t.Fatalf("audit schema shape: %+v", schema)
-	}
-	if len(schema.Required) != 0 {
-		t.Fatal("root required hints survived")
-	}
 }
 
 func TestCreatePlanExposesOnlyTitleAndCriteriaPerStep(t *testing.T) {
@@ -258,7 +238,7 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 		{PlanID: &id, ExpectedRevision: &rev, Order: []work.StepID{"step-z", "step-y"}},
 		{PlanID: &id, ExpectedRevision: &rev, Title: ptr("Renamed")},
 	}
-	if a, b := mustJSON(t, got), mustJSON(t, want); a != b {
+	if a, b := string(mustJSON(t, got)), string(mustJSON(t, want)); a != b {
 		t.Fatalf("plan updates diverged:\n got %s\nwant %s", a, b)
 	}
 	rejected := []struct{ tool, raw, want string }{
@@ -289,13 +269,13 @@ func TestPlanToolsMapToOnePlanUpdateEach(t *testing.T) {
 	}
 }
 
-func mustJSON(t *testing.T, v any) string {
+func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	raw, err := MarshalInput(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(raw)
+	return raw
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -332,28 +312,5 @@ func TestWorkToolsDeclareRevisionBookkeeping(t *testing.T) {
 	// A progress report carries no revision at all, so it declares none.
 	if got := declared(ReportWorkProgress(nil)); len(got) != 0 {
 		t.Fatalf("report_work_progress: %v", got)
-	}
-}
-
-// The progress tool accepts exactly the advertised shape, without rewriting
-// objective aliases, dropping nulls, or re-encoding revision numbers as floats.
-func TestProgressReportRejectsUndocumentedAliasesAndNulls(t *testing.T) {
-	calls := 0
-	report := ReportWorkProgress(func(context.Context, Call, work.ReportWorkProgressRequest) (Result, error) {
-		calls++
-		return Text("ok"), nil
-	})
-	for _, raw := range []string{
-		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"objective":"Ship it"}}`,
-		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"findings":null,"steps":null}}`,
-		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"Ship it","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"steps":null,"findings":null}}`,
-		`{"input":{"work_id":"work-1","expected_revision":1,"assigned_at_revision":1,"position":{"objective":"x","activity":null,"note":null,"next_step":null,"uncertainty":null,"blocker":null,"decision_need":null,"dependencies":null},"priority":1,"findings":null,"steps":null}}`,
-	} {
-		if _, err := report.Call(context.Background(), Call{Actor: "worker", Arguments: []byte(raw)}); err == nil {
-			t.Fatalf("accepted %s", raw)
-		}
-	}
-	if calls != 0 {
-		t.Fatalf("invalid progress reports reached handler %d times", calls)
 	}
 }

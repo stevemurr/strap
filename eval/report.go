@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -423,7 +425,7 @@ func (r Report) Markdown() string {
 	}
 	if len(tools) > 0 {
 		b.WriteString("\n## Tool usage\n\n| tool | calls | errors |\n|---|---|---|\n")
-		for _, k := range sortedKeys(tools) {
+		for _, k := range slices.Sorted(maps.Keys(tools)) {
 			fmt.Fprintf(&b, "| %s | %d | %d |\n", k, tools[k], toolErrors[k])
 		}
 	}
@@ -435,7 +437,7 @@ func countList(m map[string]int) string {
 		return "-"
 	}
 	var parts []string
-	for _, k := range sortedKeys(m) {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
 		parts = append(parts, fmt.Sprintf("%s %d", k, m[k]))
 	}
 	return strings.Join(parts, ", ")
@@ -447,15 +449,6 @@ func sumMap(m map[string]int) int {
 		n += v
 	}
 	return n
-}
-
-func sortedKeys(m map[string]int) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // failureLines keeps the lines of go test output that explain a failure:
@@ -501,5 +494,5 @@ func WriteReport(r Report) error {
 	if err := os.WriteFile(filepath.Join(r.Dir, "report.md"), []byte(r.Markdown()), 0o644); err != nil {
 		return err
 	}
-	return errors.Join(writeJSON(filepath.Join(r.Dir, "report.json"), r))
+	return writeJSON(filepath.Join(r.Dir, "report.json"), r)
 }

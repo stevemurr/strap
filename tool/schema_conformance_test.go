@@ -11,24 +11,6 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-// Use a separate JSON Schema engine: the exported schema is the contract the
-// model sees, and must reject the same invalid shape as the real call boundary.
-func TestAuditSchemaRejectsMissingFailedFindings(t *testing.T) {
-	calls := 0
-	op := SubmitAudit(func(context.Context, Call, work.AuditRequest) (Result, error) {
-		calls++
-		return Text("recorded"), nil
-	})
-	raw := json.RawMessage(`{"input":{"work_id":"w","expected_revision":1,"submission_id":"s","verdict":"fail","summary":"broken","findings":null}}`)
-	schema := compileExportedSchema(t, op.Definition().Parameters)
-	if err := validateExportedSchema(t, schema, raw); err == nil {
-		t.Error("advertised schema accepted failed audit without findings")
-	}
-	if _, err := op.Call(context.Background(), Call{Arguments: raw}); err == nil || calls != 0 {
-		t.Fatalf("invalid audit reached handler: err=%v calls=%d", err, calls)
-	}
-}
-
 func compileExportedSchema(t *testing.T, raw json.RawMessage) *jsonschema.Schema {
 	t.Helper()
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))

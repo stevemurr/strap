@@ -44,7 +44,7 @@ func (s *Store) GetWorkProgress(actor identity.ActorID, id ID) (WorkProgress, er
 	if !ok {
 		return WorkProgress{}, ErrNotFound
 	}
-	if actor == "" || actor != w.Owner && actor != w.Assignee {
+	if !w.visibleTo(actor) {
 		return WorkProgress{}, ErrForbidden
 	}
 	v := WorkProgress{Current: WorkStateSnapshot{WorkID: id, Owner: w.Owner, Assignee: w.Assignee, State: w.State, WorkRevision: w.Revision, AssignedAtRevision: w.AssignedAtRevision, ActiveBlocker: w.Blocker, CurrentNote: w.Note}, LatestReportID: w.LatestProgressReportID}
@@ -91,7 +91,7 @@ func (s *Store) ProgressReports(actor identity.ActorID, id ID) ([]WorkProgressRe
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if actor == "" || actor != w.Owner && actor != w.Assignee {
+	if !w.visibleTo(actor) {
 		return nil, ErrForbidden
 	}
 	out := []WorkProgressReport{}

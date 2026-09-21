@@ -102,7 +102,7 @@ func TestReplayRecoversActiveOutputAndFixedTextPrefix(t *testing.T) {
 	}
 }
 func TestLargeMessageFramingRetainsCompleteContent(t *testing.T) {
-	s := newLifecycleSession(t, context.Background(), idle{})
+	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	body := strings.Repeat("large ✓ ", 50000)
 	if _, err := s.Send(s.Root(), body); err != nil {
 		t.Fatal(err)
@@ -161,17 +161,12 @@ func (s missingFinishStore) Append(ctx context.Context, d eventlog.Data) (eventl
 	return s.Store.Append(ctx, d)
 }
 
-type simpleResponse struct{}
-
-func (simpleResponse) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
-	return provider.Response{Content: "committed text"}, nil
-}
 func TestHistoryCommitSurvivesMissingOutputFinish(t *testing.T) {
 	cfg := harness.DefaultConfig()
 	cfg.Web = nil
 	cfg.LocalTools = false
 	failed := make(chan struct{})
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: simpleResponse{}, CaptureFailure: func(error) { close(failed) }, EventStore: func(id string) (eventlog.Store, error) {
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("committed text"), CaptureFailure: func(error) { close(failed) }, EventStore: func(id string) (eventlog.Store, error) {
 		m, e := eventlog.NewMemory(id, eventlog.Limits{})
 		return missingFinishStore{m}, e
 	}})
@@ -197,11 +192,6 @@ func TestHistoryCommitSurvivesMissingOutputFinish(t *testing.T) {
 	}
 }
 
-type textResponse string
-
-func (p textResponse) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
-	return provider.Response{Content: string(p)}, nil
-}
 func TestEscapedOutputStreamsWithinSmallQueueBudget(t *testing.T) {
 	cfg := harness.DefaultConfig()
 	cfg.Web = nil
@@ -248,7 +238,7 @@ func TestDiskReplayMatchesClosedSessionProjection(t *testing.T) {
 	cfg.Web = nil
 	cfg.LocalTools = false
 	cfg.Events.JSONLPath = filepath.Join(t.TempDir(), "session.jsonl")
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: simpleResponse{}})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("committed text")})
 	if err != nil {
 		t.Fatal(err)
 	}

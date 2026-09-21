@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/message"
@@ -145,15 +144,7 @@ func TestCompletionPreservesScrollFreezeAndTerminalBounds(t *testing.T) {
 		{Width: 80, Height: 24}, {Width: 25, Height: 12}, {Width: 15, Height: 8}, {Width: 1, Height: 1}, {Width: 80, Height: 24},
 	} {
 		m.Update(size)
-		view := m.View()
-		if lines := strings.Split(view, "\n"); len(lines) > size.Height {
-			t.Fatalf("menu exceeds height %d: %s", size.Height, view)
-		}
-		for _, line := range strings.Split(view, "\n") {
-			if lipgloss.Width(line) > size.Width {
-				t.Fatalf("menu exceeds width %d: %q", size.Width, line)
-			}
-		}
+		assertFits(t, m.View(), size.Width, size.Height)
 		if m.input.Value() != "/" {
 			t.Fatal("resize lost draft")
 		}

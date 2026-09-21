@@ -64,10 +64,4 @@ func TestEvidenceReceiptRequiresAcceptedFinishAndSurvivesToolError(t *testing.T)
 	}
 }
 
-func (t evidenceTool) InputContract() tool.Contract {
-	p, err := tool.NewParameters[struct{}]()
-	if err != nil {
-		panic(err)
-	}
-	return p.Contract()
-}
+func (t evidenceTool) InputContract() tool.Contract { return emptyContract() }

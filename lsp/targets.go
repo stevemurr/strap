@@ -10,9 +10,9 @@ func validateTarget(t Target) error {
 	valid := false
 	switch {
 	case t.Ref != "":
-		valid = t.Path == "" && t.Line == 0 && t.Column == 0 && t.ExpectedText == nil && t.Symbol == "" && t.Context == nil
+		valid = t.Path == "" && t.Line == 0 && t.Column == 0 && t.Symbol == "" && t.Context == nil
 	case t.Symbol != "":
-		valid = t.Path != "" && t.Line > 0 && t.Column == 0 && t.ExpectedText == nil
+		valid = t.Path != "" && t.Line > 0 && t.Column == 0
 	default:
 		valid = t.Path != "" && t.Line > 0 && t.Column > 0 && t.Context == nil
 	}

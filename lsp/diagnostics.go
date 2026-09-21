@@ -20,8 +20,7 @@ func (m *Manager) Diagnostics(ctx context.Context, q DiagnosticQuery) (Page, err
 	if q.Paths != nil && (len(q.Paths) == 0 || len(q.Paths) > 32) {
 		return Page{}, failure("invalid_query", "provide 1..32 paths, or null for cached diagnostics")
 	}
-	cursor := q.Cursor
-	q.Cursor = ""
+	cursor := q.detachCursor()
 	key := queryKey("diagnostics", q)
 	if cursor != "" {
 		return m.continuePage(key, cursor, q.Limit)
@@ -39,13 +38,7 @@ func (m *Manager) Diagnostics(ctx context.Context, q DiagnosticQuery) (Page, err
 		if !sources[s.key] {
 			sm := m.metadata(s)
 			m.addReadiness(s, &sm)
-			meta.Sources = append(meta.Sources, sm.Sources...)
-			meta.Partial = meta.Partial || sm.Partial
-			for _, v := range sm.Issues {
-				if len(meta.Issues) < 8 {
-					meta.Issues = append(meta.Issues, v)
-				}
-			}
+			mergeMetadata(&meta, sm)
 			sources[s.key] = true
 		}
 	}
@@ -240,7 +233,7 @@ func (m *Manager) documentDiagnostics(ctx context.Context, s *instance, path str
 		if err := c.call(ctx, "textDocument/diagnostic", params, &report); err == nil && report.Kind == "full" {
 			version := d.version
 			set := diagnosticSet{Version: &version, Items: report.Items, Received: time.Now(), Epoch: c.epoch.Load(), Revision: revision}
-			c.storePulledDiagnostics(uri, set)
+			c.storeDiagnosticSet(uri, set, true)
 			sets, _ := c.diagnosticSnapshot()
 			return sets[uri], true
 		}
@@ -378,20 +371,11 @@ func (m *Manager) refresh() {
 	}
 }
 
-func (c *client) storeDiagnostics(uri string, set diagnosticSet) {
-	c.storeDiagnosticSet(uri, set, false)
-}
-func (c *client) storePulledDiagnostics(uri string, set diagnosticSet) {
-	c.storeDiagnosticSet(uri, set, true)
-}
 func (c *client) storeDiagnosticSet(uri string, set diagnosticSet, pulled bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cache := c.diagnostics
 	if pulled {
-		if c.pulledDiagnostics == nil {
-			c.pulledDiagnostics = map[string]diagnosticSet{}
-		}
 		cache = c.pulledDiagnostics
 	}
 	old, ok := cache[uri]

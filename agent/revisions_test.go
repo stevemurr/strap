@@ -22,22 +22,27 @@ func (revisionSender) Send(context.Context, message.Draft) (message.Receipt, err
 }
 func TestLifecycleRevisionIsIndependentFromHistory(t *testing.T) {
 	var events []StateSnapshot
-	a, err := New(Config{ID: "a", Spec: Spec{Provider: revisionProvider{}}, Inbox: inbox.New[message.Message](), Outbox: revisionSender{}, OnLifecycle: func(s StateSnapshot) { events = append(events, s) }})
+	a, err := New(Config{ID: "a", Spec: Spec{Provider: revisionProvider{}}, Inbox: inbox.New[message.Message](), Outbox: revisionSender{}, Reporter: ReporterFunc(func(_ context.Context, e Event) error {
+		if s, ok := e.(StateSnapshot); ok {
+			events = append(events, s)
+		}
+		return nil
+	})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	history := a.ContextRevision()
-	if _, err = a.Pause(); err != nil {
+	if _, err = a.PauseSnapshot(); err != nil {
 		t.Fatal(err)
 	}
 	first := a.StateSnapshot()
-	if _, err = a.Pause(); err != nil {
+	if _, err = a.PauseSnapshot(); err != nil {
 		t.Fatal(err)
 	}
 	if a.StateSnapshot() != first {
 		t.Fatal("idempotent pause changed revision")
 	}
-	if _, err = a.Resume(); err != nil {
+	if _, err = a.ResumeSnapshot(); err != nil {
 		t.Fatal(err)
 	}
 	last := a.StateSnapshot()

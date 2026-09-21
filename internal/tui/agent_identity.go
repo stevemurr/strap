@@ -112,13 +112,13 @@ func (m *model) renderMessage(e *entry, firstRow int) string {
 		lines = append(lines, padding)
 		return strings.Join(lines, "\n")
 	}
-	if e.label == "Strap" || e.label == "Message" || e.label == "Saved reply" || e.output != nil || e.label == "Tool" {
+	if e.label == "Strap" || e.label == "Message" || e.output != nil {
 		actor := m.session.Root()
 		if len(e.actors) > 0 {
 			actor = e.actors[0]
 		}
 		prefix := stackIdentity(actor).Render("•") + " "
-		if len(e.actors) > 0 && (e.actors[0] != m.session.Root() || e.label == "Tool") {
+		if len(e.actors) > 0 && e.actors[0] != m.session.Root() {
 			prefix = agentIcon(e.actors[0]) + " "
 			m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.actors[0], row: firstRow, column: 0})
 		}

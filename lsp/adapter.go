@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -113,11 +114,7 @@ func (a genericAdapter) Resolve(ctx context.Context, r ResolveRequest) (LaunchSp
 			env["GOWORK"] = "off"
 		}
 	}
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(env))
 	s := LaunchSpec{Root: root, Dir: root, Command: append([]string(nil), r.Server.Command...), InitializationOptions: append(json.RawMessage(nil), r.Server.InitializationOptions...), Settings: append(json.RawMessage(nil), r.Server.Settings...)}
 	for _, k := range keys {
 		s.Env = append(s.Env, k+"="+env[k])

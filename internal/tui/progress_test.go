@@ -67,13 +67,8 @@ func TestProgressMarkdownInConversationAndEval(t *testing.T) {
 				for _, width := range []int{80, 40, 20} {
 					m.Update(tea.WindowSizeMsg{Width: width, Height: 35})
 					e.Update(tea.WindowSizeMsg{Width: width, Height: 35})
-					for _, view := range []string{m.View(), e.View()} {
-						for _, line := range strings.Split(view, "\n") {
-							if ansi.StringWidth(line) > width {
-								t.Fatalf("report overflow at width %d", width)
-							}
-						}
-					}
+					assertFits(t, m.View(), width, 0)
+					assertFits(t, e.View(), width, 0)
 				}
 			})
 		}

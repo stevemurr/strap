@@ -103,7 +103,7 @@ func TestLiveLanguageTraversal(t *testing.T) {
 			cfg.Dir, cfg.Web = dir, nil
 			cfg.Telemetry.ContextTokens = false
 			var err error
-			cfg.Model, err = modelcatalog.Load("../internal/modelcatalog/models.json", profile, 2*time.Minute)
+			cfg.Model, _, err = modelcatalog.Resolve("../internal/modelcatalog/models.json", profile, 2*time.Minute)
 			if err != nil {
 				t.Fatal(err)
 			}

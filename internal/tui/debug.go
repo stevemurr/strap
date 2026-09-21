@@ -2,20 +2,18 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
+	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 )
 
 var (
-	toolStyle    = dimStyle
 	routeStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#006F87", Dark: "#22D3EE"})
 	stateStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FBBF24"})
 	successStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#16803C", Dark: "#4ADE80"})
@@ -51,19 +49,15 @@ func (m *model) toolEvent(event conversation.ToolEvent) {
 	name := toolName(activity.Call.Name)
 	if activity.FinishedAt.IsZero() {
 		m.activeTools[key] = activity
-		m.streamUI.nextEntry++
-		m.entries = append(m.entries, entry{serial: m.streamUI.nextEntry, actors: []message.ActorID{event.Agent}, label: "Tool", meta: safeText(string(event.Agent)), body: name, at: m.now(), tool: key, toolInfo: displayTool(activity)})
-		for i := len(m.entries) - 2; i >= 0; i-- {
+		var output *identity.OutputID
+		for i := len(m.entries) - 1; i >= 0; i-- {
 			if m.entries[i].output != nil && m.entries[i].output.Agent == event.Agent {
 				id := *m.entries[i].output
-				m.entries[len(m.entries)-1].activityOutput = &id
+				output = &id
 				break
 			}
 		}
-		m.noteStreamEntry(&m.entries[len(m.entries)-1])
-		if !m.selecting {
-			m.renderTranscript(false)
-		}
+		m.addEntry(entry{actors: []message.ActorID{event.Agent}, label: "Tool", meta: string(event.Agent), body: name, activityOutput: output, tool: key, toolInfo: displayTool(activity)}, false)
 		return
 	}
 	delete(m.activeTools, key)
@@ -127,51 +121,14 @@ func (m *model) busy() bool {
 	}
 	return false
 }
-func (m *model) refreshActivity() {
-	if m.busy() {
-		if m.busySince.IsZero() {
-			m.busySince = m.now()
-			m.lastElapsed = 0
-		}
-	} else if !m.busySince.IsZero() {
-		m.lastElapsed = m.now().Sub(m.busySince)
-		m.busySince = time.Time{}
-	}
-}
-
-func (m *model) activityLine() string {
-	if !m.busy() {
-		line := m.status()
-		if m.lastElapsed > 0 {
-			line += " · last active " + elapsed(m.lastElapsed)
-		}
-		return dimStyle.Render(line)
-	}
-	duration := m.now().Sub(m.busySince)
-	var operations []string
-	for key, activity := range m.activeTools {
-		operations = append(operations, fmt.Sprintf("%s/%s %s", safeText(string(key.agent)), toolName(activity.Call.Name), elapsed(m.now().Sub(activity.StartedAt))))
-	}
-	sort.Strings(operations)
-	detail := m.status()
-	if len(operations) > 0 {
-		detail += " · " + strings.Join(operations, ", ")
-	}
-	return m.spinner.View() + " " + stateStyle.Render(elapsed(duration)) + " · " + detail
-}
-
-func (m *model) addDetail(label, meta, body string, follow bool) {
-	m.addAttributed(label, meta, body, follow)
-}
 
 func (m *model) addAttributed(label, meta, body string, follow bool, actors ...message.ActorID) {
-	progress := len(actors) == 1 && meta == string(actors[0])+" · progress" && (label == "Strap" || label == "Message")
-	m.addEntry(entry{actors: actors, label: label, meta: meta, body: body, progress: progress}, follow)
+	m.addEntry(entry{actors: actors, label: label, meta: meta, body: body}, follow)
 }
 
 func (m *model) addEntry(e entry, follow bool) {
 	m.streamUI.nextEntry++
-	e.serial, e.at = m.streamUI.nextEntry, m.now()
+	e.serial = m.streamUI.nextEntry
 	e.label, e.meta, e.body = safeText(e.label), safeText(e.meta), safeText(e.body)
 	m.entries = append(m.entries, e)
 	m.noteStreamEntry(&m.entries[len(m.entries)-1])
@@ -208,13 +165,4 @@ func (m *model) refreshSelection() {
 	if m.selecting {
 		m.frozenView = m.renderView()
 	}
-}
-
-// Keep every call in order, including repeated tools and its batch measurement.
-func toolRow(e *entry, width int) string {
-	label := "├─ " + inlineText(e.meta) + " · " + e.body
-	if e.tokens != nil {
-		label += " · " + e.tokens.label()
-	}
-	return ansi.Hardwrap(label, width, true)
 }

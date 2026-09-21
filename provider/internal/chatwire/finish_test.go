@@ -19,7 +19,7 @@ func TestRejectedArgumentsRecordFinishReasonAndCallPosition(t *testing.T) {
 	body := `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
 		{"id":"first","type":"function","function":{"name":"write_file","arguments":"{\"path\": \"a\", \"content\": \"open"}},
 		{"id":"second","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"b\",\"content\":\"\"}"}}]}}]}`
-	c, err := chatwire.New("https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+	c, err := chatwire.New("", "https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
 	if err != nil {

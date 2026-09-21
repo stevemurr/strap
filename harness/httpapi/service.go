@@ -37,8 +37,6 @@ type Options struct {
 	Authorize func(*http.Request, Capability, string) error
 	// Factory receives the service lifetime, never a request/disconnect context.
 	Factory func(context.Context, harness.Config) (*harness.Session, error)
-	// Agent profiles resolve executable collaborators on the host. They are not
-	// serialized in HTTP requests. Nil disables dynamic agent creation over HTTP.
 }
 
 // BearerToken authorizes all host capabilities for one configured token. Serve

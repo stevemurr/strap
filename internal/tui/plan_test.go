@@ -205,10 +205,7 @@ func TestPlanDockFitsLongPlansAndTerminalThemes(t *testing.T) {
 			m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			for _, size := range []tea.WindowSizeMsg{{Width: 104, Height: 40}, {Width: 80, Height: 24}, {Width: 40, Height: 18}, {Width: 20, Height: 12}, {Width: 10, Height: 8}, {Width: 1, Height: 1}} {
 				m.Update(size)
-				view := m.View()
-				if lipgloss.Width(view) > size.Width || lipgloss.Height(view) > size.Height {
-					t.Fatalf("overflow at %+v", size)
-				}
+				assertFits(t, m.View(), size.Width, size.Height)
 				if size.Height >= 18 && m.composerTop()+m.input.Height()+3 != m.height {
 					t.Fatal("plan moved input outside terminal")
 				}

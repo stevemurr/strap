@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/stevemurr/strap/provider"
 )
 
 type ShellConfig struct {
@@ -35,7 +33,7 @@ type ShellConfig struct {
 type Shell struct {
 	stop   func(*exec.Cmd) error
 	config ShellConfig
-	bound  Func[shellArgs]
+	Func[shellArgs]
 }
 
 var _ Tool = (*Shell)(nil)
@@ -109,7 +107,7 @@ func NewShell(config ShellConfig) (*Shell, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.bound = Func[shellArgs]{
+	s.Func = Func[shellArgs]{
 		Spec: Definition[shellArgs]{
 			Name:        "shell",
 			Description: s.description(),
@@ -120,13 +118,9 @@ func NewShell(config ShellConfig) (*Shell, error) {
 	return s, nil
 }
 
-func (s *Shell) Definition() provider.ToolDefinition { return s.bound.Definition() }
-func (s *Shell) Validate() error                     { return s.bound.Validate() }
 func (s *Shell) description() string {
 	return fmt.Sprintf("Run a synchronous shell command in %s using %s. Returns combined stdout/stderr and exit status. Default timeout %d ms, maximum %d ms. Output is bounded, keeping both ends. No persistent shell or background jobs; descendants in the process group are stopped when the call ends. Runs with host permissions, without a sandbox.", s.config.Dir, s.config.Program, s.config.Timeout.Milliseconds(), s.config.MaxTimeout.Milliseconds())
 }
-func (s *Shell) Call(ctx context.Context, call Call) (Result, error) { return s.bound.Call(ctx, call) }
-
 func (s *Shell) handle(ctx context.Context, _ Call, args shellArgs) (Result, error) {
 	if strings.TrimSpace(args.Command) == "" {
 		return Result{}, errors.New("command must not be empty")
@@ -231,10 +225,3 @@ func (b *boundedOutput) String() string {
 	}
 	return strings.ToValidUTF8(string(b.head)+string(b.tail), "�")
 }
-
-func (s *Shell) prepare(ctx context.Context, call Call) (func() (Result, error), error) {
-	return s.bound.prepare(ctx, call)
-}
-func (s *Shell) snapshot() preparedTool { return s.bound.snapshot() }
-
-func (s *Shell) contract() *parameterNode { return s.bound.contract() }

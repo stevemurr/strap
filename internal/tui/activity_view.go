@@ -19,7 +19,7 @@ type toolDisplay struct {
 	name, preview, arguments, result, failure, notice string
 	path                                              string
 	numbered                                          bool
-	started, finished                                 time.Time
+	finished                                          time.Time
 }
 
 func boundedToolText(text string, limit int) string {
@@ -35,7 +35,7 @@ func boundedToolText(text string, limit int) string {
 }
 
 func displayTool(a agent.ToolActivity) *toolDisplay {
-	d := &toolDisplay{name: a.Call.Name, started: a.StartedAt, finished: a.FinishedAt}
+	d := &toolDisplay{name: a.Call.Name, finished: a.FinishedAt}
 	var envelope struct {
 		Input map[string]json.RawMessage `json:"input"`
 	}
@@ -221,10 +221,6 @@ func (m *model) toggleToolOutput() {
 	m.restoreStreamPosition(position)
 }
 
-func indentActivity(text, prefix string) string {
-	return prefix + strings.ReplaceAll(text, "\n", "\n"+prefix)
-}
-
 func (m *model) toggleFold(key foldKey) {
 	if m.folds.expanded == nil {
 		m.folds.expanded = make(map[foldKey]bool)
@@ -256,13 +252,38 @@ func (m *model) foldMouse(event tea.MouseMsg) bool {
 	if event.Y < m.transcriptTop() || event.Y >= m.transcriptTop()+m.viewport.Height {
 		return false
 	}
-	for _, target := range append(append([]foldTarget{}, m.folds.targets...), m.folds.hints...) {
-		if y == target.row && x >= target.column && x < target.column+2 {
-			m.toggleFold(target.key)
-			return true
-		}
+	if key, ok := m.folds.hit(x, y); ok {
+		m.toggleFold(key)
+		return true
 	}
 	return false
+}
+
+// wheelStep maps a wheel button to a cursor movement: up and left move back.
+func wheelStep(button tea.MouseButton) int {
+	if button == tea.MouseButtonWheelUp || button == tea.MouseButtonWheelLeft {
+		return -1
+	}
+	return 1
+}
+
+// keyStep maps a paired navigation key to a cursor movement: negative moves
+// back, its partner moves forward.
+func keyStep(key, negative string) int {
+	if key == negative {
+		return -1
+	}
+	return 1
+}
+
+// hit reports the fold toggle at transcript coordinates x, y.
+func (f *foldState) hit(x, y int) (foldKey, bool) {
+	for _, target := range append(append([]foldTarget{}, f.targets...), f.hints...) {
+		if y == target.row && x >= target.column && x < target.column+2 {
+			return target.key, true
+		}
+	}
+	return foldKey{}, false
 }
 
 func (m *model) foldKey(key string) bool {

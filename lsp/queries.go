@@ -69,6 +69,23 @@ func appendIssue(meta *Metadata, err error) {
 		meta.Issues = append(meta.Issues, cut(err.Error(), 256))
 	}
 }
+func mergeMetadata(dst *Metadata, src Metadata) {
+	dst.Sources = append(dst.Sources, src.Sources...)
+	dst.Partial = dst.Partial || src.Partial
+	for _, issue := range src.Issues {
+		if len(dst.Issues) < 8 {
+			dst.Issues = append(dst.Issues, issue)
+		}
+	}
+}
+
+// detachCursor blanks the cursor so first and continuation requests share a
+// query key, returning the continuation cursor.
+func (q *PageQuery) detachCursor() string {
+	cursor := q.Cursor
+	q.Cursor = ""
+	return cursor
+}
 func (m *Manager) locations(ctx context.Context, s *instance, raw json.RawMessage, meta *Metadata) ([]Item, bool, error) {
 	var locs []wireLocation
 	if len(raw) > 0 && raw[0] == '{' {
@@ -119,8 +136,7 @@ func (m *Manager) Symbols(ctx context.Context, q SymbolQuery) (Page, error) {
 	if strings.TrimSpace(q.Query) == "" {
 		return Page{}, failure("invalid_query", "symbol query must not be empty")
 	}
-	cursor := q.Cursor
-	q.Cursor = ""
+	cursor := q.detachCursor()
 	key := queryKey("symbols", q)
 	if cursor != "" {
 		return m.continuePage(key, cursor, q.Limit)
@@ -188,14 +204,7 @@ func (m *Manager) Symbols(ctx context.Context, q SymbolQuery) (Page, error) {
 			continue
 		}
 		epoch := m.epoch.Load()
-		sm := m.metadata(s)
-		meta.Sources = append(meta.Sources, sm.Sources...)
-		meta.Partial = meta.Partial || sm.Partial
-		for _, issue := range sm.Issues {
-			if len(meta.Issues) < 8 {
-				meta.Issues = append(meta.Issues, issue)
-			}
-		}
+		mergeMetadata(&meta, m.metadata(s))
 		var symbols []wireSymbol
 		if err := s.client.semanticCall(ctx, "workspace/symbol", map[string]string{"query": q.Query}, &symbols); err != nil {
 			appendIssue(&meta, err)
@@ -257,8 +266,7 @@ func (m *Manager) Outline(ctx context.Context, q OutlineQuery) (Page, error) {
 	if q.Depth < 1 || q.Depth > 8 {
 		return Page{}, failure("invalid_query", "outline depth must be 1..8")
 	}
-	cursor := q.Cursor
-	q.Cursor = ""
+	cursor := q.detachCursor()
 	key := queryKey("outline", q)
 	if cursor != "" {
 		return m.continuePage(key, cursor, q.Limit)
@@ -339,30 +347,32 @@ func (m *Manager) Navigate(ctx context.Context, q NavigateQuery) (Page, error) {
 	if method == "" {
 		return Page{}, failure("invalid_query", "unknown navigation relation")
 	}
-	return m.queryLocations(ctx, "navigate", q, q.Target, q.PageQuery, method, operationCapabilities[q.Relation], nil)
+	cursor := q.detachCursor()
+	return m.queryLocations(ctx, "navigate", q, cursor, q.Target, q.Limit, method, operationCapabilities[q.Relation], nil)
 }
 func (m *Manager) References(ctx context.Context, q ReferenceQuery) (Page, error) {
-	return m.queryLocations(ctx, "references", q, q.Target, q.PageQuery, "textDocument/references", "referencesProvider", map[string]any{"includeDeclaration": q.IncludeDeclaration})
+	cursor := q.detachCursor()
+	return m.queryLocations(ctx, "references", q, cursor, q.Target, q.Limit, "textDocument/references", "referencesProvider", map[string]any{"includeDeclaration": q.IncludeDeclaration})
 }
-func (m *Manager) queryLocations(ctx context.Context, kind string, query any, target Target, page PageQuery, method, cap string, refContext any) (Page, error) {
+
+// queryLocations receives the query with its cursor already detached so first
+// and continuation requests share one key.
+func (m *Manager) queryLocations(ctx context.Context, kind string, query any, cursor string, target Target, limit int, method, cap string, refContext any) (Page, error) {
 	ctx, done := m.requestContext(ctx)
 	defer done()
 	if err := m.acquire(ctx); err != nil {
 		return Page{}, err
 	}
 	defer m.release()
-	b, _ := json.Marshal(query)
-	var keyMap map[string]any
-	_ = json.Unmarshal(b, &keyMap)
-	keyMap["Cursor"] = ""
-	key := queryKey(kind, keyMap)
-	if page.Cursor != "" {
-		return m.continuePage(key, page.Cursor, page.Limit)
+	key := queryKey(kind, query)
+	if cursor != "" {
+		return m.continuePage(key, cursor, limit)
 	}
-	s, d, path, p, err := m.target(ctx, target)
+	r, err := m.target(ctx, target)
 	if err != nil {
 		return Page{}, err
 	}
+	s, d, path, p := r.instance, r.document, r.path, r.position
 	if err = require(s.client, cap); err != nil {
 		return Page{}, err
 	}
@@ -384,7 +394,7 @@ func (m *Manager) queryLocations(ctx context.Context, kind string, query any, ta
 	m.hasChanged(epoch, &meta)
 	m.checkHashes([]Item{{Path: m.display(path), SHA256: d.hash}}, &meta)
 	m.checkHashes(items, &meta)
-	return m.firstPage(key, items, meta, truncated, page.Limit)
+	return m.firstPage(key, items, meta, truncated, limit)
 }
 
 func (m *Manager) Inspect(ctx context.Context, q InspectQuery) (Inspection, error) {
@@ -394,10 +404,11 @@ func (m *Manager) Inspect(ctx context.Context, q InspectQuery) (Inspection, erro
 		return Inspection{}, err
 	}
 	defer m.release()
-	s, d, path, p, err := m.target(ctx, q.Target)
+	t, err := m.target(ctx, q.Target)
 	if err != nil {
 		return Inspection{}, err
 	}
+	s, d, path, p := t.instance, t.document, t.path, t.position
 	if err = require(s.client, "hoverProvider"); err != nil {
 		return Inspection{}, err
 	}

@@ -66,23 +66,17 @@ func (m *Memory) Read(ctx context.Context, q Query) (Page, error) {
 	if m.disposed {
 		return Page{}, ErrDisposed
 	}
-	p := Page{Latest: m.latest, Next: q.After, Sealed: m.outcome != nil, Head: m.head()}
-	if m.latest > 0 {
-		p.Earliest = 1
-	}
-	if m.outcome != nil {
-		o := *m.outcome
-		p.Outcome = &o
-	}
-	if err := cursor(q, p.Earliest, p.Latest); err != nil {
+	p, err := m.page(q)
+	if err != nil {
 		return p, err
 	}
 	bytes := 0
 	for _, e := range m.events[int(q.After):] {
-		if q.MaxBytes > 0 && bytes+e.Size() > q.MaxBytes {
-			if len(p.Events) == 0 {
-				return p, &PageBudgetError{Required: e.Size(), Budget: q.MaxBytes}
-			}
+		stop, err := overBudget(p, e, bytes, q)
+		if err != nil {
+			return p, err
+		}
+		if stop {
 			break
 		}
 		p.Events = append(p.Events, e.Clone())

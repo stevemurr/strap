@@ -15,10 +15,9 @@ type Range struct {
 type Target struct {
 	Ref, Path    string
 	Line, Column int
-	ExpectedText *string
 	// Symbol selects an exact identifier on Line; Context optionally restricts
-	// it to a verbatim single-line fragment. Column/ExpectedText are library-only
-	// alternatives for callers which already have an exact position.
+	// it to a verbatim single-line fragment. Column is a library-only
+	// alternative for callers which already have an exact position.
 	Symbol  string
 	Context *string
 }

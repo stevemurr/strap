@@ -17,10 +17,16 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-type idle struct{}
+// textResponse is a provider that answers every request with a fixed text.
+type textResponse string
 
-func (idle) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
-	return provider.Response{Content: "ready"}, nil
+func (p textResponse) Submit(context.Context, provider.Request, provider.Observer) (provider.Response, error) {
+	return provider.Response{Content: string(p)}, nil
+}
+func testConfig(t *testing.T, localTools bool) harness.Config {
+	cfg := harness.DefaultConfig()
+	cfg.Dir, cfg.Web, cfg.LocalTools = t.TempDir(), nil, localTools
+	return cfg
 }
 
 type closer struct {
@@ -37,11 +43,9 @@ func (c *closer) Close(context.Context) error {
 }
 
 func TestHeadlessSessionOwnsAssemblyAndWork(t *testing.T) {
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	owned := &closer{}
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: idle{}, Resources: []harness.OwnedResource{{Name: "test", Resource: owned}}})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready"), Resources: []harness.OwnedResource{{Name: "test", Resource: owned}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,9 +109,7 @@ func (p *observeProvider) Submit(_ context.Context, r provider.Request, observer
 }
 func TestDefaultRoleToolsPreserveCLIOrder(t *testing.T) {
 	p := &observeProvider{requests: make(chan provider.Request, 8)}
-	cfg := harness.DefaultConfig()
-	cfg.Dir = t.TempDir()
-	cfg.Web = nil
+	cfg := testConfig(t, true)
 	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p})
 	if err != nil {
 		t.Fatal(err)

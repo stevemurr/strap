@@ -19,7 +19,7 @@ type transport func(*http.Request) (*http.Response, error)
 func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func client(t *testing.T, body string) *chatwire.Client {
 	t.Helper()
-	c, err := chatwire.New("https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+	c, err := chatwire.New("", "https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})})
 	if err != nil {
@@ -29,11 +29,11 @@ func client(t *testing.T, body string) *chatwire.Client {
 }
 func TestURLValidationAndDefaultClient(t *testing.T) {
 	for _, url := range []string{"", ":bad", "relative", "ftp://host", "https://user:pass@host", "https://host?x=1", "https://host#fragment"} {
-		if _, err := chatwire.New(url, nil); err == nil {
+		if _, err := chatwire.New("", url, nil); err == nil {
 			t.Errorf("accepted %q", url)
 		}
 	}
-	if _, err := chatwire.New("https://model.test/v1/", nil); err != nil {
+	if _, err := chatwire.New("", "https://model.test/v1/", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -50,7 +50,7 @@ func TestRequestTranslationAndTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := chatwire.New("https://model.test/api/", &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+	c, err := chatwire.New("", "https://model.test/api/", &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://model.test/api/chat/completions" || r.Method != "POST" || r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("request: %+v", r)
 		}
@@ -140,11 +140,11 @@ func TestTransportFailures(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	failing, _ := chatwire.New("https://model.test", &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) { return nil, r.Context().Err() })})
+	failing, _ := chatwire.New("", "https://model.test", &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) { return nil, r.Context().Err() })})
 	if _, err := failing.Submit(ctx, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	rejecting, _ := chatwire.New("https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+	rejecting, _ := chatwire.New("", "https://model.test", &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 429, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 5000)))}, nil
 	})})
 	_, err := rejecting.Submit(context.Background(), nil, nil)

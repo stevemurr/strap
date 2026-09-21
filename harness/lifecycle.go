@@ -32,7 +32,7 @@ func (s *Session) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.sta
 // Close initiates owner-controlled shutdown. Its context only limits this wait.
 // Cleanup failures preserve ownership; a later call retries unfinished resources.
 func (s *Session) Close(ctx context.Context) error {
-	a := s.startClose()
+	a := s.startCloseReason("requested")
 	select {
 	case <-a.done:
 		return a.err
@@ -40,7 +40,6 @@ func (s *Session) Close(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
-func (s *Session) startClose() *closeAttempt { return s.startCloseReason("requested") }
 func (s *Session) startCloseReason(reason string) *closeAttempt {
 	s.mu.Lock()
 	defer s.mu.Unlock()

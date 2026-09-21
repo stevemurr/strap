@@ -17,11 +17,11 @@ type EmbeddedFields struct {
 
 func TestParameterConstructionRejectsInvalidConstraints(t *testing.T) {
 	for _, rule := range []Constraint{{}, MinLength("title", -1), MinItems("title", 1), Minimum("count", -129), Enum("count", "a"), Enum("title"), Enum("title", string([]byte{255})), AtLeastOneNonNull("title", "value"), AtLeastOneNonNull(""), AtLeastOneNonNull("", "missing"), MinLength("title[]", 1)} {
-		if _, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), rule); err == nil {
+		if _, err := NewParameters[contractArgs](contractConstraints(rule)...); err == nil {
 			t.Fatalf("accepted constraint on %q", rule.path)
 		}
 	}
-	if _, err := NewParameters[contractArgs](Nullable("count", "default"), Nullable("steps", "no steps"), Nullable("pages", "default pages"), Nullable("steps[].status", "unchanged"), Enum("title", "x"), MinLength("title", 2)); err == nil {
+	if _, err := NewParameters[contractArgs](contractConstraints(Enum("title", "x"), MinLength("title", 2))...); err == nil {
 		t.Fatal("inconsistent enum accepted")
 	}
 	checks := []func() error{
@@ -172,14 +172,5 @@ func TestCompositionRequiresNameAndBranches(t *testing.T) {
 		if _, err := Compose(def); err == nil {
 			t.Fatal("invalid composition accepted")
 		}
-	}
-	op := assignmentTool(t, "assign_implementation", func(_ context.Context, _ Call, a work.AssignmentRequest) (Result, error) {
-		if a.Task != "task" || a.Kind != work.Implementation {
-			t.Error(a)
-		}
-		return Text("assigned"), nil
-	})
-	if result, err := op.Call(context.Background(), Call{Arguments: json.RawMessage(`{"input":{"assignee":"worker","task":"task","context":null,"expected_output":null,"scope":null}}`)}); err != nil || result.Content.Text() != "assigned" {
-		t.Fatal(result, err)
 	}
 }

@@ -33,22 +33,13 @@ func (v *View) workModel(ctx context.Context) (*work.ReadModel, map[work.ID]uint
 		if err = json.Unmarshal(e.Payload, &fact); err != nil {
 			return nil, nil, err
 		}
-		change := fact.Event.Change
-		if change == nil {
-			change = &work.Change{}
-			if fact.Event.Work.ID != "" {
-				change.Works = append(change.Works, fact.Event.Work)
-			}
-			if fact.Event.Plan != nil {
-				change.Plans = append(change.Plans, *fact.Event.Plan)
-			}
-		}
+		change := fact.Event.Changes()
 		for _, w := range change.Works {
 			if _, ok := first[w.ID]; !ok {
 				first[w.ID] = cursor.Sequence
 			}
 		}
-		model.Apply(*change)
+		model.Apply(change)
 	}
 	return model, first, nil
 }

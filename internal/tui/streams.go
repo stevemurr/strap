@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stevemurr/strap/agent"
@@ -43,7 +42,6 @@ type agentStream struct {
 	parent   message.ActorID
 	position streamPosition
 	unread   map[uint64]bool // One count per message/tool row, never per token.
-	since    time.Time
 	output   string
 	context  *contextTokens
 	err      string
@@ -398,12 +396,7 @@ func (m *model) observeStreamEvent(event conversation.Event) {
 			return
 		}
 		v := m.ensureStream(e.Agent)
-		if e.State == agent.Running || e.State == agent.PauseRequested {
-			if v.since.IsZero() {
-				v.since = m.now()
-			}
-		} else {
-			v.since = time.Time{}
+		if e.State != agent.Running && e.State != agent.PauseRequested {
 			v.output = ""
 		}
 	case conversation.AgentEvent:
@@ -433,7 +426,7 @@ func (m *model) observeStreamEvent(event conversation.Event) {
 		}
 	case conversation.AgentExited:
 		v := m.ensureStream(e.Agent)
-		v.output, v.since = "", time.Time{}
+		v.output = ""
 		if e.Err != nil && !errors.Is(e.Err, context.Canceled) {
 			v.err = e.Err.Error()
 		}
@@ -452,7 +445,7 @@ func (m *model) observeStreamEvent(event conversation.Event) {
 	case conversation.ContextTokensEvent:
 		v := m.ensureStream(e.Agent)
 		if v.context == nil || e.Revision >= v.context.revision {
-			v.context = &contextTokens{revision: e.Revision, count: e.Count, failed: e.Error != "" || e.Count < 0}
+			v.context = measuredTokens(e.Revision, e.Count, e.Error != "")
 		}
 	}
 }

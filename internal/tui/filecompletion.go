@@ -237,11 +237,7 @@ func (m *model) completeFile(key string) bool {
 		if m.completionHeight() == 0 {
 			return false
 		}
-		delta := 1
-		if key == "up" {
-			delta = -1
-		}
-		m.completion.selected = (m.completion.selected + delta + len(m.fileCompletion.candidates)) % len(m.fileCompletion.candidates)
+		m.completion.selected = (m.completion.selected + keyStep(key, "up") + len(m.fileCompletion.candidates)) % len(m.fileCompletion.candidates)
 	case "enter", "tab":
 		// Enter on an exact reference submits; Tab still navigates into a folder.
 		if key == "enter" && ref.complete && ref.path != "" && m.fileCompletion.exact {
@@ -264,10 +260,5 @@ func (m *model) completeFile(key string) bool {
 func (m *model) setInputOffset(offset int) {
 	before := m.input.Value()[:offset]
 	lines := strings.Split(before, "\n")
-	m.input, _ = m.input.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
-	for range len(lines) - 1 {
-		m.input.CursorEnd()
-		m.input.CursorDown()
-	}
-	m.input.SetCursor(len([]rune(lines[len(lines)-1])))
+	m.setInputCursor(len(lines)-1, len([]rune(lines[len(lines)-1])))
 }

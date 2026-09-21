@@ -150,7 +150,7 @@ func (s *Store) GetResearchBrief(actor identity.ActorID, id ResearchBriefID) (Re
 		return ResearchBrief{}, fmt.Errorf("%w: research brief %s; %s", ErrNotFound, id, s.knownBriefs(actor))
 	}
 	w := s.works[b.WorkID]
-	if actor == "" || actor != w.Owner && actor != w.Assignee {
+	if !w.visibleTo(actor) {
 		return ResearchBrief{}, ErrForbidden
 	}
 	return b.Clone(), nil

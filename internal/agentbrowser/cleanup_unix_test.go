@@ -24,15 +24,15 @@ func TestCleanupOnlySelectsOwnedDescendantGroups(t *testing.T) {
 		{400, 1, 400, "/path/agent-browser"}, // another operation
 		{500, 400, 500, "Chrome"},
 	}
-	groups, err := ownedBrowserGroups(100, rows)
-	if err != nil || !slices.Equal(groups, []int{200, 202}) {
+	groups, found, err := ownedBrowserGroups(100, rows)
+	if err != nil || !found || !slices.Equal(groups, []int{200, 202}) {
 		t.Fatalf("selected unrelated process groups: %v %v", groups, err)
 	}
 	rows[0].command = "/unrelated/program"
-	if _, err := ownedBrowserGroups(100, rows); err == nil {
+	if _, _, err := ownedBrowserGroups(100, rows); err == nil {
 		t.Fatal("accepted reused daemon PID")
 	}
-	if groups, err := ownedBrowserGroups(999, rows); err != nil || len(groups) != 0 {
+	if groups, found, err := ownedBrowserGroups(999, rows); err != nil || found || len(groups) != 0 {
 		t.Fatal("missing daemon has descendants")
 	}
 }

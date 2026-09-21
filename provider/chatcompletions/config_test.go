@@ -11,7 +11,7 @@ func TestConfigurationErrors(t *testing.T) {
 			t.Fatal("accepted", c)
 		}
 	}
-	if got := (&chatcompletions.HTTPError{StatusCode: 503, Body: "unavailable"}).Error(); got != "chatcompletions: HTTP 503: unavailable" {
+	if got := (&chatcompletions.HTTPError{Adapter: "chatcompletions", StatusCode: 503, Body: "unavailable"}).Error(); got != "chatcompletions: HTTP 503: unavailable" {
 		t.Fatal(got)
 	}
 }

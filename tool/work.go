@@ -188,7 +188,7 @@ func CancelWork(handle Handler[work.CancelRequest]) Tool {
 	return Func[work.CancelRequest]{Spec: cancelWorkDefinition, Invoke: handle}
 }
 func ReassignWork(handle Handler[work.ReassignRequest]) Tool {
-	return Func[work.ReassignRequest]{Spec: Definition[work.ReassignRequest]{Bookkeeping: []string{"expected_revision"}, Name: "reassign_work", Description: "Replace the worker on an existing active work item. Supply only work_id, expected_revision, and the required existing assignee. Create a replacement explicitly with create_agent if needed. Uses this work item's revision. Does not create, resume, or stop agents. Old assignment updates are rejected.", Parameters: reassignmentParameters}, Invoke: func(ctx context.Context, c Call, r work.ReassignRequest) (Result, error) { return handle(ctx, c, r) }}
+	return Func[work.ReassignRequest]{Spec: Definition[work.ReassignRequest]{Bookkeeping: []string{"expected_revision"}, Name: "reassign_work", Description: "Replace the worker on an existing active work item. Supply only work_id, expected_revision, and the required existing assignee. Create a replacement explicitly with create_agent if needed. Uses this work item's revision. Does not create, resume, or stop agents. Old assignment updates are rejected.", Parameters: reassignmentParameters}, Invoke: handle}
 }
 
 func ListWork(handle Handler[work.ListQuery]) Tool {

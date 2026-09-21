@@ -75,6 +75,16 @@ func await[T any](t *testing.T, ch <-chan T) T {
 		return zero
 	}
 }
+
+// stateReporter forwards lifecycle transitions, the same facts the controller reads.
+func stateReporter(states chan<- agent.State) agent.Reporter {
+	return agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+		if s, ok := e.(agent.StateSnapshot); ok {
+			states <- s.State
+		}
+		return nil
+	})
+}
 func awaitState(t *testing.T, ch <-chan agent.State, want agent.State) {
 	t.Helper()
 	for {
@@ -118,9 +128,17 @@ func TestToolBatchSettlesBeforeSteeringAndPreservesReplyTarget(t *testing.T) {
 	activities := make(chan agent.ToolActivity, 8)
 	batches := make(chan agent.ToolBatch, 1)
 	drafts := make(chan message.Draft, 1)
-	c.OnConsumed = func(r message.Receipt) { receipts <- r }
-	c.OnTool = func(a agent.ToolActivity) { activities <- a }
-	c.OnToolBatch = func(b agent.ToolBatch) { batches <- b }
+	c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+		switch e := e.(type) {
+		case agent.Consumed:
+			receipts <- e.Receipt
+		case agent.ToolActivity:
+			activities <- e
+		case agent.ToolBatch:
+			batches <- e
+		}
+		return nil
+	})
 	c.Outbox = senderFunc(func(_ context.Context, d message.Draft) (message.Receipt, error) {
 		drafts <- d
 		cancel()
@@ -206,17 +224,23 @@ func TestAgentFailuresAreTerminal(t *testing.T) {
 					return provider.Response{Content: "discard"}, nil
 				})
 			case "stop after consume":
-				c.OnConsumed = func(message.Receipt) { a.RequestStop() }
+				c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+					if _, ok := e.(agent.Consumed); ok {
+						a.RequestStop()
+					}
+					return nil
+				})
 			case "stop before tool":
 				c.Spec.Tools = []tool.Tool{customTool{name: "read"}}
 				c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
 					return provider.Response{ToolCalls: []provider.ToolCall{{ID: "1", Name: "read"}, {ID: "2", Name: "read"}}}, nil
 				})
-				c.OnTool = func(e agent.ToolActivity) {
-					if !e.FinishedAt.IsZero() {
+				c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+					if activity, ok := e.(agent.ToolActivity); ok && !activity.FinishedAt.IsZero() {
 						a.RequestStop()
 					}
-				}
+					return nil
+				})
 			}
 			a = mustAgent(t, c)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -227,10 +251,10 @@ func TestAgentFailuresAreTerminal(t *testing.T) {
 			if !a.State().Terminal() {
 				t.Fatal(a.State())
 			}
-			if _, err := a.Pause(); err == nil {
+			if _, err := a.PauseSnapshot(); err == nil {
 				t.Fatal("paused terminal agent")
 			}
-			if _, err := a.Resume(); err == nil {
+			if _, err := a.ResumeSnapshot(); err == nil {
 				t.Fatal("resumed terminal agent")
 			}
 			if s := a.RequestStop(); !s.Terminal() {
@@ -242,7 +266,7 @@ func TestAgentFailuresAreTerminal(t *testing.T) {
 func TestIdlePauseResumeAndStop(t *testing.T) {
 	c := config()
 	states := make(chan agent.State, 32)
-	c.OnState = func(s agent.State) { states <- s }
+	c.Reporter = stateReporter(states)
 	called := make(chan struct{}, 1)
 	c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
 		called <- struct{}{}
@@ -256,27 +280,27 @@ func TestIdlePauseResumeAndStop(t *testing.T) {
 	if a.State() != agent.Idle {
 		t.Fatal("new agent is not idle", a.State())
 	}
-	if _, err := a.Resume(); err != nil {
+	if _, err := a.ResumeSnapshot(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Pause(); err != nil {
+	if _, err := a.PauseSnapshot(); err != nil {
 		t.Fatal(err)
 	}
 	awaitState(t, states, agent.Paused)
-	if s, err := a.Pause(); err != nil || s != agent.Paused {
+	if s, err := a.PauseSnapshot(); err != nil || s.State != agent.Paused {
 		t.Fatal(s, err)
 	}
 	c.Inbox.Send(message.Message{Kind: message.Instruction, Content: "go"})
-	if _, err := a.Resume(); err != nil {
+	if _, err := a.ResumeSnapshot(); err != nil {
 		t.Fatal(err)
 	}
 	await(t, called)
 	awaitState(t, states, agent.Idle)
 	a.RequestStop()
-	if _, err := a.Pause(); err == nil {
+	if _, err := a.PauseSnapshot(); err == nil {
 		t.Fatal("pause while stopping")
 	}
-	if _, err := a.Resume(); err == nil {
+	if _, err := a.ResumeSnapshot(); err == nil {
 		t.Fatal("resume while stopping")
 	}
 	if err := await(t, done); !errors.Is(err, context.Canceled) {
@@ -286,9 +310,9 @@ func TestIdlePauseResumeAndStop(t *testing.T) {
 func TestPausedAgentCanBeCanceled(t *testing.T) {
 	c := config()
 	states := make(chan agent.State, 16)
-	c.OnState = func(s agent.State) { states <- s }
+	c.Reporter = stateReporter(states)
 	a := mustAgent(t, c)
-	a.Pause()
+	a.PauseSnapshot()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -341,10 +365,12 @@ func TestUnassignedAgentRemainsIdleWithoutRunningTransition(t *testing.T) {
 	c := config()
 	states := make(chan agent.State, 8)
 	started := make(chan struct{}, 1)
-	c.OnState = func(s agent.State) { states <- s }
 	c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
-		if _, ok := e.(agent.HistoryAppended); ok {
+		switch e := e.(type) {
+		case agent.HistoryAppended:
 			started <- struct{}{}
+		case agent.StateSnapshot:
+			states <- e.State
 		}
 		return nil
 	})
@@ -368,7 +394,10 @@ func TestUnassignedAgentRemainsIdleWithoutRunningTransition(t *testing.T) {
 	}
 }
 
-func (t customTool) InputContract() tool.Contract {
+func (t customTool) InputContract() tool.Contract { return emptyContract() }
+
+// emptyContract is the no-parameter contract shared by the test tools.
+func emptyContract() tool.Contract {
 	p, err := tool.NewParameters[struct{}]()
 	if err != nil {
 		panic(err)

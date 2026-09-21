@@ -53,10 +53,6 @@ func (w *Web) search(ctx context.Context, _ Call, args searchArgs) (Result, erro
 	return JSON(WebSearchResult{Query: query, Results: hits[:min(limit, len(hits))]})
 }
 
-func searchResults(source string) ([]SearchHit, error) {
-	return parseSearchResults(strings.NewReader(source))
-}
-
 func parseSearchResults(source io.Reader) ([]SearchHit, error) {
 	doc, err := html.Parse(source)
 	if err != nil {

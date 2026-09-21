@@ -100,6 +100,7 @@ func TestProjectorRejectsMalformedEnvelope(t *testing.T) {
 		t.Fatal("accepted a foreign session")
 	}
 	s.reject("invalid JSON payload", eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{`)})
+	s.reject("unknown kind", eventlog.Data{Kind: "future_required_kind", Payload: valid.Payload})
 
 	// Nothing may follow a terminal record.
 	s.apply(eventlog.Data{Kind: "session_closed", Payload: json.RawMessage(`{"reason":"requested"}`)})

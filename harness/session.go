@@ -210,9 +210,6 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if s.config.Events.JSONLPath != "" && deps.EventStore != nil {
 		return nil, errors.New("configure JSONLPath or EventStore, not both")
 	}
-	if s.config.Events.Retention == (eventlog.Limits{}) {
-		s.config.Events.Retention = DefaultConfig().Events.Retention
-	}
 	if s.config.Events.Queue == (eventlog.Limits{}) {
 		s.config.Events.Queue = DefaultConfig().Events.Queue
 	}
@@ -271,35 +268,33 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	pool := transport.New()
 	s.resources.Add("provider transport", pool)
 	cfg = s.config
-	makeProvider := func(role AgentConfig, injected provider.Provider) (provider.Provider, error) {
-		if injected != nil {
-			return injected, nil
+	injected := func(d AgentDependencies) bool { return d.Provider != nil || deps.Provider != nil }
+	makeProvider := func(role AgentConfig, d AgentDependencies) (provider.Provider, error) {
+		if d.Provider != nil {
+			return d.Provider, nil
 		}
 		if deps.Provider != nil {
 			return deps.Provider, nil
 		}
-		model := cfg.Model
-		if role.Model != nil {
-			model = *role.Model
-		}
+		model := cfg.roleModel(role)
 		if model.Timeout <= 0 {
 			return nil, errors.New("model timeout must be positive")
 		}
 		return model.NewProvider(&http.Client{Transport: pool, Timeout: model.Timeout})
 	}
-	root, err := makeProvider(cfg.Root, deps.Root.Provider)
+	root, err := makeProvider(cfg.Root, deps.Root)
 	if err != nil {
 		return nil, err
 	}
-	implementor, err := makeProvider(cfg.Implementor, deps.Implementor.Provider)
+	implementor, err := makeProvider(cfg.Implementor, deps.Implementor)
 	if err != nil {
 		return nil, err
 	}
-	auditor, err := makeProvider(cfg.Auditor, deps.Auditor.Provider)
+	auditor, err := makeProvider(cfg.Auditor, deps.Auditor)
 	if err != nil {
 		return nil, err
 	}
-	researcher, err := makeProvider(cfg.Researcher, deps.Researcher.Provider)
+	researcher, err := makeProvider(cfg.Researcher, deps.Researcher)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +377,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)},
 		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
-		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.readProgressTool), tool.GetResearchBrief(s.readBriefTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}))
+		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.progressReadTool(false)), tool.GetResearchBrief(s.progressReadTool(true))}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}))
 	rootTools := s.workflow.RootTools()
 	for i, t := range rootTools {
 		if t.Definition().Name == "wait_for_input" {
@@ -407,7 +402,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
+	s.effective = EffectiveConfig{LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg.roleModel(cfg.Root), rootSpec, injected(deps.Root)), Implementor: describeRole(cfg.roleModel(cfg.Implementor), implSpec, injected(deps.Implementor)), Auditor: describeRole(cfg.roleModel(cfg.Auditor), auditSpec, injected(deps.Auditor)), Researcher: describeRole(cfg.roleModel(cfg.Researcher), s.workflow.ResearcherSpec(), injected(deps.Researcher))}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err
@@ -524,7 +519,6 @@ func (s *Session) rootMayWait(ctx context.Context, c tool.Call) error {
 	return errors.New("wait_for_input rejected: you own no active delegated work, so no worker result can arrive. If the task is finished, send the final reply as a text-only response now; if work remains, assign it first")
 }
 
-func localTools(dir string) ([]tool.Tool, error) { return localToolsWithChanges(dir, nil, nil) }
 func localToolsWithChanges(dir string, changed func(string), afterRun func()) ([]tool.Tool, error) {
 	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir, AfterRun: afterRun})
 	if err != nil {
@@ -561,27 +555,16 @@ func cloneConfig(c Config) Config {
 	}
 	return c
 }
-func copyPtr[T any](p *T) *T {
-	if p == nil {
-		return nil
-	}
-	v := *p
-	return &v
-}
 func cloneModel(m ModelConfig) ModelConfig {
-	g := &m.Generation
-	g.Temperature = copyPtr(g.Temperature)
-	g.TopP = copyPtr(g.TopP)
-	g.TopK = copyPtr(g.TopK)
-	g.MinP = copyPtr(g.MinP)
-	g.PresencePenalty = copyPtr(g.PresencePenalty)
-	g.RepetitionPenalty = copyPtr(g.RepetitionPenalty)
-	g.MaxTokens = copyPtr(g.MaxTokens)
-	g.EnableThinking = copyPtr(g.EnableThinking)
-	g.ReasoningEffort = copyPtr(g.ReasoningEffort)
-	g.ForceNonemptyContent = copyPtr(g.ForceNonemptyContent)
+	m.Generation = m.Generation.Clone()
 	return m
 }
 
 // Clone returns an independent configuration for host assembly/adapters.
 func (c Config) Clone() Config { return cloneConfig(c) }
+func (c Config) roleModel(r AgentConfig) ModelConfig {
+	if r.Model != nil {
+		return *r.Model
+	}
+	return c.Model
+}

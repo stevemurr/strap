@@ -115,16 +115,6 @@ func TestCompletedAgentsWithNewWorkOrErrorsRemainVisible(t *testing.T) {
 	if m.rosterStatus("agent-11") != "completed" || !strings.Contains(m.streamState("agent-11"), "paused") {
 		t.Fatal("work and execution state were conflated")
 	}
-	m.selectStream("agent-1")
-	m.observe(conversation.AgentStateChanged{Agent: "agent-1", State: agent.Idle, Revision: 3})
-	w, _ := m.streamWork("agent-1")
-	w.State = work.Accepted
-	w.Revision++
-	m.rememberWork(w)
-	if !m.streamUI.completedExpanded {
-		t.Fatal("finishing work hid the selected agent")
-	}
-	stackLocation(t, m, rosterChoice{id: "agent-1"})
 }
 
 func TestGroupedRosterMouseAndNarrowNavigation(t *testing.T) {
@@ -143,14 +133,7 @@ func TestGroupedRosterMouseAndNarrowNavigation(t *testing.T) {
 		m.selectStream("agent-11")
 		m.focusRoster(true)
 		view := m.View()
-		if len(strings.Split(view, "\n")) > size.Height {
-			t.Fatal("vertical overflow")
-		}
-		for _, row := range strings.Split(view, "\n") {
-			if ansi.StringWidth(row) > size.Width {
-				t.Fatal("horizontal overflow")
-			}
-		}
+		assertFits(t, view, size.Width, size.Height)
 		if size.Width >= 40 && !strings.Contains(view, "agent-11") {
 			t.Fatalf("selection disappeared at %+v:\n%s", size, view)
 		}

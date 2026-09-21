@@ -23,7 +23,7 @@ func activitySetup(t *testing.T) *model {
 	m.selectStream("root")
 	for i := 1; i <= 3; i++ {
 		progress(m, "root", fmt.Sprintf("update %d", i))
-		m.addAttributed("Tool", "root", "Read file", false, "root")
+		addTool(m, "root", "Read file")
 	}
 	return m
 }
@@ -85,16 +85,12 @@ func TestIndividualToolCallsPreserveOrderAndWrap(t *testing.T) {
 		{"worker", "Read file"}, {"root", "Shell"}, {"worker", "Read file"},
 		{"root", "A long custom tool name " + strings.Repeat("extended ", 12) + "visible ending"},
 	} {
-		m.addAttributed("Tool", string(call.actor), call.body, false, call.actor)
+		addTool(m, call.actor, call.body)
 	}
 	view := ansi.Strip(m.viewport.View())
 	first, middle, last := strings.Index(view, agentGlyph("worker")+" Read file"), strings.Index(view, agentGlyph("root")+" Shell"), strings.LastIndex(view, agentGlyph("worker")+" Read file")
 	if first < 0 || middle <= first || last <= middle || !strings.Contains(view, "visible ending") {
 		t.Fatalf("tool calls merged, reordered or truncated: %s", view)
 	}
-	for _, row := range strings.Split(view, "\n") {
-		if ansi.StringWidth(row) > m.viewport.Width {
-			t.Fatal("wrapped tool overflowed viewport")
-		}
-	}
+	assertFits(t, view, m.viewport.Width, 0)
 }

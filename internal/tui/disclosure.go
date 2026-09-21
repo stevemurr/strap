@@ -47,4 +47,3 @@ func (m *model) toggleActivity(selector string) error {
 	m.renderTranscript(false)
 	return nil
 }
-func activitySelector(id identity.OutputID) string { return fmt.Sprintf("%s/%d", id.Agent, id.Call) }
