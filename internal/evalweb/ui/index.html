@@ -12,9 +12,10 @@
     <div class="side-head">
       <h1>strap eval</h1>
       <div class="root" id="root" title=""></div>
-      <input id="filter" type="search" placeholder="Filter runs" autocomplete="off">
+      <a class="button" href="#/">Evaluations</a>
+      <a class="button quiet" href="#/archive">Archive</a>
       <div class="side-actions">
-        <a id="launch" class="button" href="#/launch" hidden>Run evals</a>
+        <a id="launch" class="button" href="#/launch" hidden>New eval</a>
         <button id="compare-btn" class="button" hidden>Compare 0 runs</button>
         <button id="refresh" class="button quiet" title="Rescan the results directory">Rescan</button>
       </div>
@@ -24,6 +25,7 @@
   </aside>
   <main id="main" class="main"></main>
 </div>
+<script src="format.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

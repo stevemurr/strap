@@ -35,11 +35,91 @@ exit; read each `results/<problem-id>/result.json` for the outcome. Interrupting
 launcher stops its active container and keeps artifacts. `scripts/eval.sh --help`
 lists all options. No model requests are made by `--list`.
 
+## Run from the web page
+
+```sh
+strap eval web -profile qwen3.6
+# Reuse an image built from the same source revision:
+strap eval web -profile qwen3.6 -no-build
+```
+
+Starting a batch from the page requires Apple's `container` CLI on the host.
+The web runner builds `strap-eval` once per batch with caching, then launches a
+separate agent and grader container for each problem. It has no host execution
+fallback. `-image NAME` selects another image; `-build-context DIR` selects the
+repository to build (by default, the repository containing `-ladder`). Rebuild
+the image after updating Strap so the host and container agree on configuration
+and progress formats. Viewing existing results does not require the runtime.
+
+Each batch snapshots the resolved model and role settings, generation parameters,
+LSP configuration, public problems, and private grading fixtures. The agent reads
+its configuration from a read-only `/config` mount and always works in
+`/workspace`; host workspace paths do not override that directory. Model endpoints
+must be reachable from inside the container. Custom language-server commands must
+also be installed in the image. Strict tool schemas follow the same provider path
+as ordinary Strap requests.
+
+The grader receives only the outbox, results, and private grading fixtures, uses a
+fresh workspace, and has networking disabled. Live progress and tool failures are
+streamed back to the page. Batch `build.log` and per-attempt `agent.log`,
+`progress.jsonl`, and `grader.log` retain diagnostics. Cancelling a job stops only
+its own eval container and retains the attempt's files.
+
+## Manage evaluations
+
+The web page opens a run library in the main pane. Batches appear once, with a
+readable name, date started, model and generation settings, branch, commit, and
+result counts. Select runs for comparison, rename them without moving their
+folders, or archive and restore them. Filters include branch, commit, model,
+thinking mode, a local-date range, and free-text configuration search. Sort by
+start date, name, or pass rate. Commit choices are ordered by their most recent
+recorded run; “latest recorded branch/commit” means recency in this library,
+not Git ancestry.
+
+Attempts without readable result records (`results.jsonl`) or final artifacts
+are automatically shown in Archive. Valid `result.json`/`report.json`, published
+submissions, and final-source directories also retain an attempt. Partial batches
+with results remain visible. Active jobs are never auto-archived. Archiving is a
+reversible library classification: it never deletes or moves run files. A manual
+restore keeps an incomplete attempt visible. Historical branch information is
+shown only when recorded; a commit hash does not establish the branch that
+originally launched an eval.
+
+**New eval** opens a setup page for selecting problems and configuring the model,
+endpoint, backend, timeout, thinking mode, temperature, top-p/top-k/min-p,
+penalties, reasoning effort, and output token limit. Blank generation fields use
+server defaults; explicit zero and false are preserved. Generation settings
+require the vLLM backend. The form can apply the selected model to every agent or
+retain existing role overrides. Changes belong to that eval and do not mutate the
+web server's defaults or other jobs.
+
+New batches save `eval-run.json` with the display name, start time, source commit
+and branch, resolved model and role settings, and lifecycle status. The full
+container configuration remains in `config/run.json`. Names and manual archive
+overrides live in `.eval-library.json`; folder names are storage identifiers.
+The branch is captured from the build source, or from a matching checkout when
+reusing an image. After a web server restart, abandoned running records are
+classified as interrupted rather than treated as live jobs.
+
+On the live eval page, select a problem row to see its progress tree. Agent nodes
+expand independently, and rows devote their space to time, action, and output.
+Commentary, messages, and tool output render Markdown and fenced code using DOM
+nodes; raw model HTML is displayed as text. The original trace remains the full
+record of the attempt.
+
+Browser regression checks use fixture APIs and make no model or container calls:
+
+```sh
+npm install --prefix /tmp/strap-ui-check playwright
+/tmp/strap-ui-check/node_modules/.bin/playwright install chromium
+NODE_PATH=/tmp/strap-ui-check/node_modules node scripts/test-eval-web.cjs
+```
+
 ## Mount contract
 
 | Path | Agent container | Grader container |
 | --- | --- | --- |
-| `/problems` | Public task metadata and starter files, included in the image | Unused |
+| `/problems` | Public task metadata and starter files, included in the image or mounted read-only by the web runner | Unused |
 | `/workspace` | Empty working directory; all agent tools and language servers use it | Fresh working directory for a copy of the submission plus hidden tests |
 | `/results` | Writable mounted traces, run metadata, results and reports | Same results mount, writable for grade and reports |
 | `/outbox` | Empty writable mount; publishes `submission/` when ready | Same outbox mount, **read-only** |

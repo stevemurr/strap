@@ -12,28 +12,14 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/stevemurr/strap/harness"
 )
 
-// A model that replies "Finished." without tool calls submits an unchanged
-// stub, so the hidden tests fail and the job still exercises every phase:
+// A fake container runtime submits and grades a failed attempt while exercising:
 // start, run, submit, grade, report, index.
 func TestJobRunsGradesAndStreamsProgress(t *testing.T) {
-	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Finished."},"finish_reason":"stop"}]}`)
-	}))
-	defer model.Close()
-	ladder, err := filepath.Abs("../../eval/ladder")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := harness.DefaultConfig()
-	cfg.Model = harness.ModelConfig{Backend: "chatcompletions", Model: "test", BaseURL: model.URL, Timeout: time.Minute}
-	cfg.Web, cfg.LSP = nil, nil
+	runner, _ := fakeContainer(t, "")
 	root := t.TempDir()
-	srv, err := New(root, &Runner{Config: cfg, Ladder: ladder, Profile: "test", Commit: "abc1234", Quiet: time.Millisecond, Idle: time.Minute})
+	srv, err := New(root, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +110,11 @@ func TestJobRunsGradesAndStreamsProgress(t *testing.T) {
 		switch {
 		case runs.Runs[i].Batch:
 			batch = &runs.Runs[i]
-		case runs.Runs[i].Group == snap.Name:
+		case runs.Runs[i].Group == snap.Dir:
 			member = &runs.Runs[i]
 		}
 	}
-	if len(runs.Runs) != 2 || member == nil || member.Name != "easy-01-budget-pair" || member.Failed != 1 || batch == nil || batch.Path != snap.Name || batch.Members != 1 {
+	if len(runs.Runs) != 2 || member == nil || member.Name != "easy-01-budget-pair" || member.Failed != 1 || batch == nil || batch.Path != snap.Dir || batch.Members != 1 {
 		t.Fatalf("%+v", runs.Runs)
 	}
 	// Replaying from the last id yields nothing new but still ends.
