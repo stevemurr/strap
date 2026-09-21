@@ -1,4 +1,4 @@
-package main
+package evalcmd
 
 import (
 	"context"
@@ -18,9 +18,9 @@ import (
 )
 
 const interactionUsage = `usage:
-  strap-eval interaction list
-  strap-eval interaction run [-mode scripted|live] [-scenario ID,...] [-repeat N] [-out DIR] [-max-calls N] [-max-tool-calls N] [-timeout DURATION] [model flags]
-  strap-eval interaction report RUN_DIR
+  strap eval interaction list
+  strap eval interaction run [-mode scripted|live] [-scenario ID,...] [-repeat N] [-out DIR] [-max-calls N] [-max-tool-calls N] [-timeout DURATION] [model flags]
+  strap eval interaction report RUN_DIR
 
 scripted is the default and needs no model, catalog, or network connection.
 live runs one model actor with controlled collaborators, sequentially.
@@ -38,7 +38,7 @@ func interactionCmd(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	switch args[0] {
 	case "list":
-		fs := flag.NewFlagSet("strap-eval interaction list", flag.ContinueOnError)
+		fs := flag.NewFlagSet("strap eval interaction list", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -64,7 +64,7 @@ func interactionCmd(ctx context.Context, args []string, stdout, stderr io.Writer
 }
 
 func interactionOptions(args []string, stderr io.Writer) (interaction.Options, error) {
-	fs := flag.NewFlagSet("strap-eval interaction run", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval interaction run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	mode := fs.String("mode", string(interaction.Scripted), "Execution mode: scripted or live")
 	scenarios := fs.String("scenario", "", "Only run these comma-separated scenario ids (default all)")
@@ -150,7 +150,7 @@ func interactionRunCmd(ctx context.Context, args []string, stdout, stderr io.Wri
 }
 
 func interactionReportCmd(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("strap-eval interaction report", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval interaction report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return err

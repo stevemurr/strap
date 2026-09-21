@@ -35,9 +35,7 @@ jobs:
           set -eux
           name="strap_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
           mkdir -p "dist/$name"
-          for cmd in strap strap-eval; do
-            go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/$name/$cmd" "./cmd/$cmd"
-          done
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/$name/strap" ./cmd/strap
           cp README.md LICENSE "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           ( cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256" )

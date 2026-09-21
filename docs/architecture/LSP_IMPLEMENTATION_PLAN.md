@@ -224,7 +224,7 @@ milestone 7 is required before presenting the interface as stable.
 | [tool/files.go](../../tool/files.go) | Add a lightweight post-mutation notification without awaiting analysis under the file lock. |
 | [tool/shell.go](../../tool/shell.go) | Notify workspace uncertainty after every started shell call completes, including failure/cancellation that may have modified files. |
 | [cmd/strap/options.go](../../cmd/strap/options.go) | Add `-lsp` and `-lsp-config`, independent of model catalog selection. |
-| [cmd/strap-eval](../../cmd/strap-eval) | Apply the same LSP config loading to relevant runs; record versions and cold/warm setup in evaluation output. |
+| [internal/evalcmd](../../internal/evalcmd) | Apply the same LSP config loading to relevant runs; record versions and cold/warm setup in evaluation output. |
 | [harness/prompts.go](../../harness/prompts.go) | Explain when semantic queries help, how to reuse references, how to interpret freshness, and when to use text search. |
 | [internal/tui/tool_output.go](../../internal/tui/tool_output.go) | Render semantic locations/excerpts and distinguish pending or partial diagnostics; preserve raw-result fallback. |
 

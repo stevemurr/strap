@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/stevemurr/strap/main/install.sh | s
 ```
 
 That fetches the latest release for this machine (linux/amd64, macOS arm64 or
-amd64) and installs `strap` and `strap-eval` into the first writable of
+amd64) and installs `strap` into the first writable of
 `~/.local/bin` or `/usr/local/bin`. `STRAP_VERSION=v1.2.3` pins a tag and
 `STRAP_BIN=/somewhere/bin` chooses the directory. With a Go toolchain,
 `go install github.com/stevemurr/strap/cmd/strap@latest` does the same job.
@@ -126,7 +126,7 @@ reasoning limit cuts off a call that reasons past 192 KB regardless.
 Use `-reasoning-effort low`, `medium`, or `xhigh` to override the profile's effort;
 the value is sent inside `chat_template_kwargs`. Configure the server with
 `--reasoning-parser qwen3` to return reasoning separately from answer content.
-Both `strap` and `strap-eval` accept these profiles and generation overrides:
+Both `strap` and `strap eval` accept these profiles and generation overrides:
 
 ```sh
 go run ./cmd/strap -profile qwen3.8-flash-next-nothink
@@ -218,7 +218,7 @@ plan is focused, the Next plan control, or `/plan [plan-id]` to select another
 plan. Completed plans remain available, including after `/clear`; this is view
 state, not a new persistence or execution mechanism. Short terminals reduce the
 dock to a summary so the composer and conversation remain usable.
-`strap-eval` uses the same dock per problem, with Ctrl+P (or `p`) and F8 controls.
+`strap eval` uses the same dock per problem, with Ctrl+P (or `p`) and F8 controls.
 
 Each stream remembers its own scroll position. Output arriving above the text you
 are reading preserves the current message anchor. Unread counts track changed
@@ -242,7 +242,7 @@ progress messages, including when agents interleave. `/activity agent-id/respons
 toggles only that response's tool results. Routine delivery receipts are tracked
 internally rather than printed as messages.
 
-The `strap-eval` activity pane uses this same renderer, output folding, static
+The `strap eval` activity pane uses this same renderer, output folding, static
 agent icons, and hover details. Its navigation remains read only.
 
 Conversation messages render Markdown with headings, emphasis, lists, links,

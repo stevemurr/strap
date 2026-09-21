@@ -23,6 +23,10 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	o.config.Model = harness.ModelConfig{Backend: "vllm", Timeout: o.config.Model.Timeout}
 	flags := flag.NewFlagSet("strap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	flags.Usage = func() {
+		fmt.Fprint(stderr, "usage:\n  strap [flags]\n  strap eval <command> [options]  (see strap eval -help)\n\nflags:\n")
+		flags.PrintDefaults()
+	}
 	languageFlags := lspconfig.Flags(flags)
 	configPath := flags.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
 	profile := flags.String("profile", "", "Saved model profile (default selected by the catalog)")

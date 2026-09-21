@@ -1,6 +1,6 @@
 # Container coding evaluations
 
-Each `strap-eval` agent container solves one problem at `/workspace` and publishes
+Each `strap eval` agent container solves one problem at `/workspace` and publishes
 its completed files to an outbox. A separate grader container consumes that
 snapshot and runs hidden tests. The agent never receives the private ladder.
 
@@ -145,11 +145,11 @@ implement distributed claims or concurrent result writers.
 
 ## Commands and progress
 
-- `strap-eval -problem ID -q` runs and submits one solution, printing a short summary.
-- `strap-eval grade -q` grades a ready submission and writes updated reports.
-- `strap-eval report` rebuilds reports from the `/results` mount.
-- `strap-eval list [-tier easy,medium,hard] [-task ID,...]` lists public problems.
-- `strap-eval selfcheck [-tier ...] [-task ...] [-parallel N]` checks private fixtures;
+- `strap eval -problem ID -q` runs and submits one solution, printing a short summary.
+- `strap eval grade -q` grades a ready submission and writes updated reports.
+- `strap eval report` rebuilds reports from the `/results` mount.
+- `strap eval list [-tier easy,medium,hard] [-task ID,...]` lists public problems.
+- `strap eval selfcheck [-tier ...] [-task ...] [-parallel N]` checks private fixtures;
   mount the full ladder at `/grading`. This utility runs no agent.
 
 `-ui auto` chooses the read-only progress TUI for terminals, otherwise plain logs.
@@ -166,7 +166,7 @@ session budgets are unchanged (15/25/40 minutes by tier unless overridden).
 ## Validation
 
 ```sh
-go test ./eval ./cmd/strap-eval ./internal/tui
+go test ./eval ./internal/evalcmd ./internal/tui
 container build -f eval/Dockerfile --target smoke -t strap-eval-smoke .
 ```
 
@@ -204,7 +204,7 @@ Conventions:
   fails deterministically instead of hanging the binary. Randomized tests use a
   fixed seed and compare against a brute-force oracle in the test file.
 - Standard library only; `go 1.24` in `go.mod`.
-- `strap-eval selfcheck` must pass: every hidden suite fails on the stub and
+- `strap eval selfcheck` must pass: every hidden suite fails on the stub and
   passes on the reference.
 
 The ladder directory holds its own `go.mod` marker so the fixture modules stay

@@ -82,16 +82,16 @@ so its first model request includes the complete fixture and final stimulus.
 Scripted trials require no model catalog or network connection:
 
 ```sh
-go run ./cmd/strap-eval interaction list
-go run ./cmd/strap-eval interaction run -out /tmp/strap-interaction-scripted
-go run ./cmd/strap-eval interaction report /tmp/strap-interaction-scripted
+go run ./cmd/strap eval interaction list
+go run ./cmd/strap eval interaction run -out /tmp/strap-interaction-scripted
+go run ./cmd/strap eval interaction report /tmp/strap-interaction-scripted
 ```
 
 Use `-mode live -profile PROFILE` to evaluate one real model actor against
 controlled collaborators. For example:
 
 ```sh
-go run ./cmd/strap-eval interaction run -mode live -profile PROFILE \
+go run ./cmd/strap eval interaction run -mode live -profile PROFILE \
   -scenario audit-independent,audit-stale-revision -repeat 5 \
   -out /tmp/strap-interaction-live
 ```
@@ -99,14 +99,14 @@ go run ./cmd/strap-eval interaction run -mode live -profile PROFILE \
 To isolate concurrent revision recovery against a live model:
 
 ```sh
-go run ./cmd/strap-eval interaction run -mode live -profile PROFILE \
+go run ./cmd/strap eval interaction run -mode live -profile PROFILE \
   -scenario audit-revision-race -repeat 5 -out /tmp/strap-interaction-race
 ```
 
 To run only the eight schema regressions:
 
 ```sh
-go run ./cmd/strap-eval interaction run \
+go run ./cmd/strap eval interaction run \
   -scenario schema-audit-repair-field,schema-audit-required,schema-audit-kind,schema-audit-null-extra,schema-removed-assignment-tool,schema-audit-fail-findings,schema-audit-pass-findings,schema-progress-objective \
   -out /tmp/strap-schema-scripted
 ```

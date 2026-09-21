@@ -1,6 +1,7 @@
-// Strap-eval runs one coding problem per container and publishes its workspace
-// to an outbox. A separate grade command consumes submissions with hidden tests.
-package main
+// Package evalcmd implements the strap eval command group. It runs one coding
+// problem per container and publishes its workspace to an outbox; a separate
+// grade command consumes submissions with hidden tests.
+package evalcmd
 
 import (
 	"context"
@@ -9,11 +10,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/stevemurr/strap/eval"
@@ -25,13 +24,13 @@ import (
 )
 
 const usage = `usage:
-  strap-eval -problem ID [-q] [model flags]
-  strap-eval run -problem ID [-ui auto|tui|plain|quiet] [-q] [model flags]
-  strap-eval selfcheck [-tier easy,medium,hard] [-task ID,...] [-parallel N]
-  strap-eval list [-tier easy,medium,hard] [-task ID,...]
-  strap-eval grade [-q]
-  strap-eval report
-  strap-eval interaction list|run|report [options]
+  strap eval -problem ID [-q] [model flags]
+  strap eval run -problem ID [-ui auto|tui|plain|quiet] [-q] [model flags]
+  strap eval selfcheck [-tier easy,medium,hard] [-task ID,...] [-parallel N]
+  strap eval list [-tier easy,medium,hard] [-task ID,...]
+  strap eval grade [-q]
+  strap eval report
+  strap eval interaction list|run|report [options]
 
 Run one coding problem per container. Public fixtures live at /problems.
 Use an empty /workspace, and mount empty directories at /results and /outbox.
@@ -44,29 +43,9 @@ selfcheck proves hidden tests fail on the stub and pass on the reference.
 interaction is the separate bounded coordination suite; use interaction -help.
 `
 
-// version is stamped by the release build; a source build reports "dev" so a
-// bug report can say which binary produced it.
-var version = "dev"
-
-func main() {
-	for _, a := range os.Args[1:] {
-		if a == "-version" || a == "--version" {
-			fmt.Println("strap-eval " + version)
-			return
-		}
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			os.Exit(2)
-		}
-		fmt.Fprintln(os.Stderr, "strap-eval:", err)
-		os.Exit(1)
-	}
-}
-
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+// Main dispatches the eval command group. It returns flag.ErrHelp after
+// printing usage when no command is given.
+func Main(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return flag.ErrHelp
@@ -168,7 +147,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 }
 
 func runMounted(ctx context.Context, args []string, stdout, stderr io.Writer, mounts eval.Mounts) error {
-	fs := flag.NewFlagSet("strap-eval run", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	problem := fs.String("problem", "", "Problem ID (one per container)")
 	ui := fs.String("ui", "auto", "Progress display: auto, tui, plain, or quiet")
@@ -270,7 +249,7 @@ func useTUI(mode string, input io.Reader, output io.Writer) (bool, error) {
 }
 
 func selfcheckCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("strap-eval selfcheck", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval selfcheck", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var sel selection
 	sel.flags(fs)
@@ -313,7 +292,7 @@ func selfcheckCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 }
 
 func listCmd(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("strap-eval list", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var sel selection
 	sel.flags(fs)
@@ -331,7 +310,7 @@ func listCmd(args []string, stdout, stderr io.Writer) error {
 }
 
 func reportCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("strap-eval report", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -352,7 +331,7 @@ func reportCmd(ctx context.Context, args []string, stdout, stderr io.Writer) err
 
 // gradeCmd does not initialize a model or launch an agent.
 func gradeCmd(ctx context.Context, args []string, stdout, stderr io.Writer, mounts eval.Mounts) error {
-	fs := flag.NewFlagSet("strap-eval grade", flag.ContinueOnError)
+	fs := flag.NewFlagSet("strap eval grade", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	quiet := fs.Bool("q", false, "Suppress progress logs")
 	if err := fs.Parse(args); err != nil {

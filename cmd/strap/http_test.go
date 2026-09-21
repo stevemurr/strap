@@ -118,7 +118,7 @@ func TestRunHTTPServesUntilCancelled(t *testing.T) {
 // The CLI routes -listen into HTTP mode, carrying the token requirement with it.
 func TestRunDispatchesListenToHTTPMode(t *testing.T) {
 	t.Setenv("STRAP_API_TOKEN", "")
-	err := run(context.Background(), []string{"-listen", "127.0.0.1:0", "-C", t.TempDir()}, io.Discard)
+	err := run(context.Background(), []string{"-listen", "127.0.0.1:0", "-C", t.TempDir()}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "STRAP_API_TOKEN") {
 		t.Fatal("the -listen flag did not enter HTTP mode", err)
 	}

@@ -21,7 +21,7 @@ rename inside the same mount so readers see either no submission or a complete
 one. A snapshot failure or interrupted run publishes nothing. Normal session
 budget exhaustion and idle completion can submit partial work with their flags.
 
-A separate `strap-eval grade` process runs in a fresh container. It receives the
+A separate `strap eval grade` process runs in a fresh container. It receives the
 outbox read-only, the matching results mount, and the private ladder read-only
 at `/grading`. It copies the submission into its own empty `/workspace`, adds
 hidden tests, and executes them with the container's Go toolchain. It updates

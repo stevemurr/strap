@@ -1,4 +1,4 @@
-package main
+package evalcmd
 
 import (
 	"bytes"
@@ -30,7 +30,7 @@ func TestTierSelection(t *testing.T) {
 	}
 	for _, tier := range []string{"eazy", "easy,", "easy,,hard", ",", " "} {
 		for _, command := range []string{"list", "selfcheck"} {
-			err := run(context.Background(), []string{command, "-tier", tier}, io.Discard, io.Discard)
+			err := Main(context.Background(), []string{command, "-tier", tier}, io.Discard, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), "invalid tier") {
 				t.Fatalf("%s %q: %v", command, tier, err)
 			}
@@ -54,13 +54,13 @@ func TestNonTerminalDisplay(t *testing.T) {
 
 func TestContainerCLIRejectsLegacyWorkflow(t *testing.T) {
 	for _, flag := range []string{"-out", "-scratch", "-parallel", "-ladder", "-task", "-tier"} {
-		err := run(context.Background(), []string{"run", flag, "value"}, io.Discard, io.Discard)
+		err := Main(context.Background(), []string{"run", flag, "value"}, io.Discard, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
 			t.Fatalf("%s: %v", flag, err)
 		}
 	}
 	for _, args := range [][]string{{"run"}, {"-q"}, {"run", "-problem", ""}} {
-		if err := run(context.Background(), args, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "-problem is required") {
+		if err := Main(context.Background(), args, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "-problem is required") {
 			t.Fatal(args, err)
 		}
 	}
@@ -71,7 +71,7 @@ func TestQuietRunReturnsErrors(t *testing.T) {
 		var out, stderr bytes.Buffer
 		args = append([]string{"run"}, args...)
 		args = append(args, "-problem", "easy-01-budget-pair", "-config", filepath.Join(t.TempDir(), "missing.json"))
-		err := run(context.Background(), args, &out, &stderr)
+		err := Main(context.Background(), args, &out, &stderr)
 		if err == nil || !strings.Contains(err.Error(), "missing.json") {
 			t.Fatalf("quiet run lost configuration error: %v", err)
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"path/filepath"
 	"strings"
@@ -12,13 +13,28 @@ import (
 
 func TestHelpDoesNotOpenTerminalOrModel(t *testing.T) {
 	var out bytes.Buffer
-	if err := run(context.Background(), []string{"-help"}, &out); err != nil {
+	if err := run(context.Background(), []string{"-help"}, io.Discard, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"-base-url", "-model", "-timeout", "-C", "-backend", "-temperature", "-thinking", "-web", "-wkrender", "-agent-browser", "-browser-executable"} {
+	for _, flag := range []string{"strap eval", "-base-url", "-model", "-timeout", "-C", "-backend", "-temperature", "-thinking", "-web", "-wkrender", "-agent-browser", "-browser-executable"} {
 		if !strings.Contains(out.String(), flag) {
 			t.Fatal(out.String())
 		}
+	}
+}
+
+// The eval command group is dispatched before conversation options are parsed,
+// so its usage answers without a working directory or model.
+func TestEvalSubcommandDispatchesToEvalCommandGroup(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"eval"}, &stdout, &stderr); !errors.Is(err, flag.ErrHelp) {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "strap eval run -problem") {
+		t.Fatal(stderr.String())
+	}
+	if err := run(context.Background(), []string{"eval", "help"}, &stdout, io.Discard); err != nil || !strings.Contains(stdout.String(), "strap eval grade") {
+		t.Fatal(stdout.String(), err)
 	}
 }
 

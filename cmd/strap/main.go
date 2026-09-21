@@ -1,4 +1,5 @@
 // Strap opens an interactive terminal conversation with a local model server.
+// The eval subcommand runs the container coding evaluations.
 package main
 
 import (
@@ -13,10 +14,14 @@ import (
 	"time"
 
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/internal/evalcmd"
 	"github.com/stevemurr/strap/internal/tui"
 )
 
-func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
+	if len(args) > 0 && args[0] == "eval" {
+		return evalcmd.Main(ctx, args[1:], stdout, stderr)
+	}
 	opts, err := parseOptions(args, stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return nil
@@ -53,7 +58,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stderr); err != nil {
+	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(2)
+		}
 		fmt.Fprintln(os.Stderr, "strap:", err)
 		os.Exit(1)
 	}

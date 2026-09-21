@@ -22,7 +22,7 @@ rustup component add rust-analyzer rust-src
 go run ./cmd/strap -C /path/to/project
 ```
 
-The same flags work with `strap-eval run` and `strap-eval interaction run`.
+The same flags work with `strap eval run` and `strap eval interaction run`.
 Servers start on the first semantic query; `lsp_status` does not launch anything.
 A missing executable fails that query without disabling file or shell tools.
 `-lsp=false` disables the feature and overrides a supplied config file.

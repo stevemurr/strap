@@ -1,4 +1,4 @@
-package main
+package evalcmd
 
 import (
 	"bytes"

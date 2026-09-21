@@ -5,7 +5,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /build/strap-eval ./cmd/strap-eval \
+RUN CGO_ENABLED=0 go build -o /build/strap ./cmd/strap \
     && CGO_ENABLED=0 go test -c -o /build/eval.test ./eval
 RUN GOBIN=/build go install golang.org/x/tools/gopls@v0.20.0
 RUN mkdir /public && for tier in easy medium hard; do \
@@ -20,11 +20,11 @@ RUN mkdir /public && for tier in easy medium hard; do \
 FROM golang:${GO_VERSION}-bookworm AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ripgrep poppler-utils \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /build/strap-eval /build/gopls /usr/local/bin/
+COPY --from=build /build/strap /build/gopls /usr/local/bin/
 COPY --from=build /public /problems
 RUN mkdir /workspace /results /outbox
 WORKDIR /workspace
-ENTRYPOINT ["strap-eval"]
+ENTRYPOINT ["strap", "eval"]
 
 # A deterministic end-to-end check at the actual container paths, with no model server.
 FROM runtime AS smoke

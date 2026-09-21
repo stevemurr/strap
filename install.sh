@@ -48,11 +48,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 echo "strap: downloading $version for $os/$arch"
 curl -fsSL "$url" | tar -xz -C "$tmp"
-for cmd in strap strap-eval; do
-  [ -f "$tmp/$name/$cmd" ] || continue
-  install -m 0755 "$tmp/$name/$cmd" "$bindir/$cmd"
-  echo "strap: installed $bindir/$cmd"
-done
+install -m 0755 "$tmp/$name/strap" "$bindir/strap"
+echo "strap: installed $bindir/strap"
 
 case ":$PATH:" in
   *":$bindir:"*) ;;

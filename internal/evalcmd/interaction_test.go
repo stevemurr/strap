@@ -1,4 +1,4 @@
-package main
+package evalcmd
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 
 func TestInteractionList(t *testing.T) {
 	var out bytes.Buffer
-	if err := run(context.Background(), []string{"interaction", "list"}, &out, io.Discard); err != nil {
+	if err := Main(context.Background(), []string{"interaction", "list"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	for _, scenario := range interaction.List() {
@@ -25,7 +25,7 @@ func TestInteractionList(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"interaction", "unknown"}, {"interaction", "list", "extra"}, {"interaction", "report"}, {"interaction", "run", "extra"}, {"interaction", "run", "-mode", "unknown"}} {
-		if err := run(context.Background(), args, io.Discard, io.Discard); err == nil {
+		if err := Main(context.Background(), args, io.Discard, io.Discard); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
 	}
@@ -74,7 +74,7 @@ func TestInteractionScriptedRunAndReport(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "run")
 	var out bytes.Buffer
 	args := []string{"interaction", "run", "-scenario", "audit-independent,audit-wrong-assignee", "-repeat", "2", "-out", dir, "-config", filepath.Join(t.TempDir(), "missing.json")}
-	if err := run(context.Background(), args, &out, io.Discard); err != nil {
+	if err := Main(context.Background(), args, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "4/4 interaction trials passed (mode=scripted)") || !strings.Contains(out.String(), "script behavior:") || !strings.Contains(out.String(), "clean=false") || !strings.Contains(out.String(), "reports:") {
@@ -93,7 +93,7 @@ func TestInteractionScriptedRunAndReport(t *testing.T) {
 		}
 	}
 	out.Reset()
-	if err := run(context.Background(), []string{"interaction", "report", dir}, &out, io.Discard); err != nil {
+	if err := Main(context.Background(), []string{"interaction", "report", dir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "4/4 interaction trials passed") {
@@ -104,7 +104,7 @@ func TestInteractionScriptedRunAndReport(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := run(context.Background(), args, io.Discard, io.Discard); err == nil {
+	if err := Main(context.Background(), args, io.Discard, io.Discard); err == nil {
 		t.Fatal("accepted nonempty output directory")
 	}
 }
@@ -113,7 +113,7 @@ func TestInteractionInvalidRunFlags(t *testing.T) {
 	for _, args := range [][]string{{"-repeat", "0"}, {"-max-calls", "-1"}, {"-max-tool-calls", "0"}, {"-timeout", "0s"}, {"-scenario", "missing-scenario"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			args = append([]string{"interaction", "run", "-out", filepath.Join(t.TempDir(), "run")}, args...)
-			if err := run(context.Background(), args, io.Discard, io.Discard); err == nil {
+			if err := Main(context.Background(), args, io.Discard, io.Discard); err == nil {
 				t.Fatalf("accepted %v", args)
 			}
 		})
@@ -127,7 +127,7 @@ func TestInteractionFailedTrialPreservesReportAndExitStatus(t *testing.T) {
 		{"interaction", "report", dir},
 	} {
 		var out bytes.Buffer
-		err := run(context.Background(), args, &out, io.Discard)
+		err := Main(context.Background(), args, &out, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "1/1 interaction trials did not pass") {
 			t.Fatalf("failed trial exit status lost: %v", err)
 		}
@@ -148,7 +148,7 @@ func TestInteractionReportRejectsIncompleteRun(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	err := run(context.Background(), []string{"interaction", "report", dir}, &out, io.Discard)
+	err := Main(context.Background(), []string{"interaction", "report", dir}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "incomplete: no completed trial results") {
 		t.Fatalf("empty run did not fail as incomplete: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestInteractionReportRejectsPartialRunWithPassingResults(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	err := run(context.Background(), []string{"interaction", "report", dir}, &out, io.Discard)
+	err := Main(context.Background(), []string{"interaction", "report", dir}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "incomplete: 1/2 trials recorded") {
 		t.Fatalf("partial run did not fail as incomplete: %v", err)
 	}
