@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,12 +24,16 @@ import (
 // harness configuration the CLI resolved, and the private ladder that holds
 // both the public problems and the hidden tests.
 type Runner struct {
-	Config  harness.Config
-	Ladder  string
-	Profile string
-	Commit  string
-	Quiet   time.Duration
-	Idle    time.Duration
+	Config       harness.Config
+	Ladder       string
+	Profile      string
+	Commit       string
+	Quiet        time.Duration
+	Idle         time.Duration
+	Image        string
+	BuildContext string
+	NoBuild      bool
+	command      func(context.Context, ...string) *exec.Cmd // isolated runtime in tests
 }
 
 // JobEvent is one line of progress. Task-level events carry the task id;
@@ -233,8 +237,8 @@ func clip(s string, n int) string {
 }
 
 // run executes the tasks in order. Each task gets fresh workspace, results and
-// outbox directories beneath the batch, the same layout the container launcher
-// leaves behind, so the results index shows the batch as one group.
+// outbox mounts beneath the batch. Execution and grading occur only in separate
+// containers; the host reads artifacts and relays progress.
 func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
 	r := s.runner
 	defer func() {
@@ -253,6 +257,17 @@ func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
 		s.indexed = time.Time{}
 		s.mu.Unlock()
 	}()
+	j.emit(JobEvent{Kind: "job", Text: "Preparing eval containers"})
+	inputs, prepareErr := r.prepareContainers(ctx, filepath.Join(s.root, j.dir), tasks)
+	if prepareErr != nil {
+		j.mu.Lock()
+		j.err = prepareErr.Error()
+		j.mu.Unlock()
+		for _, task := range tasks {
+			j.fail(j.byID[task.ID], prepareErr)
+		}
+		return
+	}
 	for _, task := range tasks {
 		t := j.byID[task.ID]
 		if ctx.Err() != nil {
@@ -262,33 +277,12 @@ func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
 			continue
 		}
 		attempt := filepath.Join(s.root, j.dir, task.ID)
-		mounts := eval.Mounts{Workspace: filepath.Join(attempt, "workspace"), Results: filepath.Join(attempt, "results"), Outbox: filepath.Join(attempt, "outbox"), Problems: r.Ladder}
-		grading := filepath.Join(attempt, "grading-workspace")
-		if err := mkdirs(mounts.Workspace, mounts.Results, mounts.Outbox, grading); err != nil {
-			j.fail(t, err)
-			continue
-		}
-		results, err := eval.Run(ctx, eval.Options{Config: r.Config, Mounts: mounts, Problem: task.ID, Log: io.Discard, Observe: j.observe, Quiet: r.Quiet, Idle: r.Idle, Commit: r.Commit, Profile: r.Profile})
-		var result eval.Result
-		if len(results) == 1 {
-			result = results[0]
-		}
-		if err == nil && result.Outcome == eval.Submitted {
-			j.mu.Lock()
-			t.Phase = string(eval.Grading)
-			j.emitLocked(JobEvent{Task: t.ID, Kind: "phase", Phase: t.Phase})
-			j.mu.Unlock()
-			graded, gradeErr := eval.GradeSubmission(ctx, eval.Mounts{Workspace: grading, Results: mounts.Results, Outbox: mounts.Outbox, Grading: r.Ladder})
-			if gradeErr == nil {
-				result = graded
-			} else {
-				err = gradeErr
-			}
-		}
-		if report, analyzeErr := eval.Analyze(ctx, mounts.Results); analyzeErr == nil {
+		resultsDir := filepath.Join(attempt, "results")
+		result, err := r.containerTask(ctx, j, task, attempt, inputs)
+		if report, analyzeErr := eval.Analyze(ctx, resultsDir); analyzeErr == nil {
 			_ = eval.WriteReport(report)
 		}
-		rel, _ := filepath.Rel(s.root, mounts.Results)
+		rel, _ := filepath.Rel(s.root, resultsDir)
 		j.mu.Lock()
 		now := time.Now()
 		t.FinishedAt, t.Phase, t.Results = &now, string(eval.Finished), filepath.ToSlash(rel)
@@ -327,7 +321,7 @@ func mkdirs(dirs ...string) error {
 }
 
 // startJob launches one job; only one runs at a time because every task
-// shares the host's shell and model endpoint.
+// shares the model endpoint and host resource budget.
 func (s *Server) startJob(ids []string) (*job, error) {
 	if s.runner == nil {
 		return nil, errors.New("running is disabled: start strap eval web with model flags and a ladder to enable it")

@@ -35,11 +35,41 @@ exit; read each `results/<problem-id>/result.json` for the outcome. Interrupting
 launcher stops its active container and keeps artifacts. `scripts/eval.sh --help`
 lists all options. No model requests are made by `--list`.
 
+## Run from the web page
+
+```sh
+strap eval web -profile qwen3.6
+# Reuse an image built from the same source revision:
+strap eval web -profile qwen3.6 -no-build
+```
+
+Starting a batch from the page requires Apple's `container` CLI on the host.
+The web runner builds `strap-eval` once per batch with caching, then launches a
+separate agent and grader container for each problem. It has no host execution
+fallback. `-image NAME` selects another image; `-build-context DIR` selects the
+repository to build (by default, the repository containing `-ladder`). Rebuild
+the image after updating Strap so the host and container agree on configuration
+and progress formats. Viewing existing results does not require the runtime.
+
+Each batch snapshots the resolved model and role settings, generation parameters,
+LSP configuration, public problems, and private grading fixtures. The agent reads
+its configuration from a read-only `/config` mount and always works in
+`/workspace`; host workspace paths do not override that directory. Model endpoints
+must be reachable from inside the container. Custom language-server commands must
+also be installed in the image. Strict tool schemas follow the same provider path
+as ordinary Strap requests.
+
+The grader receives only the outbox, results, and private grading fixtures, uses a
+fresh workspace, and has networking disabled. Live progress and tool failures are
+streamed back to the page. Batch `build.log` and per-attempt `agent.log`,
+`progress.jsonl`, and `grader.log` retain diagnostics. Cancelling a job stops only
+its own eval container and retains the attempt's files.
+
 ## Mount contract
 
 | Path | Agent container | Grader container |
 | --- | --- | --- |
-| `/problems` | Public task metadata and starter files, included in the image | Unused |
+| `/problems` | Public task metadata and starter files, included in the image or mounted read-only by the web runner | Unused |
 | `/workspace` | Empty working directory; all agent tools and language servers use it | Fresh working directory for a copy of the submission plus hidden tests |
 | `/results` | Writable mounted traces, run metadata, results and reports | Same results mount, writable for grade and reports |
 | `/outbox` | Empty writable mount; publishes `submission/` when ready | Same outbox mount, **read-only** |

@@ -28,6 +28,13 @@ hidden tests, and executes them with the container's Go toolchain. It updates
 the grade and reports without changing the outbox or original agent workspace.
 An ungraded execution has outcome `submitted`; it is not counted as a failure.
 
+The web page follows the same container lifecycle as `scripts/eval.sh`. The host
+snapshots resolved configuration and fixtures, launches containers, relays versioned
+progress records, and reads results. It never invokes the coding agent or grader
+in process. Agent configuration cannot override the fixed mount paths, and the
+grader has networking disabled. Missing runtime or build failures fail the batch
+without falling back to host execution.
+
 ## Consequences
 
 The agent runtime image includes only public problem fixtures. Hidden tests and
