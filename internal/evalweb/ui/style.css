@@ -203,8 +203,8 @@ select { padding: 3px 6px; border: 1px solid var(--rule-strong); border-radius: 
 }
 
 /* Launch and live jobs */
-.running { display: block; padding: 6px 8px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent-soft); color: var(--ink); font-size: 12.5px; }
-.running b { font-family: var(--mono); font-weight: 500; }
+a.running { display: block; padding: 6px 8px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent-soft); color: var(--ink); font-size: 12.5px; }
+a.running b { font-family: var(--mono); font-weight: 500; }
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 0; }
 @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.4s ease-in-out infinite; } @keyframes pulse { 50% { opacity: .25; } } }
 .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
@@ -227,3 +227,39 @@ select { padding: 3px 6px; border: 1px solid var(--rule-strong); border-radius: 
 .feed .line.result .k, .feed .line.job .k { color: var(--accent); }
 .feed .line.message .k { color: var(--passed); }
 .feed .x { white-space: pre-wrap; word-break: break-word; }
+
+/* Navigation stays small; the run library owns selection and filtering. */
+:root { --side: 190px; }
+.library-count { padding: 18px 14px; color: var(--muted); line-height: 1.8; }
+.head h2 { font-family: var(--sans); font-size: 24px; }
+.muted { color: var(--muted); font-size: 12px; }
+.library-filters { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:16px 0; }
+.field { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); }
+.field input,.field select { min-width:120px; padding:8px; border:1px solid var(--rule-strong); border-radius:5px; background:var(--surface); color:var(--ink); }
+.library-table { max-height:none; }
+.library-table td { padding:14px 12px; }
+.library-table th { padding:10px 12px; }
+.run-title { font-weight:600; }
+.row-actions { min-width:165px; }
+.row-actions .button { margin:0 5px 7px 0; }
+.row-actions details pre { max-width:420px; }
+.settings-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; padding:0; margin:16px 0 24px; border:0; }
+.eval-form { max-width:1050px; }
+.eval-form details { margin:12px 0; }
+fieldset:disabled { opacity:.5; }
+.markdown { overflow-wrap:anywhere; }
+.markdown p { margin:0 0 6px; white-space:pre-wrap; }
+.markdown pre { margin:7px 0; padding:10px 12px; background:var(--bg); border:1px solid var(--rule); border-radius:5px; overflow:auto; }
+.markdown code { font-size:12px; }
+.markdown ul,.markdown ol { margin:4px 0; padding-left:24px; }
+.markdown blockquote { border-left:3px solid var(--rule-strong); margin:6px 0; padding-left:12px; color:var(--muted); }
+.markdown h3,.markdown h4,.markdown h5,.markdown h6 { color:var(--ink); margin:10px 0 5px; }
+.feed .line { grid-template-columns:75px minmax(130px,180px) minmax(0,1fr); }
+.feed .k { white-space:normal; overflow-wrap:anywhere; }
+.feed .x { white-space:normal; min-width:0; }
+.progress-tree > details { border-bottom:1px solid var(--rule); padding:8px; }
+.progress-tree details > summary { cursor:pointer; color:var(--ink); padding:6px; }
+.progress-tree .agent-events { margin-left:18px; border-left:2px solid var(--rule); }
+tr.selected td { background:var(--accent-soft); }
+.progress-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+@media(max-width:900px) { .side { max-height:none; } .run-list,.root { display:none; } .side-head { display:flex; flex-wrap:wrap; align-items:center; } .library-filters .field { flex:1 1 140px; } }

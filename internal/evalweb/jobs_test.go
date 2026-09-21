@@ -110,11 +110,11 @@ func TestJobRunsGradesAndStreamsProgress(t *testing.T) {
 		switch {
 		case runs.Runs[i].Batch:
 			batch = &runs.Runs[i]
-		case runs.Runs[i].Group == snap.Name:
+		case runs.Runs[i].Group == snap.Dir:
 			member = &runs.Runs[i]
 		}
 	}
-	if len(runs.Runs) != 2 || member == nil || member.Name != "easy-01-budget-pair" || member.Failed != 1 || batch == nil || batch.Path != snap.Name || batch.Members != 1 {
+	if len(runs.Runs) != 2 || member == nil || member.Name != "easy-01-budget-pair" || member.Failed != 1 || batch == nil || batch.Path != snap.Dir || batch.Members != 1 {
 		t.Fatalf("%+v", runs.Runs)
 	}
 	// Replaying from the last id yields nothing new but still ends.

@@ -6,7 +6,7 @@
 //   #/compare?runs=a|b|c        outcome matrix across ladder runs
 'use strict';
 
-const state = { runs: [], root: '', filter: '', selected: new Set(), open: new Set(), sort: { key: 'task_id', dir: 1 } };
+const state = { runs: [], root: '', filter: '', selected: new Set(), open: new Set(), library: {}, sort: { key: 'task_id', dir: 1 } };
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const h = (tag, attrs = {}, ...kids) => {
@@ -74,7 +74,7 @@ function route() {
     if (tr > 1) return { view: 'trial', run: parts.slice(1, tr).join('/'), scenario: parts[tr + 1], trial: parts[tr + 2] };
     return { view: 'run', run: parts.slice(1).join('/'), tab: q.get('tab') || 'overview' };
   }
-  return { view: 'home' };
+  return { view: 'home', archive: parts[0] === 'archive' };
 }
 const runHref = p => `#/run/${p.split('/').map(encodeURIComponent).join('/')}`;
 const taskHref = (p, id) => `${runHref(p)}/task/${encodeURIComponent(id)}`;
@@ -92,71 +92,20 @@ async function loadRuns(refresh) {
   renderRuns();
 }
 
-function renderRuns() {
-  const list = $('#runs');
-  list.replaceChildren();
-  const current = route();
-  const needle = state.filter.trim().toLowerCase();
-  const runs = state.runs.filter(r => !needle || [r.path, r.model, r.profile, r.commit].join(' ').toLowerCase().includes(needle));
-  if (!runs.length) {
-    list.append(h('div', { class: 'empty', style: 'padding:20px 14px' }, state.runs.length ? 'No runs match the filter.' : 'No runs found. A run is any directory holding results.jsonl.'));
-    return;
-  }
-  const groups = new Map();
-  const batches = new Map();
-  for (const r of runs) {
-    if (r.batch) { batches.set(r.path, r); continue; }
-    const key = r.group || 'runs';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
-  }
-  // A batch whose members are all filtered out still shows when it matches.
-  for (const [p, b] of batches) if (!groups.has(p)) groups.set(p, []);
-  // Nested groups (container batches, comparison bundles, sweeps) start
-  // folded to one line with their totals; the group holding the current run
-  // is always open.
-  for (const [name, members] of groups) {
-    const nested = name !== 'runs';
-    const batch = batches.get(name);
-    const holdsCurrent = members.some(r => r.path === current.run || (current.view === 'compare' && current.runs.includes(r.path)));
-    const open = !nested || needle || holdsCurrent || state.open.has(name);
-    const ladder = members.filter(r => r.kind === 'ladder');
-    const totals = batch ? `${batch.passed}/${batch.tasks}` : ladder.length ? `${ladder.reduce((a, r) => a + r.passed, 0)}/${ladder.reduce((a, r) => a + r.tasks, 0)}` : '';
-    const toggle = () => { if (!nested) return; open && !holdsCurrent ? state.open.delete(name) : state.open.add(name); renderRuns(); };
-    if (batch) {
-      // A batch reads as one run: the row opens the merged view and can be
-      // ticked for comparison; the arrow lists the attempts beneath it.
-      const box = h('input', { type: 'checkbox', title: 'Select for comparison', onclick: e => e.stopPropagation(), onchange: e => { e.target.checked ? state.selected.add(name) : state.selected.delete(name); updateCompare(); } });
-      box.checked = state.selected.has(name);
-      const isActive = current.run === name || (current.view === 'compare' && current.runs.includes(name));
-      list.append(h('div', { class: 'group batch' + (isActive ? ' active' : ''), role: 'link', tabindex: 0, onclick: () => location.hash = runHref(name), onkeydown: e => { if (e.key === 'Enter') location.hash = runHref(name); } },
-        box, h('span', {}, h('span', { class: 'name', title: name }, name), h('div', { class: 'meta' }, [batch.model, short(batch.commit), `${batch.members} attempt${batch.members === 1 ? '' : 's'}`].filter(Boolean).join(' · ')),
-          batch.tasks ? h('div', { class: 'bar' }, h('i', { style: `width:${100 * batch.passed / batch.tasks}%` })) : null),
-        h('span', {}, h('div', { class: 'score' }, totals), h('button', { class: 'arrow-btn', title: open ? 'Hide attempts' : 'Show attempts', onclick: e => { e.stopPropagation(); toggle(); } }, open ? '▾' : '▸'))));
-    } else {
-      list.append(h('div', { class: 'group', role: 'button', tabindex: 0, onclick: toggle },
-        h('span', { class: 'arrow' }, nested ? (open ? '▾' : '▸') : ''), h('span', { class: 'name', title: name }, name, h('span', { style: 'color:var(--muted)' }, ` ${members.length}`)), h('span', { class: 'score' }, totals)));
-    }
-    if (open) for (const r of members) list.append(runRow(r, current));
-  }
+function libraryRuns() {
+  const batches = new Set(state.runs.filter(r => r.batch).map(r => r.path));
+  return state.runs.filter(r => !batches.has(r.group));
 }
-
-function runRow(r, current) {
-  const active = (current.run === r.path) || (current.view === 'compare' && current.runs.includes(r.path));
-  const box = h('input', { type: 'checkbox', title: 'Select for comparison', disabled: r.kind !== 'ladder' || null, onclick: e => e.stopPropagation(), onchange: e => { e.target.checked ? state.selected.add(r.path) : state.selected.delete(r.path); updateCompare(); } });
-  box.checked = state.selected.has(r.path);
-  const meta = r.kind === 'interaction'
-    ? `interaction · ${r.trials?.mode || ''} · ${r.profile || ''}`
-    : [r.model, r.profile !== r.model ? r.profile : null, short(r.commit)].filter(Boolean).join(' · ');
-  const score = r.kind === 'interaction'
-    ? h('div', { class: 'score interaction' }, r.trials ? `${r.trials.passed}/${r.trials.completed}` : '?')
-    : h('div', { class: 'score' }, `${r.passed}/${r.tasks}`);
-  const row = h('div', { class: 'run' + (active ? ' active' : ''), role: 'link', tabindex: 0, onclick: () => location.hash = runHref(r.path), onkeydown: e => { if (e.key === 'Enter') location.hash = runHref(r.path); } },
-    box,
-    h('div', {}, h('div', { class: 'name', title: r.path }, r.name), h('div', { class: 'meta' }, r.error ? h('span', { class: 'error' }, 'unreadable') : meta),
-      r.kind === 'ladder' && r.tasks ? h('div', { class: 'bar' }, h('i', { style: `width:${100 * r.passed / r.tasks}%` })) : null),
-    score);
-  return row;
+function runName(r) { return r.display_name || r.name || 'Evaluation'; }
+function renderRuns() {
+  const runs = libraryRuns();
+  mount($('#runs'), h('div', { class: 'library-count' }, `${runs.filter(r => !r.archived).length} evaluations`, h('div', {}, `${runs.filter(r => r.archived).length} archived`)));
+}
+async function saveRun(path, changes) {
+  const response = await fetch('/api/library', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path,...changes})});
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error);
+  await loadRuns(true); await render();
 }
 
 function updateCompare() {
@@ -173,7 +122,7 @@ async function render() {
   const r = route();
   renderRuns();
   try {
-    if (r.view === 'home') return renderHome(main);
+    if (r.view === 'home') { await loadRuns(false); await refreshRunning(); return renderHome(main); }
     if (r.view === 'launch') return await renderLaunch(main);
     if (r.view === 'job') return await renderJob(main, r.id);
     if (r.view === 'compare') return await renderCompare(main, r.runs);
@@ -188,20 +137,77 @@ async function render() {
 }
 
 function renderHome(main) {
-  const ladder = state.runs.filter(r => r.kind === 'ladder'), inter = state.runs.filter(r => r.kind === 'interaction');
-  mount(main, 
-    h('div', { class: 'head' }, h('h2', {}, 'Results')),
-    h('div', { class: 'facts' }, h('span', {}, h('b', {}, num(ladder.length)), ' ladder runs'), h('span', {}, h('b', {}, num(inter.length)), ' interaction runs'), h('span', {}, 'under ', h('code', {}, state.root))),
-    h('div', { class: 'empty' }, 'Pick a run on the left to read it. Tick two or more ladder runs to compare their outcomes task by task. Every number here is derived from results.jsonl and the traces, so runs without a written report are complete too.'),
-  );
+  const archived = !!route().archive;
+  const all = libraryRuns();
+  const f = state.library;
+  const table = h('div', {class:'section scroll library-table'});
+  const count = h('span', {class:'flag'});
+  const error = h('div', {class:'error', role:'status'});
+  const search = h('input', {type:'search', placeholder:'Search name, model, configuration or commit', value:f.search || '', oninput:e=>{f.search=e.target.value;draw();}});
+  function select(key, label, values) {
+    return h('label', {class:'field'}, label, h('select', {'aria-label':label,onchange:e=>{f[key]=e.target.value;draw();}}, values.map(([v,l])=>h('option',{value:v,selected:v===(f[key]||'')},l))));
+  }
+  const unique = key => [...new Set(all.map(r=>r[key]).filter(Boolean))];
+  const branches = unique('branch');
+  const commits = unique('commit');
+  const bar = h('div',{class:'library-filters'},
+    select('branch','Branch',[['','All branches'],['@latest','Latest recorded branch'],['@unknown','Unknown branch'],...branches.map(x=>[x,x])]),
+    select('commit','Commit (newest run first)',[['','All commits'],['@latest','Latest recorded commit'],...commits.map(x=>[x,short(x)])]),
+    select('model','Model',[['','All models'],...unique('model').map(x=>[x,x])]),
+    select('thinking','Thinking',[['','Any'],['true','Enabled'],['false','Disabled'],['default','Server default']]),
+    ...['from','to'].map(key=>h('label',{class:'field'},key==='from'?'Started on or after':'Started on or before',h('input',{type:'date',value:f[key]||'',onchange:e=>{f[key]=e.target.value;draw();}}))),
+    select('sort','Sort',[['','Newest started'],['old','Oldest started'],['name','Name'],['score','Pass rate']]),
+    h('button',{class:'button',onclick:()=>{state.library={};renderHome(main);}},'Clear filters'));
+  function draw() {
+    const rows = all.filter(r=>{
+      if (!!r.archived!==archived) return false;
+      if (f.search && !JSON.stringify([runName(r),r.model,r.profile,r.commit,r.branch,r.configuration,r.role_models]).toLowerCase().includes(f.search.toLowerCase())) return false;
+      const branch=f.branch==='@latest'?branches[0]:f.branch;
+      if (f.branch==='@latest' && !branches.length) return false;
+      if (branch==='@unknown'?!!r.branch:(branch && r.branch!==branch)) return false;
+      const commit=f.commit==='@latest'?commits[0]:f.commit;
+      if (f.commit==='@latest' && !commits.length) return false;
+      if (commit && r.commit!==commit) return false;
+      if (f.model && r.model!==f.model) return false;
+      const thinking=r.configuration?.generation?.enable_thinking;
+      if (f.thinking && (f.thinking==='default'?thinking!==undefined:String(thinking)!==f.thinking)) return false;
+      const date=new Date(r.started_at);
+      if (f.from && date<new Date(f.from+'T00:00:00')) return false;
+      if (f.to && date>new Date(f.to+'T23:59:59.999')) return false;
+      return true;
+    }).sort((a,b)=>f.sort==='name'?runName(a).localeCompare(runName(b)):f.sort==='score'?(b.passed/(b.tasks||1)-a.passed/(a.tasks||1)):(new Date(b.started_at)-new Date(a.started_at))*(f.sort==='old'?-1:1));
+    count.textContent=`${rows.length} ${archived?'archived':'evaluations'}`;
+    const action = (r,label,fn) => h('button',{class:'button small',disabled:r.status==='running',title:r.status==='running'?'Available after the eval finishes':label,onclick:async()=>{try{await fn();}catch(e){error.textContent=e.message;}}},label);
+    const trs=rows.map(r=>{
+      const box=h('input',{type:'checkbox','aria-label':`Compare ${runName(r)}`,disabled:r.kind!=='ladder'||!r.tasks,onchange:e=>{e.target.checked?state.selected.add(r.path):state.selected.delete(r.path);updateCompare();}});box.checked=state.selected.has(r.path);
+      const target=r.job_id?`#/job/${r.job_id}`:runHref(r.path);
+      return h('tr',{},h('td',{},box),h('td',{},r.tasks||r.job_id?h('a',{href:target,class:'run-title'},runName(r)):h('b',{},runName(r)),h('div',{class:'muted'},r.archive_reason||r.status||r.kind)),
+        h('td',{},when(r.started_at)||'Unknown'),h('td',{},r.model||'Unknown',h('div',{class:'muted'},configLabel(r.configuration))),
+        h('td',{},r.branch||'Unknown branch',h('div',{},h('code',{title:r.commit},short(r.commit)||'Unknown commit'))),
+        h('td',{class:'num'},`${r.passed}/${r.tasks}`),
+        h('td',{class:'row-actions'},action(r,'Rename',async()=>{const name=prompt('Eval name',runName(r));if(name?.trim())await saveRun(r.path,{name:name.trim()});}),action(r,archived?'Restore':'Archive',()=>saveRun(r.path,{archived:!archived})),
+          h('details',{},h('summary',{},'Configuration'),h('pre',{},JSON.stringify({model:r.configuration,roles:r.role_models,folder:r.path},null,2)))));
+    });
+    mount(table,rows.length?h('table',{},h('thead',{},h('tr',{},['','Evaluation','Date started','Model / settings','Source','Passed','Manage'].map(x=>h('th',{},x)))),h('tbody',{},trs)):h('div',{class:'empty'},'No evaluations match these filters.'));
+  }
+  mount(main,h('div',{class:'head'},h('h2',{},archived?'Archive':'Evaluations'),h('a',{class:'button primary',href:'#/launch',hidden:!runner?.enabled},'New eval'),count),
+    archived?h('p',{class:'muted'},'Attempts without readable results are archived automatically. Files are retained; restore any attempt to keep it in the library.'):null,
+    search,bar,error,table);
+  draw();
+}
+function configLabel(model) {
+ const g=model?.generation||{};
+ return [g.enable_thinking===undefined?'Thinking: default':g.enable_thinking?'Thinking on':'Thinking off',g.temperature===undefined?'Temperature: default':`Temperature ${g.temperature}`].join(' · ');
 }
 
 function header(summary, extra = []) {
   const s = summary;
   return [
-    h('div', { class: 'head' }, h('h2', {}, s.path)),
+    h('div', { class: 'head' }, h('h2', {}, runName(s))),
     h('div', { class: 'facts' },
       s.model ? h('span', {}, 'model ', h('b', {}, s.model)) : null,
+      s.branch ? h('span', {}, 'branch ', h('b', {}, s.branch)) : null,
+      s.configuration ? h('details', {}, h('summary', {}, configLabel(s.configuration)), h('pre', {}, JSON.stringify({model:s.configuration,roles:s.role_models},null,2))) : null,
       s.backend ? h('span', {}, 'backend ', h('b', {}, s.backend)) : null,
       s.profile ? h('span', {}, 'profile ', h('b', {}, s.profile)) : null,
       s.commit ? h('span', {}, 'commit ', h('code', {}, s.commit)) : null,
@@ -409,7 +415,7 @@ function summary(kind, p) {
     case 'output_finished': return line(p.status || 'finished', p.reasoning_bytes ? ` · reasoning ${kb(p.reasoning_bytes)}` : '', p.error ? h('span', { class: 'err' }, ` · ${p.error.message || JSON.stringify(p.error)}`) : '');
     case 'message': case 'reply': case 'instruction': case 'notification': case 'commentary': {
       const m = p.message || p;
-      return line(m.from ? h('span', { class: 'flag', style: 'margin:0 6px 0 0' }, `${m.from} → ${m.to}`) : null, h('pre', {}, String(m.content ?? p.content ?? '').slice(0, 800)));
+      return line(m.from ? h('span', { class: 'flag', style: 'margin:0 6px 0 0' }, `${m.from} → ${m.to}`) : null, markdown(String(m.content ?? p.content ?? '')));
     }
     case 'agent_state': return line(`${p.agent?.agent_id || ''} ${p.agent?.state || p.state || ''}`);
     case 'agent_started': return line(`${p.agent?.agent_id || ''} started with ${(p.tools || []).length} tools`);
@@ -425,7 +431,7 @@ function textOf(content) {
 
 // Compare
 async function renderCompare(main, paths) {
-  if (paths.length < 2) { mount(main, h('div', { class: 'empty' }, 'Tick at least two ladder runs on the left, then press Compare.')); return; }
+  if (paths.length < 2) { mount(main, h('div', { class: 'empty' }, 'Select at least two evaluations in the library, then press Compare.')); return; }
   mount(main, h('div', { class: 'empty' }, `Analysing ${paths.length} runs…`));
   const data = await api('/api/compare?' + paths.map(p => `run=${encodeURIComponent(p)}`).join('&'));
   const runs = data.runs;
@@ -434,7 +440,7 @@ async function renderCompare(main, paths) {
   const tiers = ['easy', 'medium', 'hard'];
   const ordered = [...tasks].sort((a, b) => (tiers.indexOf(a[1]) - tiers.indexOf(b[1])) || a[0].localeCompare(b[0]));
   const at = (r, id) => r.report.tasks.find(t => t.task_id === id);
-  const label = r => r.summary.name + (r.summary.group ? ` (${r.summary.group})` : '');
+  const label = r => runName(r.summary);
   const rows = [];
   let lastTier = '';
   for (const [id, tier] of ordered) {
@@ -482,8 +488,7 @@ async function renderCompare(main, paths) {
         metric('mean reasoning', r => mean(r, 'reasoning_bytes'), kb, true)))));
 }
 
-// Launching runs. The server runs tasks on this host with the model it was
-// started with and streams progress over server-sent events.
+// Launching container runs with a configuration snapshot per evaluation.
 let runner = null;
 async function loadRunner() {
   try { runner = await api('/api/runner'); } catch { runner = { enabled: false }; }
@@ -507,6 +512,38 @@ async function refreshRunning() {
 async function renderLaunch(main) {
   if (!runner?.enabled) { mount(main, h('div', { class: 'empty' }, 'Running is disabled. Start strap eval web with a ladder directory and model flags to run tasks from here.')); return; }
   const chosen = new Set();
+  const form=h('form',{class:'eval-form',onsubmit:e=>e.preventDefault()});
+  const name=h('input',{type:'text',maxlength:160,placeholder:'e.g. Qwen · no thinking · baseline','aria-label':'Eval name'});
+  const defaults=runner.configuration || {model:runner.model,backend:runner.backend,base_url:runner.base_url,timeout_ns:3600e9,generation:{}};
+  const input=(value,attrs={})=>h('input',{value:value??'',...attrs});
+  const model=input(defaults.model,{required:true,list:'known-models'});
+  const endpoint=input(defaults.base_url,{type:'url',required:true});
+  const backend=h('select',{},['vllm','chatcompletions'].map(x=>h('option',{value:x,selected:x===defaults.backend},x)));
+  const timeout=input(defaults.timeout_ns/60e9,{type:'number',min:0.01,step:'any',required:true});
+  const field=(label,control)=>{if(!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);return h('label',{class:'field'},label,control);};
+  const generation=h('fieldset',{class:'settings-grid'});
+  const settings={};
+  const g=defaults.generation||{};
+  const choice=(key,label,values)=>{
+    const value=g[key]===undefined?'':String(g[key]);
+    settings[key]=h('select',{},[['','Server default'],...values].map(([v,l])=>h('option',{value:v,selected:v===value},l)));
+    generation.append(field(label,settings[key]));
+  };
+  choice('enable_thinking','Thinking',[['true','Enabled'],['false','Disabled']]);
+  choice('reasoning_effort','Reasoning effort',[['low','Low'],['medium','Medium'],['xhigh','Extra high']]);
+  choice('force_nonempty_content','Require nonempty content',[['true','Enabled'],['false','Disabled']]);
+  for(const [key,label,min,max,step] of [
+    ['temperature','Temperature',0,2,'any'],['top_p','Top P',0.000001,1,'any'],['top_k','Top K',-1,null,1],['min_p','Min P',0,1,'any'],
+    ['presence_penalty','Presence penalty',-2,2,'any'],['repetition_penalty','Repetition penalty',0.000001,null,'any'],['max_tokens','Maximum output tokens',1,null,1]]) {
+    settings[key]=input(g[key],{type:'number',min,max,step,placeholder:'Server default'});generation.append(field(label,settings[key]));
+  }
+  const allRoles=h('input',{type:'checkbox',checked:!Object.values(runner.roles||{}).some(Boolean)});
+  const syncBackend=()=>generation.disabled=backend.value!=='vllm';backend.addEventListener('change',syncBackend);syncBackend();
+  form.append(h('div',{class:'settings-grid'},field('Eval name (optional)',name),field('Model',model),field('Backend',backend),field('Model endpoint',endpoint),field('Request timeout (minutes)',timeout)),
+    h('datalist',{id:'known-models'},[...new Set([defaults.model,...state.runs.map(r=>r.model)].filter(Boolean))].map(x=>h('option',{value:x}))),
+    h('h3',{},'Generation settings'),h('p',{class:'muted'},'Blank fields use server defaults. Thinking options require support in the served model template. The endpoint must be reachable from the eval container.'),generation,
+    h('label',{},allRoles,' Apply this model and generation settings to every agent'),
+    h('details',{},h('summary',{},'Existing role overrides (retained when unchecked)'),h('pre',{},JSON.stringify(runner.roles||{},null,2))));
   const tiers = new Map();
   for (const t of runner.tasks || []) { if (!tiers.has(t.tier)) tiers.set(t.tier, []); tiers.get(t.tier).push(t); }
   const start = h('button', { class: 'button primary', disabled: true }, 'Run 0 tasks');
@@ -522,20 +559,21 @@ async function renderLaunch(main) {
     }));
   }));
   start.addEventListener('click', async () => {
+    if (!form.reportValidity()) return;
     start.disabled = true;
     note.textContent = 'Starting…';
     try {
-      const res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: [...chosen] }) });
+      const res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: [...chosen], name:name.value.trim(), apply_to_roles:allRoles.checked, model:{model:model.value.trim(),backend:backend.value,base_url:endpoint.value.trim(),timeout_ns:Math.round(Number(timeout.value)*60e9),generation:backend.value==='vllm'?Object.fromEntries(Object.entries(settings).filter(([,el])=>el.value!=='').map(([key,el])=>[key,['enable_thinking','force_nonempty_content'].includes(key)?el.value==='true':key==='reasoning_effort'?el.value:Number(el.value)])):{}} }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || res.statusText);
       location.hash = `#/job/${body.id}`;
     } catch (err) { note.textContent = err.message; start.disabled = false; }
   });
   mount(main, 
-    h('div', { class: 'head' }, h('h2', {}, 'Run evals')),
-    h('div', { class: 'facts' }, h('span', {}, 'model ', h('b', {}, runner.model)), h('span', {}, 'backend ', h('b', {}, runner.backend)), h('span', {}, 'endpoint ', h('code', {}, runner.base_url)), runner.profile ? h('span', {}, 'profile ', h('b', {}, runner.profile)) : null, h('span', {}, 'ladder ', h('code', {}, runner.ladder))),
+    h('div', { class: 'head' }, h('h2', {}, 'New eval'), h('a',{href:'#/'},'← Evaluations')),
+    form,
     runner.error ? h('div', { class: 'error' }, runner.error) : null,
-    h('div', { class: 'empty', style: 'padding:0 0 12px' }, 'Tasks run one after another on this machine, each in a fresh workspace, and are graded with the hidden tests as they finish. Results land in a new batch under the results directory.'),
+    h('div', { class: 'empty', style: 'padding:0 0 12px' }, 'Choose problems below. Each runs in a fresh container at /workspace and is graded in a separate container. Settings are saved with this evaluation.'),
     h('div', { class: 'launch-bar' }, start, note),
     picker,
   );
@@ -543,56 +581,86 @@ async function renderLaunch(main) {
 
 async function renderJob(main, id) {
   let snap = await api(`/api/jobs/${id}`);
-  const table = h('table', { class: 'dense' });
-  const feed = h('div', { class: 'feed' });
-  const status = h('span', {});
-  const cancel = h('button', { class: 'button', onclick: async () => { cancel.disabled = true; await fetch(`/api/jobs/${id}/cancel`, { method: 'POST' }); } }, 'Cancel');
-  const follow = h('label', { class: 'flag' }, h('input', { type: 'checkbox', checked: true }), ' follow');
-  let follows = true;
-  follow.firstChild.addEventListener('change', e => follows = e.target.checked);
-  const elapsed = t => t.started_at ? dur(((t.finished_at ? new Date(t.finished_at) : new Date()) - new Date(t.started_at)) * 1e6) : '';
+  let selected=snap.tasks.find(t=>['running','starting','grading'].includes(t.phase))?.id || snap.tasks[0]?.id;
+  const events=[];const seen=new Set();const closed=new Set();
+  const table=h('table',{class:'dense'});
+  const feed=h('div',{class:'feed progress-tree'});
+  const heading=h('h3',{});
+  const status=h('span',{});
+  const notice=h('div',{class:'error',role:'status'});
+  const cancel=h('button',{class:'button',onclick:async()=>{cancel.disabled=true;try{const res=await fetch(`/api/jobs/${id}/cancel`,{method:'POST'});if(!res.ok)throw new Error((await res.json()).error);}catch(e){notice.textContent=e.message;cancel.disabled=false;}}},'Cancel eval');
+  const follow=h('label',{},h('input',{type:'checkbox',checked:true}),' Follow progress');let follows=true;
+  follow.firstChild.addEventListener('change',e=>follows=e.target.checked);
+  const elapsed=t=>t.started_at?dur(((t.finished_at?new Date(t.finished_at):new Date())-new Date(t.started_at))*1e6):'';
+  const selectTask=t=>{selected=t.id;drawTable();drawTree();};
   function drawTable() {
-    const done = snap.tasks.filter(t => t.phase === 'finished');
-    const passed = done.filter(t => t.passed).length;
-    mount(status, snap.status === 'running' ? h('span', { class: 'pulse' }) : null, h('b', {}, snap.status), ` · ${done.length}/${snap.tasks.length} finished · ${passed} passed`, snap.error ? h('span', { class: 'error' }, ` · ${snap.error}`) : null);
-    cancel.hidden = snap.status !== 'running';
-    table.replaceChildren(
-      h('thead', {}, h('tr', {}, ['task', 'phase', 'outcome', 'time', 'calls', 'tools', 'tool errs', 'agents', 'tokens in', 'tokens out', ''].map((l, i) => h('th', { class: i >= 3 ? 'num' : '' }, l)))),
-      h('tbody', {}, snap.tasks.map(t => h('tr', {},
-        h('td', { class: 'id', title: t.title }, t.id),
-        h('td', {}, h('span', { class: `phase ${t.phase}` }, t.phase)),
-        h('td', {}, t.outcome ? outcomeTag(t) : '', t.error ? h('div', { class: 'flag error', style: 'margin:0' }, clipText(t.error, 120)) : null),
-        h('td', { class: 'num' }, elapsed(t)), h('td', { class: 'num' }, num(t.model_calls)), h('td', { class: 'num' }, num(t.tool_calls)), h('td', { class: 'num' }, num(t.tool_errors)), h('td', { class: 'num' }, num(t.agents)), h('td', { class: 'num' }, num(t.input_tokens)), h('td', { class: 'num' }, num(t.output_tokens)),
-        h('td', {}, t.results ? h('a', { href: runHref(t.results) }, 'open') : '')))));
+    const done=snap.tasks.filter(t=>t.phase==='finished');
+    mount(status,snap.status==='running'?h('span',{class:'pulse'}):null,h('b',{},snap.status),` · ${done.length}/${snap.tasks.length} finished · ${done.filter(t=>t.passed).length} passed`,snap.error?h('span',{class:'error'},` · ${snap.error}`):null);
+    cancel.hidden=snap.status!=='running';
+    mount(table,h('thead',{},h('tr',{},['Problem','Phase','Outcome','Time','Calls','Tools','Tool errors','Agents','Tokens in','Tokens out',''].map(l=>h('th',{},l)))),
+      h('tbody',{},snap.tasks.map(t=>h('tr',{class:'row'+(selected===t.id?' selected':''),tabindex:0,'aria-selected':selected===t.id,onclick:()=>selectTask(t),onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectTask(t);}}},
+        h('td',{},h('b',{},t.title||t.id),h('div',{class:'muted'},t.id)),h('td',{},h('span',{class:`phase ${t.phase}`},t.phase)),
+        h('td',{},t.outcome?outcomeTag(t):'',t.error?h('div',{class:'error'},clipText(t.error,120)):null),
+        h('td',{class:'num'},elapsed(t)),...['model_calls','tool_calls','tool_errors','agents','input_tokens','output_tokens'].map(k=>h('td',{class:'num'},num(t[k]))),
+        h('td',{},t.results?h('a',{href:runHref(t.results),onclick:e=>e.stopPropagation()},'Results'):'')))));
   }
-  function addLine(e) {
-    const line = h('div', { class: `line ${e.kind}` }, h('div', { class: 't' }, new Date(e.at).toLocaleTimeString('en-US', { hour12: false })), h('div', { class: 'task' }, e.task || ''), h('div', { class: 'k' }, e.kind === 'phase' ? e.phase : e.kind, e.agent ? ` ${e.agent}` : ''), h('div', { class: 'x' }, e.text || ''));
-    feed.append(line);
-    while (feed.children.length > 400) feed.firstChild.remove();
-    if (follows) feed.scrollTop = feed.scrollHeight;
+  function drawTree() {
+    const task=snap.tasks.find(t=>t.id===selected);
+    heading.textContent=task?`${task.title||task.id} · progress`:'Progress';
+    const scroll=feed.scrollTop;
+    const items=events.filter(e=>e.task===selected || !e.task);
+    feed.replaceChildren();
+    const agents=new Map();
+    const groups=new Map();
+    for(const e of items)if(e.agent&&!agents.has(e.agent))agents.set(e.agent,e.parent||'');else if(e.agent&&e.parent)agents.set(e.agent,e.parent);
+    for(const [agent] of agents) {
+      const body=h('div',{class:'agent-events'});
+      const key=selected+':'+agent;
+      const group=h('details',{open:!closed.has(key),ontoggle:e=>{e.target.open?closed.delete(key):closed.add(key);}},h('summary',{},agent),body);
+      groups.set(agent,{group,body});
+    }
+    const parents=new Map();
+    for(const [agent,parent] of agents) {
+      let p=parent;const ancestors=new Set([agent]);let cycle=false;
+      while(p&&agents.has(p)){if(ancestors.has(p)){cycle=true;break;}ancestors.add(p);p=agents.get(p);}
+      parents.set(agent,!cycle&&groups.has(parent)?parent:'');
+    }
+    const placed=new Set();
+    function place(agent) {
+      if(placed.has(agent))return;
+      const parent=parents.get(agent);if(parent)place(parent);
+      (parent?groups.get(parent).body:feed).append(groups.get(agent).group);placed.add(agent);
+    }
+    for(const e of items) {
+      if(e.agent)place(e.agent);
+      const row=h('div',{class:`line ${e.kind}`},h('div',{class:'t'},new Date(e.at).toLocaleTimeString('en-US',{hour12:false})),h('div',{class:'k'},e.kind==='phase'?e.phase:e.kind),h('div',{class:'x'},markdown(e.text||'')));
+      (groups.get(e.agent)?.body||feed).append(row);
+    }
+    if(!items.length)feed.append(h('div',{class:'empty',style:'padding:18px'},'Waiting for this problem to start.'));
+    feed.scrollTop=follows?feed.scrollHeight:scroll;
   }
-  drawTable();
-  mount(main, 
-    h('div', { class: 'head' }, h('h2', {}, snap.name), h('a', { href: '#/launch' }, 'run more')),
-    h('div', { class: 'facts' }, status, h('span', {}, 'started ', h('b', {}, when(snap.started_at))), h('span', {}, 'results in ', h('code', {}, snap.dir))),
-    h('div', { class: 'launch-bar' }, cancel, follow),
-    h('div', { class: 'section' }, table),
-    h('div', { class: 'section' }, h('h3', {}, 'Progress'), feed),
-  );
-  const source = new EventSource(`/api/jobs/${id}/events`);
-  const tick = setInterval(drawTable, 1000);
-  const stop = () => { source.close(); clearInterval(tick); };
-  source.addEventListener('progress', ev => addLine(JSON.parse(ev.data)));
-  source.addEventListener('state', ev => { snap = JSON.parse(ev.data); drawTable(); refreshRunning(); });
-  source.addEventListener('end', async () => { stop(); snap = await api(`/api/jobs/${id}`); drawTable(); await loadRuns(true); await refreshRunning(); });
-  source.onerror = () => { if (snap.status !== 'running') stop(); };
-  window.addEventListener('hashchange', stop, { once: true });
+  drawTable();drawTree();
+  mount(main,h('div',{class:'head'},h('h2',{},snap.name),h('a',{href:'#/'},'← Evaluations')),
+    h('div',{class:'facts'},status,h('span',{},'Started ',when(snap.started_at)),h('span',{},snap.metadata?.model?.model||''),h('span',{},configLabel(snap.metadata?.model))),
+    h('div',{class:'launch-bar'},cancel,notice),h('div',{class:'section scroll'},table),
+    h('div',{class:'progress-heading'},heading,follow),h('p',{class:'muted'},'Select a problem to inspect its agent tree. Expand an agent to read actions, output, Markdown and code.'),feed);
+  const source=new EventSource(`/api/jobs/${id}/events`);
+  const tick=setInterval(drawTable,1000);
+  let pending=false;
+  const stop=()=>{source.close();clearInterval(tick);};
+  source.addEventListener('progress',ev=>{
+    const e=JSON.parse(ev.data);if(seen.has(e.seq))return;seen.add(e.seq);events.push(e);
+    if(!pending){pending=true;requestAnimationFrame(()=>{pending=false;if(feed.isConnected)drawTree();});}
+  });
+  source.addEventListener('state',ev=>{snap=JSON.parse(ev.data);drawTable();refreshRunning();});
+  source.addEventListener('end',async()=>{stop();snap=await api(`/api/jobs/${id}`);drawTable();await loadRuns(true);await refreshRunning();});
+  source.onerror=()=>{if(snap.status!=='running')stop();};
+  window.addEventListener('hashchange',stop,{once:true});
 }
 function clipText(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
 
 // Wiring
 window.addEventListener('hashchange', render);
-$('#filter').addEventListener('input', e => { state.filter = e.target.value; renderRuns(); });
 $('#compare-btn').addEventListener('click', () => location.hash = compareHref([...state.selected]));
 $('#refresh').addEventListener('click', () => loadRuns(true).then(render));
 Promise.all([loadRuns(false), loadRunner()]).then(() => {

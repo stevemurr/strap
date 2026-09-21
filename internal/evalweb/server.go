@@ -22,7 +22,7 @@ import (
 var ui embed.FS
 
 // Server answers the results API and serves the embedded page. It reads only
-// beneath its root and never writes.
+// beneath its root. Jobs and library metadata are written only under that root.
 type Server struct {
 	root   string
 	mux    *http.ServeMux
@@ -75,6 +75,7 @@ func New(root string, runner *Runner) (*Server, error) {
 	static, _ := fs.Sub(ui, "ui")
 	s.mux.Handle("GET /", http.FileServerFS(static))
 	s.mux.HandleFunc("GET /api/runs", s.handleRuns)
+	s.mux.HandleFunc("POST /api/library", s.handleLibrary)
 	s.mux.HandleFunc("GET /api/run", s.handleRun)
 	s.mux.HandleFunc("GET /api/compare", s.handleCompare)
 	s.mux.HandleFunc("GET /api/trace", s.handleTrace)
@@ -101,6 +102,20 @@ func (s *Server) index(force bool) ([]RunSummary, error) {
 	runs, err := discover(s.root)
 	if err != nil {
 		return nil, err
+	}
+	for _, j := range s.jobs {
+		snap := j.snapshot()
+		if snap.Status != "running" {
+			continue
+		}
+		for i := range runs {
+			if runs[i].Path == snap.Dir || runs[i].Group == snap.Dir {
+				runs[i].Archived = false
+				runs[i].ArchiveReason = ""
+				runs[i].Status = "running"
+				runs[i].JobID = snap.ID
+			}
+		}
 	}
 	s.runs, s.indexed = runs, time.Now()
 	return runs, nil
@@ -142,7 +157,9 @@ func (s *Server) summary(rel string) (RunSummary, error) {
 	if batch {
 		return s.batchSummary(dir, rel), nil
 	}
-	return summarize(dir, filepath.ToSlash(filepath.Clean(rel))), nil
+	summary := summarize(dir, filepath.ToSlash(filepath.Clean(rel)))
+	enrichRun(s.root, &summary)
+	return summary, nil
 }
 
 // ladder analyses a run once per change of its results file. Analysis walks
@@ -175,6 +192,7 @@ func (s *Server) ladder(ctx context.Context, rel string) (*ladderDetail, error) 
 		return nil, err
 	}
 	detail := &ladderDetail{Summary: summarize(dir, filepath.ToSlash(filepath.Clean(rel))), Report: report, Results: map[string]eval.Result{}}
+	enrichRun(s.root, &detail.Summary)
 	for _, r := range results {
 		detail.Results[r.TaskID] = r
 	}

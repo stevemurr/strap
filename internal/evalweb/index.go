@@ -18,6 +18,7 @@ import (
 
 	"github.com/stevemurr/strap/eval"
 	"github.com/stevemurr/strap/eval/interaction"
+	"github.com/stevemurr/strap/harness"
 )
 
 // Kind tells the two result families apart. They share file names but not
@@ -33,19 +34,27 @@ const (
 // RunSummary is what the run list needs: identity, provenance and outcome
 // counts read from results.jsonl alone, without opening any trace.
 type RunSummary struct {
-	Path      string    `json:"path"`
-	Name      string    `json:"name"`
-	Group     string    `json:"group,omitempty"`
-	Kind      Kind      `json:"kind"`
-	StartedAt time.Time `json:"started_at"`
-	Commit    string    `json:"commit,omitempty"`
-	Profile   string    `json:"profile,omitempty"`
-	Model     string    `json:"model,omitempty"`
-	Backend   string    `json:"backend,omitempty"`
-	HasReport bool      `json:"has_report"`
-	Error     string    `json:"error,omitempty"`
-	Batch     bool      `json:"batch,omitempty"`
-	Members   int       `json:"members,omitempty"`
+	DisplayName   string                          `json:"display_name"`
+	Branch        string                          `json:"branch,omitempty"`
+	Configuration *harness.ModelConfig            `json:"configuration,omitempty"`
+	RoleModels    map[string]*harness.ModelConfig `json:"role_models,omitempty"`
+	Archived      bool                            `json:"archived"`
+	ArchiveReason string                          `json:"archive_reason,omitempty"`
+	Status        string                          `json:"status,omitempty"`
+	JobID         string                          `json:"job_id,omitempty"`
+	Path          string                          `json:"path"`
+	Name          string                          `json:"name"`
+	Group         string                          `json:"group,omitempty"`
+	Kind          Kind                            `json:"kind"`
+	StartedAt     time.Time                       `json:"started_at"`
+	Commit        string                          `json:"commit,omitempty"`
+	Profile       string                          `json:"profile,omitempty"`
+	Model         string                          `json:"model,omitempty"`
+	Backend       string                          `json:"backend,omitempty"`
+	HasReport     bool                            `json:"has_report"`
+	Error         string                          `json:"error,omitempty"`
+	Batch         bool                            `json:"batch,omitempty"`
+	Members       int                             `json:"members,omitempty"`
 
 	Tasks       int                  `json:"tasks"`
 	Passed      int                  `json:"passed"`
@@ -83,10 +92,11 @@ var skippedDirs = map[string]bool{"workspace": true, ".git": true, "ladder": tru
 // three directories down (batch/task/results), which is the deepest layout.
 const maxDepth = 4
 
-// discover walks root for directories holding results.jsonl and summarises
-// each. Runs are returned newest first.
+// discover indexes result records and unfinished run metadata. Incomplete
+// attempts stay discoverable in Archive. Runs are returned newest first.
 func discover(root string) ([]RunSummary, error) {
 	var runs []RunSummary
+	seen := map[string]bool{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -98,11 +108,18 @@ func discover(root string) ([]RunSummary, error) {
 			}
 			return nil
 		}
-		if d.Name() != "results.jsonl" {
+		if d.Name() != "results.jsonl" && d.Name() != "run.json" && d.Name() != "eval-run.json" {
 			return nil
 		}
 		dir := filepath.Dir(p)
 		relDir, _ := filepath.Rel(root, dir)
+		if seen[dir] {
+			return nil
+		}
+		seen[dir] = true
+		if d.Name() == "eval-run.json" {
+			return nil
+		}
 		runs = append(runs, summarize(dir, filepath.ToSlash(relDir)))
 		return nil
 	})
@@ -110,6 +127,23 @@ func discover(root string) ([]RunSummary, error) {
 		return nil, err
 	}
 	runs = addBatches(root, runs)
+	// A batch can fail during image preparation, before any attempt exists.
+	entries, _ := os.ReadDir(root)
+	known := map[string]bool{}
+	for _, r := range runs {
+		known[r.Path] = true
+	}
+	for _, e := range entries {
+		if !e.IsDir() || known[e.Name()] || skippedDirs[e.Name()] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, e.Name(), "eval-run.json")); err == nil {
+			runs = append(runs, RunSummary{Path: e.Name(), Name: e.Name(), Kind: Ladder, Batch: true})
+		}
+	}
+	for i := range runs {
+		enrichRun(root, &runs[i])
+	}
 	sort.SliceStable(runs, func(i, j int) bool {
 		if !runs[i].StartedAt.Equal(runs[j].StartedAt) {
 			return runs[i].StartedAt.After(runs[j].StartedAt)
@@ -145,6 +179,7 @@ func summarize(dir, rel string) RunSummary {
 		return s
 	}
 	s.Model, s.Backend = run.Model.Model, run.Model.Backend
+	s.Configuration = &run.Model
 	results, err := latestResults(dir)
 	if err != nil {
 		s.Error = err.Error()

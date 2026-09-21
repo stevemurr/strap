@@ -76,6 +76,7 @@ func summarizeBatch(group string, members []RunSummary) RunSummary {
 		}
 		if s.Model == "" {
 			s.Model, s.Backend, s.Commit, s.Profile = m.Model, m.Backend, m.Commit, m.Profile
+			s.Configuration = m.Configuration
 		}
 		s.Tasks += m.Tasks
 		s.Passed += m.Passed
@@ -105,7 +106,9 @@ func (s *Server) batchSummary(dir, rel string) RunSummary {
 		memberRel, _ := filepath.Rel(s.root, m)
 		members = append(members, summarize(m, filepath.ToSlash(memberRel)))
 	}
-	return summarizeBatch(filepath.ToSlash(filepath.Clean(rel)), members)
+	summary := summarizeBatch(filepath.ToSlash(filepath.Clean(rel)), members)
+	enrichRun(s.root, &summary)
+	return summary
 }
 
 // batchDetail merges the members' analysed reports into one. Members are

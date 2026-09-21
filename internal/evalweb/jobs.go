@@ -39,13 +39,14 @@ type Runner struct {
 // JobEvent is one line of progress. Task-level events carry the task id;
 // job-level ones leave it empty.
 type JobEvent struct {
-	Seq   int       `json:"seq"`
-	At    time.Time `json:"at"`
-	Task  string    `json:"task,omitempty"`
-	Kind  string    `json:"kind"`
-	Agent string    `json:"agent,omitempty"`
-	Text  string    `json:"text,omitempty"`
-	Phase string    `json:"phase,omitempty"`
+	Seq    int       `json:"seq"`
+	At     time.Time `json:"at"`
+	Task   string    `json:"task,omitempty"`
+	Kind   string    `json:"kind"`
+	Agent  string    `json:"agent,omitempty"`
+	Parent string    `json:"parent,omitempty"`
+	Text   string    `json:"text,omitempty"`
+	Phase  string    `json:"phase,omitempty"`
 }
 
 // TaskState is the live and final view of one task in a job.
@@ -81,10 +82,13 @@ type JobSnapshot struct {
 	Error      string       `json:"error,omitempty"`
 	Tasks      []*TaskState `json:"tasks"`
 	Events     int          `json:"events"`
+	Metadata   RunMetadata  `json:"metadata"`
 }
 
 type job struct {
 	id, name, dir string
+	runner        *Runner
+	metadata      RunMetadata
 	cancel        context.CancelFunc
 
 	mu       sync.Mutex
@@ -111,7 +115,7 @@ func (j *job) snapshot() JobSnapshot {
 		copied := *t
 		tasks[i] = &copied
 	}
-	return JobSnapshot{ID: j.id, Name: j.name, Dir: j.dir, Status: j.status, StartedAt: j.started, FinishedAt: j.finished, Error: j.err, Tasks: tasks, Events: len(j.events)}
+	return JobSnapshot{ID: j.id, Name: j.name, Dir: j.dir, Status: j.status, StartedAt: j.started, FinishedAt: j.finished, Error: j.err, Tasks: tasks, Events: len(j.events), Metadata: j.metadata}
 }
 
 func (j *job) emit(e JobEvent) {
@@ -173,12 +177,10 @@ func (j *job) observe(p eval.Progress) {
 		e.Kind, e.Agent = "tool", string(ev.Agent)
 		name := ev.Activity.Call.Name
 		args := strings.TrimSpace(string(ev.Activity.Call.Arguments))
-		if len(args) > 160 {
-			args = args[:160] + "…"
-		}
+		args = clip(args, 16384)
 		switch {
 		case ev.Activity.FinishedAt.IsZero():
-			e.Text = name + " " + args
+			e.Text = name + "\n```json\n" + args + "\n```"
 		case ev.Activity.Err != nil:
 			t.ToolCalls++
 			t.ToolErrors++
@@ -186,14 +188,18 @@ func (j *job) observe(p eval.Progress) {
 		default:
 			t.ToolCalls++
 			e.Kind, e.Text = "tool_done", name+" "+ev.Activity.FinishedAt.Sub(ev.Activity.StartedAt).Round(time.Millisecond).String()
+			if output := ev.Activity.Result.Content.Text(); output != "" {
+				e.Text += "\n```\n" + clip(output, 16384) + "\n```"
+			}
 		}
 	case conversation.MessageEvent:
 		m := ev.Message
-		e.Kind, e.Agent, e.Text = "message", string(m.From), fmt.Sprintf("%s → %s (%s): %s", m.From, m.To, m.Kind, clip(m.Content, 240))
+		e.Kind, e.Agent, e.Text = "message", string(m.From), fmt.Sprintf("%s → %s (%s): %s", m.From, m.To, m.Kind, clip(m.Content, 16384))
 	case conversation.CommentaryEvent:
-		e.Kind, e.Agent, e.Text = "commentary", string(ev.Agent), clip(ev.Content, 240)
+		e.Kind, e.Agent, e.Text = "commentary", string(ev.Agent), clip(ev.Content, 16384)
 	case conversation.AgentStarted:
 		e.Kind, e.Agent, e.Text = "agent", string(ev.Agent.ID), "started"
+		e.Parent = string(ev.Agent.Parent)
 		agents := j.agents[t.ID]
 		if agents == nil {
 			agents = map[message.ActorID]bool{}
@@ -240,7 +246,10 @@ func clip(s string, n int) string {
 // outbox mounts beneath the batch. Execution and grading occur only in separate
 // containers; the host reads artifacts and relays progress.
 func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
-	r := s.runner
+	r := j.runner
+	if r == nil {
+		r = s.runner
+	}
 	defer func() {
 		j.mu.Lock()
 		now := time.Now()
@@ -250,6 +259,10 @@ func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
 			if ctx.Err() != nil {
 				j.status = "cancelled"
 			}
+		}
+		j.metadata.Status = j.status
+		if err := writeMetadata(filepath.Join(s.root, j.dir), j.metadata, "eval-run.json"); err != nil {
+			j.err = "save metadata: " + err.Error()
 		}
 		j.emitLocked(JobEvent{Kind: "job", Text: j.status})
 		j.mu.Unlock()
@@ -322,9 +335,17 @@ func mkdirs(dirs ...string) error {
 
 // startJob launches one job; only one runs at a time because every task
 // shares the model endpoint and host resource budget.
-func (s *Server) startJob(ids []string) (*job, error) {
+func (s *Server) startJob(ids []string, options ...newEval) (*job, error) {
 	if s.runner == nil {
 		return nil, errors.New("running is disabled: start strap eval web with model flags and a ladder to enable it")
+	}
+	request := newEval{}
+	if len(options) > 0 {
+		request = options[0]
+	}
+	configured, err := s.runner.configured(request)
+	if err != nil {
+		return nil, err
 	}
 	if len(ids) == 0 {
 		return nil, errors.New("choose at least one task")
@@ -360,12 +381,21 @@ func (s *Server) startJob(ids []string) (*job, error) {
 		}
 	}
 	now := time.Now()
-	name := "web-" + eval.RunName(s.runner.Commit, s.runner.Profile, now)
+	name := fmt.Sprintf("eval-%d", now.UnixNano())
+	display := strings.TrimSpace(request.Name)
+	if display == "" {
+		display = configured.Config.Model.Model + " · " + now.Format("Jan 2, 15:04")
+	}
+	metadata := configured.metadata(display, now)
 	if err := os.MkdirAll(filepath.Join(s.root, name), 0o755); err != nil {
 		return nil, err
 	}
+	if err := writeMetadata(filepath.Join(s.root, name), metadata, "eval-run.json"); err != nil {
+		return nil, err
+	}
+	s.indexed = time.Time{}
 	ctx, cancel := context.WithCancel(context.Background())
-	j := &job{id: fmt.Sprintf("%d", now.UnixNano()), name: name, dir: name, cancel: cancel, status: "running", started: now, byID: map[string]*TaskState{}, agents: map[string]map[message.ActorID]bool{}, changed: make(chan struct{})}
+	j := &job{id: fmt.Sprintf("%d", now.UnixNano()), name: display, dir: name, runner: configured, metadata: metadata, cancel: cancel, status: "running", started: now, byID: map[string]*TaskState{}, agents: map[string]map[message.ActorID]bool{}, changed: make(chan struct{})}
 	for _, t := range tasks {
 		state := &TaskState{ID: t.ID, Tier: t.Tier, Title: t.Title, Phase: string(eval.Queued)}
 		j.tasks = append(j.tasks, state)
@@ -390,14 +420,16 @@ func (s *Server) findJob(id string) *job {
 
 // runnerInfo tells the page whether it can launch runs and with what.
 type runnerInfo struct {
-	Enabled bool        `json:"enabled"`
-	Model   string      `json:"model,omitempty"`
-	Backend string      `json:"backend,omitempty"`
-	BaseURL string      `json:"base_url,omitempty"`
-	Profile string      `json:"profile,omitempty"`
-	Ladder  string      `json:"ladder,omitempty"`
-	Tasks   []eval.Task `json:"tasks,omitempty"`
-	Error   string      `json:"error,omitempty"`
+	Enabled       bool                            `json:"enabled"`
+	Model         string                          `json:"model,omitempty"`
+	Backend       string                          `json:"backend,omitempty"`
+	BaseURL       string                          `json:"base_url,omitempty"`
+	Profile       string                          `json:"profile,omitempty"`
+	Ladder        string                          `json:"ladder,omitempty"`
+	Tasks         []eval.Task                     `json:"tasks,omitempty"`
+	Error         string                          `json:"error,omitempty"`
+	Configuration harness.ModelConfig             `json:"configuration"`
+	Roles         map[string]*harness.ModelConfig `json:"roles"`
 }
 
 func (s *Server) handleRunner(w http.ResponseWriter, r *http.Request) {
@@ -414,6 +446,8 @@ func (s *Server) handleRunner(w http.ResponseWriter, r *http.Request) {
 		tasks[i].Prompt, tasks[i].Insight = "", ""
 	}
 	info.Tasks = tasks
+	info.Configuration = s.runner.Config.Model
+	info.Roles = s.runner.metadata("", time.Time{}).Roles
 	writeJSON(w, info)
 }
 
@@ -429,14 +463,14 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStartJob(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Tasks []string `json:"tasks"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+	var body newEval
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
 		fail(w, http.StatusBadRequest, err)
 		return
 	}
-	j, err := s.startJob(body.Tasks)
+	j, err := s.startJob(body.Tasks, body)
 	if err != nil {
 		fail(w, http.StatusConflict, err)
 		return
