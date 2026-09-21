@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>strap eval results</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="side-head">
+      <h1>strap eval</h1>
+      <div class="root" id="root" title=""></div>
+      <input id="filter" type="search" placeholder="Filter runs" autocomplete="off">
+      <div class="side-actions">
+        <a id="launch" class="button" href="#/launch" hidden>Run evals</a>
+        <button id="compare-btn" class="button" hidden>Compare 0 runs</button>
+        <button id="refresh" class="button quiet" title="Rescan the results directory">Rescan</button>
+      </div>
+      <a id="running" class="running" href="#/" hidden></a>
+    </div>
+    <nav id="runs" class="run-list" aria-label="Runs"></nav>
+  </aside>
+  <main id="main" class="main"></main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

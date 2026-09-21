@@ -9,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,8 +19,8 @@ import (
 
 	"github.com/stevemurr/strap/eval"
 	"github.com/stevemurr/strap/harness"
-	"github.com/stevemurr/strap/internal/lspconfig"
-	"github.com/stevemurr/strap/internal/modelcatalog"
+	"github.com/stevemurr/strap/internal/evalweb"
+	"github.com/stevemurr/strap/internal/modelflags"
 	"github.com/stevemurr/strap/internal/tui"
 	"golang.org/x/term"
 )
@@ -30,6 +32,7 @@ const usage = `usage:
   strap eval list [-tier easy,medium,hard] [-task ID,...]
   strap eval grade [-q]
   strap eval report
+  strap eval web [-results DIR] [-listen ADDR]
   strap eval interaction list|run|report [options]
 
 Run one coding problem per container. Public fixtures live at /problems.
@@ -41,6 +44,8 @@ Retries require fresh mounts. Launch separate containers for parallel problems.
 -q suppresses the TUI and progress logs, retaining the final summary and errors.
 selfcheck proves hidden tests fail on the stub and pass on the reference.
 interaction is the separate bounded coordination suite; use interaction -help.
+web serves a local page for reading and comparing the runs under a results
+directory (default eval/results); it reads results.jsonl and traces directly.
 `
 
 // Main dispatches the eval command group. It returns flag.ErrHelp after
@@ -61,6 +66,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return listCmd(args[1:], stdout, stderr)
 	case "report":
 		return reportCmd(ctx, args[1:], stdout, stderr)
+	case "web":
+		return webCmd(ctx, args[1:], stdout, stderr)
 	case "interaction":
 		return interactionCmd(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
@@ -155,13 +162,8 @@ func runMounted(ctx context.Context, args []string, stdout, stderr io.Writer, mo
 	report := fs.Bool("report", true, "Write an ungraded execution report on completion")
 	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
-	configPath := fs.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
-	profile := fs.String("profile", "", "Saved model profile (default selected by the catalog)")
 	cfg := harness.DefaultConfig()
-	languageFlags := lspconfig.Flags(fs)
-	cfg.Model = harness.ModelConfig{Backend: "vllm", Timeout: cfg.Model.Timeout}
-	modelcatalog.Flags(fs, &cfg.Model)
-	fs.IntVar(&cfg.ReasoningLimit, "reasoning-limit", cfg.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
+	model := modelflags.Register(fs, &cfg, "timeout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -179,15 +181,11 @@ func runMounted(ctx context.Context, args []string, stdout, stderr io.Writer, mo
 	if err != nil {
 		return err
 	}
-	profileName, err := modelcatalog.Apply(fs, args, &cfg.Model, *configPath, *profile)
+	profileName, err := model.Model(args)
 	if err != nil {
 		return err
 	}
-	if _, err := cfg.Model.NewProvider(nil); err != nil {
-		return err
-	}
-	cfg.LSP, err = languageFlags.Resolve()
-	if err != nil {
+	if err := model.Languages(); err != nil {
 		return err
 	}
 	commit := eval.BuildCommit()
@@ -355,5 +353,67 @@ func gradeCmd(ctx context.Context, args []string, stdout, stderr io.Writer, moun
 		return err
 	}
 	fmt.Fprintf(stdout, "%s: %s; results in %s\n", r.TaskID, r.Outcome, mounts.Results)
+	return nil
+}
+
+func webCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("strap eval web", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	results := fs.String("results", filepath.Join("eval", "results"), "Directory holding run directories (any depth)")
+	listen := fs.String("listen", "127.0.0.1:0", "Loopback address to serve on; port 0 picks a free port")
+	ladder := fs.String("ladder", filepath.Join("eval", "ladder"), "Private task ladder used to run and grade from the page; missing disables running")
+	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
+	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
+	cfg := harness.DefaultConfig()
+	model := modelflags.Register(fs, &cfg, "timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected web arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	var runner *evalweb.Runner
+	if info, err := os.Stat(*ladder); err == nil && info.IsDir() {
+		profileName, err := model.Model(args)
+		if err != nil {
+			return err
+		}
+		if err := model.Languages(); err != nil {
+			return err
+		}
+		ladderPath, err := filepath.Abs(*ladder)
+		if err != nil {
+			return err
+		}
+		runner = &evalweb.Runner{Config: cfg, Ladder: ladderPath, Profile: profileName, Commit: eval.BuildCommit(), Quiet: *quiet, Idle: *idle}
+	} else {
+		fmt.Fprintf(stderr, "no ladder at %s; running from the page is disabled\n", *ladder)
+	}
+	server, err := evalweb.New(*results, runner)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	if !listener.Addr().(*net.TCPAddr).IP.IsLoopback() {
+		listener.Close()
+		return errors.New("web serves without authentication; listen on a loopback address")
+	}
+	fmt.Fprintf(stdout, "serving %s at http://%s/\n", server.Root(), listener.Addr())
+	if runner != nil {
+		fmt.Fprintf(stdout, "runs launched from the page use model %s at %s and execute on this host\n", runner.Config.Model.Model, runner.Config.Model.BaseURL)
+	}
+	httpServer := &http.Server{Handler: server}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		httpServer.Shutdown(shutdown)
+	}()
+	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
 }

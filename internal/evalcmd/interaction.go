@@ -13,8 +13,7 @@ import (
 	"github.com/stevemurr/strap/eval"
 	"github.com/stevemurr/strap/eval/interaction"
 	"github.com/stevemurr/strap/harness"
-	"github.com/stevemurr/strap/internal/lspconfig"
-	"github.com/stevemurr/strap/internal/modelcatalog"
+	"github.com/stevemurr/strap/internal/modelflags"
 )
 
 const interactionUsage = `usage:
@@ -69,26 +68,13 @@ func interactionOptions(args []string, stderr io.Writer) (interaction.Options, e
 	mode := fs.String("mode", string(interaction.Scripted), "Execution mode: scripted or live")
 	scenarios := fs.String("scenario", "", "Only run these comma-separated scenario ids (default all)")
 	opts := interaction.Options{Config: harness.DefaultConfig()}
-	languageFlags := lspconfig.Flags(fs)
+	// Keep the common model flags, reserving -timeout for the trial boundary.
+	model := modelflags.Register(fs, &opts.Config, "model-timeout")
 	fs.StringVar(&opts.Output, "out", "", "Empty run directory (default eval/results/interaction_<commit>_<profile>_<timestamp>)")
 	fs.IntVar(&opts.Repetitions, "repeat", 1, "Sequential trials per scenario")
 	fs.IntVar(&opts.MaxCalls, "max-calls", 8, "Maximum model calls per trial")
 	fs.IntVar(&opts.MaxToolCalls, "max-tool-calls", 24, "Maximum tool calls per trial")
 	fs.DurationVar(&opts.Timeout, "timeout", 3*time.Minute, "Wall-clock limit per trial")
-	configPath := fs.String("config", "", "Model catalog JSON (live mode only; same discovery as ladder)")
-	profile := fs.String("profile", "", "Saved model profile (live mode only; default selected by catalog)")
-	opts.Config.Model = harness.ModelConfig{Backend: "vllm", Timeout: opts.Config.Model.Timeout}
-	// Keep the common model flags, reserving -timeout for the trial boundary.
-	modelFlags := flag.NewFlagSet("model", flag.ContinueOnError)
-	modelcatalog.Flags(modelFlags, &opts.Config.Model)
-	modelFlags.VisitAll(func(f *flag.Flag) {
-		name := f.Name
-		if name == "timeout" {
-			name = "model-timeout"
-		}
-		fs.Var(f.Value, name, f.Usage)
-	})
-	fs.IntVar(&opts.Config.ReasoningLimit, "reasoning-limit", opts.Config.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
@@ -109,17 +95,15 @@ func interactionOptions(args []string, stderr io.Writer) (interaction.Options, e
 	}
 	opts.Profile = "scripted"
 	if opts.Mode == interaction.Live {
-		profileName, err := modelcatalog.Apply(fs, args, &opts.Config.Model, *configPath, *profile)
+		profileName, err := model.Model(args)
 		if err != nil {
 			return opts, err
 		}
 		opts.Profile = profileName
 	}
-	languages, err := languageFlags.Resolve()
-	if err != nil {
+	if err := model.Languages(); err != nil {
 		return opts, err
 	}
-	opts.Config.LSP = languages
 	opts.Commit = eval.BuildCommit()
 	if opts.Output == "" {
 		opts.Output = filepath.Join("eval", "results", "interaction_"+eval.RunName(opts.Commit, opts.Profile, time.Now()))

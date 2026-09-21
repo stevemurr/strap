@@ -148,6 +148,9 @@ implement distributed claims or concurrent result writers.
 - `strap eval -problem ID -q` runs and submits one solution, printing a short summary.
 - `strap eval grade -q` grades a ready submission and writes updated reports.
 - `strap eval report` rebuilds reports from the `/results` mount.
+- `strap eval web [-results DIR] [-ladder DIR] [-listen ADDR] [model flags]` serves a local
+  page for reading, comparing and analysing runs under a results directory, and
+  runs tasks from the page on this host with live progress when a ladder is present.
 - `strap eval list [-tier easy,medium,hard] [-task ID,...]` lists public problems.
 - `strap eval selfcheck [-tier ...] [-task ...] [-parallel N]` checks private fixtures;
   mount the full ladder at `/grading`. This utility runs no agent.

@@ -8,8 +8,7 @@ import (
 	"os"
 
 	"github.com/stevemurr/strap/harness"
-	"github.com/stevemurr/strap/internal/lspconfig"
-	"github.com/stevemurr/strap/internal/modelcatalog"
+	"github.com/stevemurr/strap/internal/modelflags"
 )
 
 type options struct {
@@ -19,20 +18,14 @@ type options struct {
 
 func parseOptions(args []string, stderr io.Writer) (options, error) {
 	o := options{config: harness.DefaultConfig()}
-	// The CLI's model defaults live in models.json, independently of library defaults.
-	o.config.Model = harness.ModelConfig{Backend: "vllm", Timeout: o.config.Model.Timeout}
 	flags := flag.NewFlagSet("strap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
 		fmt.Fprint(stderr, "usage:\n  strap [flags]\n  strap eval <command> [options]  (see strap eval -help)\n\nflags:\n")
 		flags.PrintDefaults()
 	}
-	languageFlags := lspconfig.Flags(flags)
-	configPath := flags.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
-	profile := flags.String("profile", "", "Saved model profile (default selected by the catalog)")
-	modelcatalog.Flags(flags, &o.config.Model)
+	model := modelflags.Register(flags, &o.config, "timeout")
 	flags.StringVar(&o.config.Dir, "C", o.config.Dir, "Working directory for shell and file tools")
-	flags.IntVar(&o.config.ReasoningLimit, "reasoning-limit", o.config.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
 	flags.StringVar(&o.config.Events.JSONLPath, "record", "", "Record session events and tool diagnostics to a new JSONL file")
 	flags.StringVar(&o.listen, "listen", "", "Serve the harness HTTP API at a loopback address (requires STRAP_API_TOKEN)")
 	webEnabled := flags.Bool("web", o.config.Web != nil, "Enable web_search and open_url (backends start lazily)")
@@ -47,15 +40,9 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if flags.NArg() != 0 {
 		return options{}, errors.New("unexpected arguments; run strap and type into the prompt")
 	}
-	if _, err := modelcatalog.Apply(flags, args, &o.config.Model, *configPath, *profile); err != nil {
-		return options{}, err
-	}
-	if o.config.Model.Timeout <= 0 {
-		return options{}, errors.New("timeout must be positive")
-	}
-	// Provider construction validates options without connecting to the server.
-	// Do this before either terminal startup or opening the HTTP listener.
-	if _, err := o.config.Model.NewProvider(nil); err != nil {
+	// Provider validation happens before either terminal startup or opening
+	// the HTTP listener.
+	if _, err := model.Model(args); err != nil {
 		return options{}, err
 	}
 	info, err := os.Stat(o.config.Dir)
@@ -68,8 +55,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if !*webEnabled {
 		o.config.Web = nil
 	}
-	o.config.LSP, err = languageFlags.Resolve()
-	if err != nil {
+	if err := model.Languages(); err != nil {
 		return options{}, err
 	}
 	return o, nil
