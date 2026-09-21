@@ -32,7 +32,6 @@ type Progress struct {
 	Root   message.ActorID
 	Event  conversation.Event
 	Result *Result
-	Reused bool
 }
 
 func (o Options) notify(p Progress) {

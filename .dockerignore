@@ -1,0 +1,8 @@
+.git
+.env
+.env.*
+.claude
+.DS_Store
+strap
+strap-eval
+eval/results

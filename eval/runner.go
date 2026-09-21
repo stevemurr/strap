@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
@@ -23,25 +22,17 @@ import (
 // Options configure a run. Config supplies the model and role prompts; the
 // runner owns Dir, Events.JSONLPath, Web and LocalTools for every task.
 type Options struct {
-	Config   harness.Config
-	Deps     harness.Dependencies // Provider injection for tests; EventStore must stay nil.
-	Ladder   string
-	Output   string
-	Parallel int
-	Filter   func(Task) bool
-	Log      io.Writer
-	Observe  func(Progress) // Optional live observer; see Progress for concurrency contract.
-	Quiet    time.Duration  // Silence required after the root's final reply; default 3s.
+	Config  harness.Config
+	Deps    harness.Dependencies // Provider injection for tests; EventStore must stay nil.
+	Mounts  Mounts
+	Problem string
+	Log     io.Writer
+	Observe func(Progress) // Optional live observer; see Progress for concurrency contract.
+	Quiet   time.Duration  // Silence required after the root's final reply; default 3s.
 	// Idle finishes a task whose agents are all idle with nothing queued and no
 	// root reply after this much silence, flagged NoReply; default 3m. Without
 	// it a root that ends on wait_for_input costs the whole session budget.
 	Idle time.Duration
-	// Scratch holds each live workspace while its session runs; default
-	// os.TempDir(). Keeping sessions out of the repository tree stops an agent
-	// from finding the ladder, its hidden tests and reference solutions by
-	// walking up from its working directory. The workspace moves under Output
-	// once the task is graded.
-	Scratch string
 	// Commit and Profile are recorded in run.json so a run can be traced to
 	// the harness build and the model profile that produced it.
 	Commit  string
@@ -52,6 +43,7 @@ type Options struct {
 type Outcome string
 
 const (
+	Submitted   Outcome = "submitted"
 	Passed      Outcome = "passed"
 	Failed      Outcome = "failed"
 	BuildFailed Outcome = "build_failed"
@@ -85,136 +77,86 @@ type RunInfo struct {
 	StartedAt time.Time           `json:"started_at"`
 	Commit    string              `json:"commit,omitempty"`
 	Profile   string              `json:"profile,omitempty"`
-	Ladder    string              `json:"ladder"`
+	Mounts    Mounts              `json:"mounts"`
 	Model     harness.ModelConfig `json:"model"`
-	Parallel  int                 `json:"parallel"`
 	Tasks     []string            `json:"tasks"`
 }
 
 const replyLimit = 4 << 10
 
-// Run executes every selected task and returns results in ladder order. Tasks
-// with an existing result.json under Output are reused, so an interrupted run
-// resumes by pointing at the same directory.
-func Run(ctx context.Context, opts Options) ([]Result, error) {
+// Run executes one problem in the mounted workspace. Each invocation requires
+// fresh output mounts; container orchestration owns retries and parallelism.
+func Run(ctx context.Context, opts Options) (results []Result, runErr error) {
 	if opts.Deps.EventStore != nil {
-		return nil, errors.New("the runner records each task to its own JSONL trace; EventStore must be nil")
+		return nil, errors.New("the runner records its own JSONL trace; EventStore must be nil")
 	}
-	if opts.Parallel < 1 {
-		opts.Parallel = 1
+	if opts.Problem == "" {
+		return nil, errors.New("problem is required: run one problem per container")
 	}
-	if opts.Log == nil {
-		opts.Log = io.Discard
-	}
-	if opts.Quiet <= 0 {
-		opts.Quiet = 3 * time.Second
-	}
-	if opts.Idle <= 0 {
-		opts.Idle = 3 * time.Minute
-	}
-	tasks, err := LoadLadder(opts.Ladder)
+	var err error
+	opts.Mounts, err = opts.Mounts.resolve(false)
 	if err != nil {
 		return nil, err
 	}
-	if opts.Filter != nil {
-		kept := tasks[:0]
-		for _, t := range tasks {
-			if opts.Filter(t) {
-				kept = append(kept, t)
-			}
-		}
-		tasks = kept
-	}
-	if len(tasks) == 0 {
-		return nil, errors.New("no tasks selected")
-	}
-	if err := os.MkdirAll(opts.Output, 0o755); err != nil {
+	tasks, err := LoadProblems(opts.Mounts.Problems)
+	if err != nil {
 		return nil, err
 	}
-	info := RunInfo{StartedAt: time.Now(), Commit: opts.Commit, Profile: opts.Profile, Ladder: opts.Ladder, Model: opts.Config.Model, Parallel: opts.Parallel}
-	for _, t := range tasks {
-		info.Tasks = append(info.Tasks, t.ID)
+	var task Task
+	for _, candidate := range tasks {
+		if candidate.ID == opts.Problem {
+			task = candidate
+			break
+		}
 	}
-	if _, err := os.Stat(filepath.Join(opts.Output, "run.json")); errors.Is(err, os.ErrNotExist) {
-		if err := writeJSON(filepath.Join(opts.Output, "run.json"), info); err != nil {
+	if task.ID == "" {
+		return nil, fmt.Errorf("unknown problem %q", opts.Problem)
+	}
+	// Validate both mounts before writing either. Never delete mounted contents.
+	for _, dir := range []string{opts.Mounts.Workspace, opts.Mounts.Results, opts.Mounts.Outbox} {
+		if err := requireEmpty(dir); err != nil {
 			return nil, err
 		}
 	}
-	lines, err := os.OpenFile(filepath.Join(opts.Output, "results.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	defer lines.Close()
-	var mu sync.Mutex
-	results := make([]Result, len(tasks))
-	for _, task := range tasks {
-		opts.notify(Progress{Task: task, Phase: Queued})
+	info := RunInfo{StartedAt: time.Now(), Commit: opts.Commit, Profile: opts.Profile, Mounts: opts.Mounts, Model: opts.Config.Model, Tasks: []string{task.ID}}
+	if err := writeJSON(filepath.Join(opts.Mounts.Results, "run.json"), info); err != nil {
+		return nil, err
 	}
-	queue := make(chan int)
-	var wg sync.WaitGroup
-	var tier sync.WaitGroup
-	var saveErr error
-	for range opts.Parallel {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range queue {
-				func() {
-					defer tier.Done()
-					task := tasks[i]
-					resultPath := filepath.Join(opts.Output, task.ID, "result.json")
-					if data, err := os.ReadFile(resultPath); err == nil {
-						var prev Result
-						if json.Unmarshal(data, &prev) == nil && prev.TaskID == task.ID {
-							fmt.Fprintf(opts.Log, "[%s] reusing %s\n", task.ID, resultPath)
-							results[i] = prev
-							opts.notify(Progress{Task: task, Phase: Finished, Result: &prev, Reused: true})
-							return
-						}
-					}
-					if ctx.Err() != nil {
-						results[i] = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, Outcome: Errored, Error: ctx.Err().Error()}
-						return
-					}
-					r := RunTask(ctx, opts, task)
-					results[i] = r
-					if ctx.Err() != nil {
-						return // Interrupted attempts are not durable results.
-					}
-					if err := writeJSON(resultPath, r); err != nil {
-						fmt.Fprintf(opts.Log, "[%s] write result: %v\n", task.ID, err)
-						mu.Lock()
-						saveErr = errors.Join(saveErr, err)
-						mu.Unlock()
-						return
-					}
-					line, _ := json.Marshal(r)
-					mu.Lock()
-					_, err := lines.Write(append(line, '\n'))
-					saveErr = errors.Join(saveErr, err)
-					mu.Unlock()
-				}()
-			}
-		}()
-	}
-	for i := range tasks {
-		// Preserve the wrapper's tier barriers while allowing parallel problems
-		// within a tier. LoadLadder already orders easy, medium, hard.
-		if i > 0 && tasks[i].Tier != tasks[i-1].Tier {
-			tier.Wait()
+	opts.notify(Progress{Task: task, Phase: Queued})
+	r := runTask(ctx, opts, task)
+	results = []Result{r}
+	defer func() {
+		if runErr != nil && results[0].Outcome == Submitted {
+			results[0].Outcome, results[0].Error = Errored, runErr.Error()
 		}
-		tier.Add(1)
-		queue <- i
+		opts.notify(Progress{Task: task, Phase: Finished, Result: &results[0]})
+	}()
+	// Interrupted attempts retain their workspace and trace, but aren't grades.
+	if err := ctx.Err(); err != nil {
+		return results, err
 	}
-	close(queue)
-	wg.Wait()
-	return results, errors.Join(ctx.Err(), saveErr)
+	if err := saveResult(opts.Mounts.Results, r); err != nil {
+		return results, err
+	}
+	if r.Outcome == Errored {
+		return results, errors.New(r.Error)
+	}
+	if r.Outcome == Submitted {
+		if err := publishSubmission(ctx, opts.Mounts, info, r); err != nil {
+			r.Outcome, r.Error = Errored, fmt.Sprintf("publish submission: %v", err)
+			results[0] = r
+			return results, errors.Join(err, saveResult(opts.Mounts.Results, r))
+		}
+	}
+	return results, nil
 }
 
-// RunTask runs one task. The agent works in a temporary directory under
-// Scratch; afterwards <Output>/<task id>/ holds that workspace with the hidden
-// tests copied in, trace.jsonl and result.json.
-func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
+// runTask leaves the workspace mounted in place, including on startup failure
+// or cancellation. Only closed sessions can be published to the outbox.
+func runTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if opts.Log == nil {
 		opts.Log = io.Discard
 	}
@@ -224,47 +166,23 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if opts.Idle <= 0 {
 		opts.Idle = 3 * time.Minute
 	}
-	taskDir := filepath.Join(opts.Output, task.ID)
-	r = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, StartedAt: time.Now(), Trace: filepath.Join(taskDir, "trace.jsonl"), Workspace: filepath.Join(taskDir, "workspace")}
+	taskDir := filepath.Join(opts.Mounts.Results, task.ID)
+	r = Result{TaskID: task.ID, Tier: task.Tier, Title: task.Title, StartedAt: time.Now(), Trace: filepath.Join(taskDir, "trace.jsonl"), Workspace: opts.Mounts.Workspace}
 	opts.notify(Progress{Task: task, Phase: Starting})
 	defer func() {
 		r.FinishedAt = time.Now()
 		r.Duration = r.FinishedAt.Sub(r.StartedAt)
 		r.Passed = r.Outcome == Passed
 		fmt.Fprintf(opts.Log, "[%s] %s after %s\n", task.ID, r.Outcome, r.Duration.Round(time.Second))
-		opts.notify(Progress{Task: task, Phase: Finished, Result: &r})
 	}()
 	fail := func(err error) Result {
 		r.Outcome, r.Error = Errored, err.Error()
 		return r
 	}
-	if err := os.RemoveAll(r.Workspace); err != nil {
-		return fail(err)
-	}
-	if err := os.Remove(r.Trace); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fail(err)
-	}
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		return fail(err)
 	}
-	scratch := opts.Scratch
-	if scratch == "" {
-		scratch = os.TempDir()
-	}
-	live, err := os.MkdirTemp(scratch, "strap-eval-"+task.ID+"-")
-	if err != nil {
-		return fail(err)
-	}
-	defer os.RemoveAll(live)
-	workspace := filepath.Join(live, "workspace")
-	defer func() {
-		// Keep whatever the agent left, graded or not, beside the trace.
-		if err := os.Rename(workspace, r.Workspace); err != nil {
-			if err := copyTree(workspace, r.Workspace); err != nil {
-				fmt.Fprintf(opts.Log, "[%s] keep workspace: %v\n", task.ID, err)
-			}
-		}
-	}()
+	workspace := opts.Mounts.Workspace
 	if err := Materialize(task, workspace); err != nil {
 		return fail(err)
 	}
@@ -284,12 +202,10 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	}
 	r.Session = session.ID()
 	drain := opts.observeSession(session, task)
-	cleanup := func() {
+	cleanup := func() error {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
-		if err := session.Close(closeCtx); err != nil {
-			fmt.Fprintf(opts.Log, "[%s] close: %v\n", task.ID, err)
-		}
+		closeErr := session.Close(closeCtx)
 		drain(closeCtx)
 		insp := session.Inspect()
 		capture := insp.Capture
@@ -297,18 +213,14 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 		if insp.Outcome != nil {
 			r.ExecutionError = insp.Outcome.Error
 		}
-		if err := session.Dispose(closeCtx); err != nil {
-			fmt.Fprintf(opts.Log, "[%s] dispose: %v\n", task.ID, err)
-		}
+		return errors.Join(closeErr, session.Dispose(closeCtx))
 	}
 	sub, err := session.Subscribe(ctx, harness.SubscribeOptions{})
 	if err != nil {
-		cleanup()
-		return fail(err)
+		return fail(errors.Join(err, cleanup()))
 	}
 	if _, err := session.Send(session.Root(), task.Prompt); err != nil {
-		cleanup()
-		return fail(err)
+		return fail(errors.Join(err, cleanup()))
 	}
 	w := watcher{root: session.Root(), states: map[identity.ActorID]agent.State{}, working: map[identity.ActorID]bool{}, tools: map[string]bool{}, pending: map[message.MessageID]identity.ActorID{}}
 	waitErr := w.wait(ctx, session, sub, task.SessionTimeout(), opts.Quiet, opts.Idle, func(format string, args ...any) {
@@ -317,7 +229,9 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 	r.TimedOut = errors.Is(waitErr, errBudget)
 	r.NoReply = errors.Is(waitErr, errNoReply)
 	r.Replies, r.Reply = w.replies, bound(w.lastReply, replyLimit)
-	cleanup()
+	if err := cleanup(); err != nil {
+		return fail(err)
+	}
 	if ctx.Err() != nil {
 		return fail(ctx.Err())
 	}
@@ -329,23 +243,7 @@ func RunTask(ctx context.Context, opts Options, task Task) (r Result) {
 		// endpoint, not something the workspace can be graded on.
 		return fail(fmt.Errorf("no model call completed: %s", r.ExecutionError))
 	}
-	opts.notify(Progress{Task: task, Phase: Grading})
-	if err := ApplyHidden(task, workspace); err != nil {
-		return fail(err)
-	}
-	grade, err := RunHiddenTests(ctx, task, workspace)
-	if err != nil {
-		return fail(err)
-	}
-	r.Grade = &grade
-	switch {
-	case grade.Passed:
-		r.Outcome = Passed
-	case !grade.Compiled:
-		r.Outcome = BuildFailed
-	default:
-		r.Outcome = Failed
-	}
+	r.Outcome = Submitted
 	return r
 }
 

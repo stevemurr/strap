@@ -70,7 +70,6 @@ type evalProblem struct {
 	started, last time.Time
 	root          message.ActorID
 	result        *eval.Result
-	reused        bool
 	activity      *model
 	tools         map[string]bool // invocation -> finished; counts each invocation once
 	toolErrors    map[string]bool
@@ -152,7 +151,7 @@ func (m *evalModel) observe(e eval.Progress) {
 	}
 	if e.Result != nil {
 		copy := *e.Result
-		p.result, p.reused = &copy, e.Reused
+		p.result = &copy
 		p.started = copy.StartedAt
 		p.status = string(copy.Outcome)
 		if p.activity == nil {
@@ -168,14 +167,11 @@ func (m *evalModel) observe(e eval.Progress) {
 		if copy.ExecutionError != "" {
 			p.activity.add("Execution error", safeText(copy.ExecutionError), false)
 		}
-		if copy.Reply != "" && e.Reused {
-			p.activity.add("Saved reply", safeText(copy.Reply), false)
-		}
 		if copy.TimedOut {
-			p.activity.add("Eval", "Session budget exhausted; workspace was still graded.", false)
+			p.activity.add("Eval", "Session budget exhausted; see submission status for grading readiness.", false)
 		}
 		if copy.NoReply {
-			p.activity.add("Eval", "Session ended without a root reply; workspace was still graded.", false)
+			p.activity.add("Eval", "Session ended without a root reply; see submission status for grading readiness.", false)
 		}
 	}
 	if e.Event == nil {
@@ -617,9 +613,6 @@ func (m *evalModel) metrics(p *evalProblem) []string {
 			usage += " (partial)"
 		}
 	}
-	if p.reused {
-		tools = "Live metrics unavailable · result reused"
-	}
 	return []string{contextLabel, tools, usage}
 }
 func (m *evalModel) View() string {
@@ -627,11 +620,13 @@ func (m *evalModel) View() string {
 		return " "
 	}
 	width := m.detailWidth()
-	done, passed, failed, active, reused := 0, 0, 0, 0, 0
+	done, passed, failed, active, submitted := 0, 0, 0, 0, 0
 	for _, p := range m.problems {
 		if p.phase == eval.Finished {
 			done++
-			if p.result != nil && p.result.Passed {
+			if p.result != nil && p.result.Outcome == eval.Submitted {
+				submitted++
+			} else if p.result != nil && p.result.Passed {
 				passed++
 			} else {
 				failed++
@@ -640,25 +635,22 @@ func (m *evalModel) View() string {
 		if p.active() {
 			active++
 		}
-		if p.reused {
-			reused++
-		}
 	}
 	state := "running"
 	if m.stopping {
 		state = "stopping"
 	}
-	header := titleStyle.Render("strap / eval") + dimStyle.Render(fmt.Sprintf("   %s · %d workers · %s · %s", inlineText(m.opts.Config.Model.Model), max(1, m.opts.Parallel), state, m.now().Sub(m.started).Round(time.Second)))
+	header := titleStyle.Render("strap / eval") + dimStyle.Render(fmt.Sprintf("   %s · %s · %s", inlineText(m.opts.Config.Model.Model), state, m.now().Sub(m.started).Round(time.Second)))
 	barWidth := max(1, min(40, width))
 	filled, passWidth := 0, 0
 	if len(m.problems) > 0 {
 		filled = barWidth * done / len(m.problems)
-		passWidth = barWidth * passed / len(m.problems)
+		passWidth = barWidth * (passed + submitted) / len(m.problems)
 	}
 	bar := successStyle.Render(strings.Repeat("━", passWidth)) + errorStyle.Render(strings.Repeat("━", filled-passWidth)) + dimStyle.Render(strings.Repeat("─", barWidth-filled))
 	counts := fmt.Sprintf("%d / %d complete   ", done, len(m.problems)) + successStyle.Render(fmt.Sprintf("✓ %d passed", passed)) + dimStyle.Render(fmt.Sprintf(" · %d failed · %d active · %d queued", failed, active, len(m.problems)-done-active))
-	if reused > 0 {
-		counts += dimStyle.Render(fmt.Sprintf(" · %d reused", reused))
+	if submitted > 0 {
+		counts += dimStyle.Render(fmt.Sprintf(" · %d submitted", submitted))
 	}
 	lines := []string{header, bar, counts, ""}
 	p := m.current()
@@ -716,7 +708,7 @@ func (m *evalModel) View() string {
 			statusLine += fmt.Sprintf(" · %d tool errors", len(p.toolErrors))
 		}
 		if m.metricsOpen {
-			lines = append(lines, dimStyle.Render(metrics[1]), dimStyle.Render(metrics[2]), dimStyle.Render("Results → "+safeText(m.opts.Output)))
+			lines = append(lines, dimStyle.Render(metrics[1]), dimStyle.Render(metrics[2]), dimStyle.Render("Results → "+safeText(m.opts.Mounts.Results)))
 		}
 	}
 	if p == nil && m.metricsOpen {
@@ -737,9 +729,6 @@ func (m *evalModel) View() string {
 }
 
 func (m *evalModel) problemStatus(p *evalProblem) string {
-	if p.reused {
-		return p.status + " · reused"
-	}
 	if p.phase == eval.Queued {
 		return "queued"
 	}

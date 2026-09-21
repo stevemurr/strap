@@ -1,145 +1,185 @@
-# Harness evaluation ladder
+# Container coding evaluations
 
-`strap-eval` runs the harness against a ladder of 60 coding tasks (20 easy,
-20 medium, 20 hard), records one JSONL trace per task exactly as `strap -record`
-would, grades each attempt with hidden tests, and summarizes the traces.
+Each `strap-eval` agent container solves one problem at `/workspace` and publishes
+its completed files to an outbox. A separate grader container consumes that
+snapshot and runs hidden tests. The agent never receives the private ladder.
 
-Each task wraps the algorithmic insight of a LeetCode problem in an ordinary
-engineering request: a small Go module with a stub, a README that states the
-contract, and a user message asking for the implementation. The agent never
-sees the hidden tests, so it has to read the repository and verify its own work.
+## One-command launcher
 
-For precise tool and state-transition checks, use the separate
-[interaction suite](interaction/README.md). Its five audit-assignment cases and
-eight schema regressions run scripted providers or one live model actor against
-the production session. Reports separate harness invariants, eventual outcomes,
-first-operation tool selection, and argument validity; recovery cannot hide an
-invalid first attempt. `strap-eval interaction list` shows the available cases.
-
-## Commands
+From the repository root, use Apple's `container` CLI through the host launcher:
 
 ```sh
-go build -o strap-eval ./cmd/strap-eval
-
-./strap-eval list                                   # every task with its insight
-./strap-eval selfcheck                              # hidden tests fail on the stub, pass on the reference
-./strap-eval run -tier easy -parallel 2             # record eval/results/<timestamp>/
-./strap-eval run -tier easy,medium,hard -parallel 2 -profile PROFILE -out eval/results/RUN
-./strap-eval run -q -tier easy -out eval/results/RUN # quiet mode for automation
-./strap-eval run -out eval/results/<dir>            # rerun the same directory to resume
-./strap-eval report eval/results/<dir>              # write report.md and report.json
+scripts/eval.sh easy-01-budget-pair
+scripts/eval.sh --no-build --tier easy -- -profile qwen3.6
+scripts/eval.sh --all
+scripts/eval.sh --no-build --list
 ```
 
-`run` accepts the same model flags as `strap` (`-config`, `-profile`,
-`-base-url`, `-model`, generation overrides). `-task id,id` and
-`-tier easy,medium,hard` select tasks. Omit `-tier` for all tiers. Whitespace
-and duplicate tiers are accepted; unknown or empty tier names are errors.
-`-parallel N` runs N sessions at once within a tier. Tiers always run in
-easy → medium → hard order, with each tier finishing before the next starts.
-`-quiet DURATION` sets how long the session must stay silent after the root's
-final reply before the attempt is considered finished (default 3s).
-This completion delay is independent of the quiet display mode (`-q`).
+The launcher builds the image with caching by default, discovers your host Strap
+model catalog, and snapshots it into a fresh batch directory under `eval/results`.
+It runs problems sequentially, with a separate agent container and grader container
+for each. Private grading fixtures are snapshotted on the host and mounted only in
+the grader. Logs, workspaces, submissions and per-problem reports are retained;
+the launcher prints their host paths.
 
-`run` writes `report.md` and `report.json` after successful completion; use
-`-report=false` to skip report generation. The multi-tier command above replaces
-the former `run-eval.sh` script, which is removed. From another directory, also
-pass `-ladder /path/to/strap/eval/ladder`.
+Pass multiple problem IDs to run a selection. Use `--config FILE` for another
+host catalog, `--out NEW_DIRECTORY` for an explicit batch location, and place
+model flags after `--`. The endpoint in the catalog must be reachable from the
+container. `--no-build` uses the existing image; omit it after source changes.
+Existing output directories are rejected, so retries cannot overwrite results.
+These are host-launcher options; paths inside every container remain fixed.
 
-### Live progress
+Infrastructure failures are logged, remaining problems still run, and the launcher
+exits nonzero. A failed solution is a completed grade and does not cause a nonzero
+exit; read each `results/<problem-id>/result.json` for the outcome. Interrupting the
+launcher stops its active container and keeps artifacts. `scripts/eval.sh --help`
+lists all options. No model requests are made by `--list`.
 
-When input and output are terminals, `run` opens a read-only TUI using Strap's
-existing activity renderer. It shows overall and per-tier completion, active
-problem spinners, elapsed time and session budgets, model/tool calls, tool
-errors, context measurements, token usage, and expandable tool activity.
-Grading and long gaps between events are shown separately from agent work.
-The display exits automatically when the run finishes; it never requires a reply.
+## Mount contract
 
-- **↑/↓** or **j/k** selects a problem; **f** resumes following active problems.
-- **Enter** or **F7** focuses activity folds; **↑/↓** selects a fold and **Enter**
-  expands it. **Esc** returns to problem navigation.
-- **Tab** cycles between all activity and individual agent streams.
-- **PgUp/PgDn** or the mouse wheel scrolls; **Ctrl+End** returns to latest output.
-- **Ctrl+T** shows or hides reasoning; **Ctrl+C** stops the run and cleans up.
+| Path | Agent container | Grader container |
+| --- | --- | --- |
+| `/problems` | Public task metadata and starter files, included in the image | Unused |
+| `/workspace` | Empty working directory; all agent tools and language servers use it | Fresh working directory for a copy of the submission plus hidden tests |
+| `/results` | Writable mounted traces, run metadata, results and reports | Same results mount, writable for grade and reports |
+| `/outbox` | Empty writable mount; publishes `submission/` when ready | Same outbox mount, **read-only** |
+| `/grading` | **Not mounted** | Full private task ladder, **read-only** |
 
-The view has no composer or agent-control commands. It reads an independent
-event subscription, so browsing does not consume the runner's events or change
-model inputs. Context is the latest measured size for the selected agent (the
-root in the all-agent view), not cumulative input tokens. Unknown counts are
-marked unavailable and incomplete token totals are marked partial. Context-window
-percentages are omitted because the runner does not have a reliable window limit.
-Reused results show saved grading output and replies; live metrics are unavailable.
-The activity pane retains a bounded tail; full history remains in `trace.jsonl`.
+The CLI fixes these paths. There are no `-scratch`, `-out`, `-ladder`, `-task`,
+`-tier`, or `-parallel` options for agent runs, no automatic result reuse, and
+no workspace relocation. Each retry needs fresh workspace, results and outbox
+directories. Run multiple containers to evaluate problems in parallel.
+The Go embedding API accepts an explicit `Mounts` value for tests; it uses the
+same workflow and checks that active mounts exist, are directories and do not overlap.
 
-Use `-ui plain` for the original line-oriented output. `-ui auto` is the default
-and selects plain output for pipes, CI, or `TERM=dumb`. `-ui tui` explicitly
-requires terminal input and output. Interrupted runs retain completed results;
-reports can be generated explicitly with `strap-eval report RUN_DIR`.
+## Build and run
 
-For automation and CLI scripts, use `-ui quiet` or `-q`. Quiet mode never opens
-the TUI and suppresses startup and per-task progress logs. It keeps the final
-summary and report paths on stdout, and command errors on stderr. `-q` overrides
-`-ui` regardless of flag order. Results, traces, resume behavior, and automatic
-reports are unchanged; scripts can read `results.jsonl` or `report.json` for
-structured results. A completed run exits successfully even if some tasks fail
-grading; command errors and interruptions exit nonzero, as in other display modes.
+Use Apple’s `container` CLI on macOS. Build from the repository root:
 
-## Run layout
+```sh
+container build -f eval/Dockerfile -t strap-eval .
+container run --rm strap-eval list
+```
 
-A run directory defaults to `<commit>_<profile>_<timestamp>`: the harness
-build's short git hash (`-dirty` when the tree had uncommitted changes,
-`nogit` when the binary carries no VCS information), the model profile, and
-the start time. Runs therefore sort by harness build first, then by model.
-Both values are also recorded in `run.json` and printed in the report.
+The image contains Go and gopls (versions are set in `eval/Dockerfile`), Bash,
+ripgrep and Poppler. It contains only public problem fixtures; private hidden
+tests and reference solutions exist only in the build stage and the explicit
+smoke-test target, never in the runtime image.
+
+Create a fresh attempt directory on the host. Supply a model endpoint reachable
+**from the container**; `localhost` refers to the container itself. Replace the
+example model and endpoint below with your server settings.
+
+```sh
+attempt="$PWD/eval/results/container-attempt-001"
+mkdir -p "$attempt/workspace" "$attempt/results" "$attempt/outbox"
+container run --rm --progress none \
+  --mount "type=bind,source=$attempt/workspace,target=/workspace" \
+  --mount "type=bind,source=$attempt/results,target=/results" \
+  --mount "type=bind,source=$attempt/outbox,target=/outbox" \
+  strap-eval -problem easy-01-budget-pair -q \
+  -backend chatcompletions -base-url http://MODEL_HOST:8000/v1 -model MODEL_NAME
+```
+
+`-config`, `-profile`, generation overrides, and LSP flags use the same model
+configuration as `strap`. To use a host catalog, mount it read-only and pass its
+container path to `-config`. Go language tools start gopls inside the container.
+Other language servers must be installed in a derived image if needed.
+`run -problem ID` is also accepted; omitting the `run` subcommand is shorthand.
+
+After the agent container exits successfully, grade the ready submission:
+
+```sh
+container run --rm --progress none --network none \
+  --mount "type=bind,source=$attempt/outbox,target=/outbox,readonly" \
+  --mount "type=bind,source=$attempt/results,target=/results" \
+  --mount "type=bind,source=$PWD/eval/ladder,target=/grading,readonly" \
+  strap-eval grade -q
+```
+
+The grader uses the image's empty `/workspace`; do **not** mount the original
+agent workspace there. The shipped ladder uses only the standard library, so
+grading needs no network. The grader never contacts a model. Starting another
+fresh grader container with the same outbox and results reruns grading.
+A host scheduler can watch attempt directories, wait for the agent container to
+exit, and dispatch this command when `outbox/submission/manifest.json` exists.
+There is no embedded daemon or Docker socket dependency.
+
+## Submission and results
+
+After closing the harness and LSP processes, the runner copies the workspace to
+`/outbox/.pending/workspace`, writes a versioned manifest, then renames `.pending`
+to `submission` within the same mount. Only `submission` is ready. Cancellation
+or failed copying never publishes a partial submission. Snapshots contain regular
+files and directories; symlinks and special files fail submission explicitly.
+The manifest records the session result and run metadata, identifying one problem
+and one session. The grader verifies the results mount belongs to that session.
 
 ```
-eval/results/<run>/
-  run.json              model, ladder, task list
-  results.jsonl         one Result per finished task, appended as tasks finish
+workspace/                         original agent work, retained in place
+outbox/submission/
+  manifest.json                    version, run metadata and ungraded result
+  workspace/                       submitted snapshot, unchanged by grading
+results/
+  run.json                         model, build, problem and mount metadata
+  results.jsonl                    one result; grade replaces submitted outcome
   report.md, report.json
-  <task-id>/
-    trace.jsonl         the session recording (same format as strap -record)
-    workspace/          the agent's module, plus the hidden tests copied in afterwards
-                        (during the session it lives under the system temp directory)
-    result.json         outcome, grade output, final root reply, capture health
+  <problem-id>/
+    trace.jsonl                    full agent session recording
+    result.json                    submitted outcome, then grading result
 ```
 
-Interrupting a run leaves finished tasks in place; rerunning with the same
-`-out` reuses every task that already has a `result.json`.
+The agent phase reports `submitted`, not passed or failed. Infrastructure failures
+return a command error and publish no ready submission. Interrupted attempts retain
+the workspace and trace but publish no submission. A timed-out or idle session can
+still submit its partial solution after orderly shutdown, retaining `timed_out`
+or `no_reply` in the manifest.
 
-While a session runs, its workspace lives in a fresh directory under the
-system temp directory (`-scratch` overrides the parent), not under `-out`. An
-agent that explores upward from its working directory therefore finds other
-temporary workspaces at most, never the repository with the ladder's hidden
-tests and reference solutions. The workspace moves under `-out` after grading.
+`grade` copies the snapshot into its own `/workspace`, overlays hidden tests from
+`/grading`, and runs `go test ./... -count=1 -run '^TestHidden'`. Agent-authored
+Go test files must also compile. Outcomes are `passed`, `failed`, `build_failed`,
+and `error`. A failing solution is a completed grade (exit zero); command and
+infrastructure errors exit nonzero. Read `result.json` for the grading outcome.
+Run one grader per attempt at a time; this single-submission protocol does not
+implement distributed claims or concurrent result writers.
 
-Keep runs that feed one write-up together in a bundle directory named after
-that write-up, for example
-`eval/results/2026-09-15-three-model-comparison/<run>/`, with a `README.md`
-that lists the runs and links the reports under `docs/evals/`. Run directories
-can be moved: `report` looks for each trace beside its `result.json` under the
-run directory, not at the path recorded when the task ran. Tier runs that
-share a profile can be merged into one run directory by concatenating their
-`results.jsonl` files and moving the task directories together.
+## Commands and progress
 
-## Completion rule and grading
+- `strap-eval -problem ID -q` runs and submits one solution, printing a short summary.
+- `strap-eval grade -q` grades a ready submission and writes updated reports.
+- `strap-eval report` rebuilds reports from the `/results` mount.
+- `strap-eval list [-tier easy,medium,hard] [-task ID,...]` lists public problems.
+- `strap-eval selfcheck [-tier ...] [-task ...] [-parallel N]` checks private fixtures;
+  mount the full ladder at `/grading`. This utility runs no agent.
 
-A task attempt is finished when the root agent has sent a reply to the user and
-nothing is still in flight: no agent is running, no tool call is open, and no
-message is queued for a live agent. Those are the same signals the TUI uses for
-its activity indicator. The attempt then has to stay silent for the quiet
-period. A session whose agents are all idle with nothing queued and no root
-reply for the idle period (`-idle`, default 3 minutes) is finished early and
-flagged `no_reply`; a root that ends its turn with `wait_for_input` instead of
-a reply would otherwise cost the whole budget. If the tier's session budget
-runs out first (15, 25 or 40 minutes by default, overridable per task), the
-session is closed and the result is marked `timed_out`. In every case the
-workspace is still graded.
+`-ui auto` chooses the read-only progress TUI for terminals, otherwise plain logs.
+`-ui plain` forces logs; `-q` or `-ui quiet` suppresses progress but retains the
+summary and errors. `-q` overrides `-ui tui`. `-report=false` skips the agent's
+ungraded execution report; grading always writes reports.
+The TUI retains the shared tool activity, plan and agent inspection controls.
 
-Grading copies `hidden/` into the workspace and runs
-`go test ./... -count=1 -run ^TestHidden`. The agent's own test files still
-compile, so a broken test breaks the build the way it would for a person.
-Outcomes are `passed`, `failed`, `build_failed` and `error` (infrastructure
-problem; nothing to grade).
+A session completes when the root has replied and all work and tool calls have
+settled for `-quiet` (default 3s). This delay is independent of `-q`.
+`-idle` (default 3m) bounds an idle session without a root reply. Per-problem
+session budgets are unchanged (15/25/40 minutes by tier unless overridden).
+
+## Validation
+
+```sh
+go test ./eval ./cmd/strap-eval ./internal/tui
+container build -f eval/Dockerfile --target smoke -t strap-eval-smoke .
+```
+
+The container smoke target needs no model server. Linux CI builds the same
+Dockerfile with Docker. A scripted provider exercises
+shell working-directory discovery, relative and absolute reads, real gopls,
+submission publication and hidden-test grading at the actual container paths.
+Ordinary tests use isolated mount directories and cover cancellation, immutable
+submissions, regrading, mount overlap and preservation of existing files.
+
+The separate [interaction suite](interaction/README.md) evaluates bounded
+coordination and schema decisions. Its fixture-oriented commands and artifact
+layout remain independent of coding-problem submission and grading.
 
 ## Task format
 
@@ -179,18 +219,3 @@ replies and time to first reply, failed model outputs and agent exits. Per tier
 it reports pass rate, timeouts, mean duration, mean model and tool calls, and
 mean tokens. Failures list the session or capture error and the tail of the
 grade output.
-
-## What the first smoke runs showed
-
-Two live attempts at `easy-01-budget-pair` against qwen3.6 (`qwen3.6-coding`
-preset) illustrate what the report surfaces:
-
-- One attempt passed in 41 seconds with 5 model calls. The root read the README
-  and stub, wrote the solution itself, ran `go build` and `go vet`, and replied.
-  It never created a plan or delegated, which the `agents`, `roles` and `work
-  events` columns make visible.
-- The other attempt stalled: the third model call streamed 370 KB of reasoning
-  for almost 15 minutes and was cancelled when the session budget ran out. The
-  `longest call`, `reasoning KB` and `failed outputs` columns show that pattern.
-  The profile's generation settings allow very long outputs; pass `-max-tokens`
-  or `-thinking=false` to `run` when you want to bound that rather than measure it.

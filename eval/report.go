@@ -63,6 +63,7 @@ type TaskMetrics struct {
 type TierSummary struct {
 	Tier            string        `json:"tier"`
 	Tasks           int           `json:"tasks"`
+	Submitted       int           `json:"submitted"`
 	Passed          int           `json:"passed"`
 	Failed          int           `json:"failed"`
 	BuildFailed     int           `json:"build_failed"`
@@ -293,6 +294,8 @@ func summarize(tasks []TaskMetrics) []TierSummary {
 		}
 		s.Tasks++
 		switch t.Outcome {
+		case Submitted:
+			s.Submitted++
 		case Passed:
 			s.Passed++
 		case Failed:
@@ -323,7 +326,9 @@ func summarize(tasks []TaskMetrics) []TierSummary {
 			continue
 		}
 		n := float64(s.Tasks)
-		s.PassRate = float64(s.Passed) / n
+		if graded := s.Tasks - s.Submitted; graded > 0 {
+			s.PassRate = float64(s.Passed) / float64(graded)
+		}
 		s.MeanDuration = time.Duration(float64(s.MeanDuration) / n)
 		s.MeanModelCalls /= n
 		s.MeanToolCalls /= n
@@ -341,7 +346,7 @@ func (r Report) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# strap eval: %s\n\n", r.Dir)
 	if r.Run.Model.Model != "" {
-		fmt.Fprintf(&b, "Model %s at %s (backend %s). Started %s, parallel %d.", r.Run.Model.Model, r.Run.Model.BaseURL, r.Run.Model.Backend, r.Run.StartedAt.Format(time.RFC3339), r.Run.Parallel)
+		fmt.Fprintf(&b, "Model %s at %s (backend %s). Started %s.", r.Run.Model.Model, r.Run.Model.BaseURL, r.Run.Model.Backend, r.Run.StartedAt.Format(time.RFC3339))
 		if r.Run.Commit != "" {
 			fmt.Fprintf(&b, " Harness commit %s.", r.Run.Commit)
 		}
@@ -350,15 +355,19 @@ func (r Report) Markdown() string {
 		}
 		b.WriteString("\n\n")
 	}
-	b.WriteString("## Tiers\n\n| tier | tasks | passed | rate | failed | build failed | error | timed out | no reply | mean time | calls | tools | tool errs | agents | tokens in | tokens out |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("## Tiers\n\n| tier | tasks | passed | submitted | rate | failed | build failed | error | timed out | no reply | mean time | calls | tools | tool errs | agents | tokens in | tokens out |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	total := TierSummary{Tier: "all"}
 	for _, s := range r.Tiers {
-		fmt.Fprintf(&b, "| %s | %d | %d | %.0f%% | %d | %d | %d | %d | %d | %s | %.1f | %.1f | %.1f | %.1f | %.0f | %.0f |\n", s.Tier, s.Tasks, s.Passed, 100*s.PassRate, s.Failed, s.BuildFailed, s.Errored, s.TimedOut, s.NoReply, s.MeanDuration.Round(time.Second), s.MeanModelCalls, s.MeanToolCalls, s.MeanToolErrors, s.MeanAgents, s.MeanInputTokens, s.MeanOutput)
+		fmt.Fprintf(&b, "| %s | %d | %d | %d | %.0f%% | %d | %d | %d | %d | %d | %s | %.1f | %.1f | %.1f | %.1f | %.0f | %.0f |\n", s.Tier, s.Tasks, s.Passed, s.Submitted, 100*s.PassRate, s.Failed, s.BuildFailed, s.Errored, s.TimedOut, s.NoReply, s.MeanDuration.Round(time.Second), s.MeanModelCalls, s.MeanToolCalls, s.MeanToolErrors, s.MeanAgents, s.MeanInputTokens, s.MeanOutput)
 		total.Tasks += s.Tasks
 		total.Passed += s.Passed
+		total.Submitted += s.Submitted
 	}
-	if total.Tasks > 0 {
-		fmt.Fprintf(&b, "\n%d of %d tasks passed (%.0f%%).\n", total.Passed, total.Tasks, 100*float64(total.Passed)/float64(total.Tasks))
+	if graded := total.Tasks - total.Submitted; graded > 0 {
+		fmt.Fprintf(&b, "\n%d of %d graded tasks passed (%.0f%%).\n", total.Passed, graded, 100*float64(total.Passed)/float64(graded))
+	}
+	if total.Submitted > 0 {
+		fmt.Fprintf(&b, "\n%d submissions await grading.\n", total.Submitted)
 	}
 	b.WriteString("\n## Tasks\n\n| task | outcome | time | first reply | calls | longest call | reasoning KB | failed outputs | ctx max | tools (errors) | shell | agents | roles | work events | audits | replies | tokens in/out |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, t := range r.Tasks {
@@ -373,7 +382,7 @@ func (r Report) Markdown() string {
 	}
 	var failures []TaskMetrics
 	for _, t := range r.Tasks {
-		if !t.Passed || t.Error != "" {
+		if (t.Outcome != Submitted && !t.Passed) || t.Error != "" {
 			failures = append(failures, t)
 		}
 	}

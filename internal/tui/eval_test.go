@@ -25,7 +25,7 @@ func evalSetup(t *testing.T) (*evalModel, eval.Task) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	m := newEvalModel(ctx, cancel, eval.Options{Parallel: 2, Output: "results"})
+	m := newEvalModel(ctx, cancel, eval.Options{Mounts: eval.Mounts{Results: "results"}})
 	task := eval.Task{ID: "medium-01-cache", Tier: "medium", Title: "Session cache"}
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
 	m.observe(eval.Progress{Task: task, Phase: eval.Starting, At: time.Now()})
@@ -123,7 +123,7 @@ func TestEvalProgramExitsWithoutUserInput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var output bytes.Buffer
-	_, err := RunEval(ctx, eval.Options{Ladder: t.TempDir(), Output: t.TempDir()}, nil, &output)
+	_, err := RunEval(ctx, eval.Options{Problem: "missing", Mounts: eval.Mounts{Problems: t.TempDir(), Results: t.TempDir(), Workspace: t.TempDir(), Outbox: t.TempDir()}}, nil, &output)
 	if err == nil || !strings.Contains(err.Error(), "no tasks under") {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestEvalProgramRunsAndCancelsWithoutInput(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			dir := t.TempDir()
-			opts := eval.Options{Config: harness.DefaultConfig(), Deps: harness.Dependencies{Provider: evalFinalProvider{block: stop}}, Ladder: "../../eval/ladder", Output: dir, Scratch: t.TempDir(), Quiet: time.Millisecond, Filter: func(task eval.Task) bool { return task.ID == "easy-01-budget-pair" }}
+			opts := eval.Options{Config: harness.DefaultConfig(), Deps: harness.Dependencies{Provider: evalFinalProvider{block: stop}}, Mounts: eval.Mounts{Problems: evalLadderPath(t), Results: dir, Workspace: t.TempDir(), Outbox: t.TempDir()}, Quiet: time.Millisecond, Problem: "easy-01-budget-pair"}
 			if stop {
 				opts.Observe = func(e eval.Progress) {
 					if v, ok := e.Event.(conversation.AgentEvent); ok {
@@ -167,12 +167,11 @@ func TestEvalProgramRunsAndCancelsWithoutInput(t *testing.T) {
 				if _, err := os.Stat(filepath.Join(dir, "easy-01-budget-pair", "result.json")); !os.IsNotExist(err) {
 					t.Fatal("interrupted result became durable", err)
 				}
-			} else if err != nil || len(results) != 1 || results[0].Grade == nil {
+			} else if err != nil || len(results) != 1 || results[0].Outcome != eval.Submitted {
 				t.Fatal(results, err)
 			}
-			entries, err := os.ReadDir(opts.Scratch)
-			if err != nil || len(entries) != 0 {
-				t.Fatal("cleanup incomplete", entries, err)
+			if _, err := os.Stat(filepath.Join(opts.Mounts.Workspace, "go.mod")); err != nil {
+				t.Fatal("mounted workspace was not retained", err)
 			}
 		})
 	}
@@ -243,4 +242,13 @@ func TestEvalSessionHasNoControlCapabilities(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func evalLadderPath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs("../../eval/ladder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

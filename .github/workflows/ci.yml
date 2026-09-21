@@ -30,3 +30,10 @@ jobs:
       # Live tests reach a model server and skip unless STRAP_LIVE_BASE_URL is
       # set, so the suite is self-contained here.
       - run: go test -race -timeout 20m ./...
+
+  container-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fixed workspace, file tools, gopls, outbox and hidden grading
+        run: docker build -f eval/Dockerfile --target smoke -t strap-eval-smoke .

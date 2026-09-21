@@ -2,9 +2,6 @@ package eval_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +18,7 @@ func TestProgressObservesExecutionAndFinalTelemetry(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	results, err := eval.Run(ctx, opts)
-	if err != nil || len(results) != 1 || !results[0].Passed {
+	if err != nil || len(results) != 1 || results[0].Outcome != eval.Submitted {
 		t.Fatal(results, err)
 	}
 	var phases []eval.Phase
@@ -39,63 +36,13 @@ func TestProgressObservesExecutionAndFinalTelemetry(t *testing.T) {
 			tokens = true
 		}
 	}
-	if len(phases) != 5 || phases[0] != eval.Queued || phases[1] != eval.Starting || phases[2] != eval.Running || phases[3] != eval.Grading || phases[4] != eval.Finished {
+	if len(phases) != 4 || phases[0] != eval.Queued || phases[1] != eval.Starting || phases[2] != eval.Running || phases[3] != eval.Finished {
 		t.Fatal(phases)
 	}
 	if !tools || !usage || !tokens {
 		t.Fatalf("tools=%v usage=%v tokens=%v", tools, usage, tokens)
 	}
-	if events[len(events)-1].Result == nil || !events[len(events)-1].Result.Passed {
+	if events[len(events)-1].Result == nil || events[len(events)-1].Result.Outcome != eval.Submitted {
 		t.Fatal("completion preceded observation drain")
-	}
-	events = nil
-	if _, err := eval.Run(ctx, opts); err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 2 || events[1].Phase != eval.Finished || !events[1].Reused {
-		t.Fatal(events)
-	}
-}
-
-func TestProgressPreservesTierBarriers(t *testing.T) {
-	ladder := writeLadder(t)
-	source := filepath.Join(ladder, "easy", "00-probe")
-	for _, name := range []string{"easy/01-probe", "medium/00-probe"} {
-		dir := filepath.Join(ladder, name)
-		if err := os.CopyFS(dir, os.DirFS(source)); err != nil {
-			t.Fatal(err)
-		}
-		data, err := os.ReadFile(filepath.Join(dir, "task.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		data = []byte(strings.ReplaceAll(string(data), "easy-00-probe", strings.ReplaceAll(name, "/", "-")))
-		if strings.HasPrefix(name, "medium") {
-			data = []byte(strings.ReplaceAll(string(data), `"tier":"easy"`, `"tier":"medium"`))
-		}
-		if err := os.WriteFile(filepath.Join(dir, "task.json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	opts := options(t, ladder, &script{})
-	opts.Parallel = 2
-	var mu sync.Mutex
-	finishedEasy := 0
-	violation := false
-	opts.Observe = func(p eval.Progress) {
-		mu.Lock()
-		defer mu.Unlock()
-		if p.Phase == eval.Finished && p.Task.Tier == "easy" {
-			finishedEasy++
-		}
-		if p.Phase == eval.Starting && p.Task.Tier == "medium" && finishedEasy != 2 {
-			violation = true
-		}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	results, err := eval.Run(ctx, opts)
-	if err != nil || len(results) != 3 || violation || finishedEasy != 2 {
-		t.Fatal(len(results), err, violation, finishedEasy)
 	}
 }

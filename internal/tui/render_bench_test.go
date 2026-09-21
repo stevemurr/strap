@@ -24,7 +24,7 @@ func renderBenchEval(b *testing.B) *evalModel {
 	b.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	b.Cleanup(cancel)
-	m := newEvalModel(ctx, cancel, eval.Options{Parallel: 4})
+	m := newEvalModel(ctx, cancel, eval.Options{})
 	m.width, m.height = 180, 55
 	now := time.Now()
 	for problem := 0; problem < 4; problem++ {

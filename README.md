@@ -391,16 +391,17 @@ go test -race ./...
 
 ## Evaluation
 
-Run the coding ladder with live progress, context and tool-call counts, and
-read-only activity inspection. Tiers run in order and reports are written automatically:
+Run one coding problem per container with a consistent `/workspace`. The agent
+publishes a snapshot to `/outbox`; a separate grader container runs hidden tests
+against that snapshot and writes grades beside the traces in `/results`.
 
 ```sh
-go run ./cmd/strap-eval run -tier easy,medium,hard -parallel 2 -profile PROFILE -out eval/results/RUN
+scripts/eval.sh easy-01-budget-pair
+scripts/eval.sh --no-build --tier easy -- -profile qwen3.6
 ```
 
-Replace `PROFILE` with a saved model profile. Use `-ui plain` for line-oriented
-output, or rerun with the same `-out` to resume. See the [eval guide](eval/README.md)
-for keyboard controls, task selection, grading, and reports.
+See the [eval guide](eval/README.md) for the agent and grader mount commands,
+model configuration, quiet mode, and container smoke tests.
 
 ## Package map
 

@@ -150,7 +150,6 @@ func TestEvalMockRenderCapture(t *testing.T) {
 			withTerminalTheme(t, dark, termenv.TrueColor)
 			m, task := evalSetup(t)
 			m.opts.Config.Model.Model = "qwen3.6"
-			m.opts.Parallel = 1
 			m.current().task.Title = "Group tags that are rearrangements of each other"
 			m.current().task.ID = "medium-02-group-equivalent-tags"
 			fixed := m.started.Add(202 * time.Second)

@@ -108,7 +108,7 @@ func options(t *testing.T, ladder string, p provider.Provider) eval.Options {
 	t.Helper()
 	cfg := harness.DefaultConfig()
 	cfg.Web = nil
-	return eval.Options{Config: cfg, Deps: harness.Dependencies{Provider: p}, Ladder: ladder, Output: filepath.Join(t.TempDir(), "run"), Scratch: t.TempDir(), Log: testWriter{t}, Quiet: 200 * time.Millisecond}
+	return eval.Options{Config: cfg, Deps: harness.Dependencies{Provider: p}, Mounts: eval.Mounts{Problems: publicProblems(t, ladder), Grading: ladder, Results: t.TempDir(), Workspace: t.TempDir(), Outbox: t.TempDir()}, Problem: "easy-00-probe", Log: testWriter{t}, Quiet: 200 * time.Millisecond}
 }
 
 type testWriter struct{ t *testing.T }
@@ -118,13 +118,13 @@ func (w testWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestRunPassesAndResumes(t *testing.T) {
+func TestRunPassesAndRetainsMounts(t *testing.T) {
 	ladder := writeLadder(t)
 	p := &script{write: true, content: "package probe\n\nfunc Answer() int { return 42 }\n"}
 	opts := options(t, ladder, p)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	results, err := eval.Run(ctx, opts)
+	results, err := runAndGrade(t, ctx, opts)
 	if err != nil || len(results) != 1 {
 		t.Fatal(results, err)
 	}
@@ -144,23 +144,26 @@ func TestRunPassesAndResumes(t *testing.T) {
 	if err != nil || !page.Sealed || len(page.Events) < 5 {
 		t.Fatalf("trace: sealed=%v events=%d err=%v", page.Sealed, len(page.Events), err)
 	}
-	if _, err := os.Stat(filepath.Join(opts.Output, r.TaskID, "workspace", "probe_hidden_test.go")); err != nil {
-		t.Fatal("hidden test not applied:", err)
+	if _, err := os.Stat(filepath.Join(opts.Mounts.Workspace, "probe_hidden_test.go")); !os.IsNotExist(err) {
+		t.Fatal("hidden test leaked into agent workspace:", err)
 	}
-	// The session ran in the scratch directory, not under the run directory,
-	// and nothing was left behind there once the workspace moved.
+	// The advertised workspace is the actual mount and stays in place after grading.
 	trace, _ := os.ReadFile(r.Trace)
-	if !strings.Contains(string(trace), opts.Scratch) || strings.Contains(string(trace), filepath.Join(opts.Output, r.TaskID, "workspace")) {
-		t.Fatal("session did not run in the scratch directory")
+	canonical, err := filepath.EvalSymlinks(opts.Mounts.Workspace)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if left, _ := os.ReadDir(opts.Scratch); len(left) != 0 {
-		t.Fatalf("scratch not cleaned: %v", left)
+	if r.Workspace != canonical || !strings.Contains(string(trace), canonical) {
+		t.Fatalf("workspace mismatch: %q", r.Workspace)
 	}
-	lines, _ := os.ReadFile(filepath.Join(opts.Output, "results.jsonl"))
+	if _, err := os.Stat(filepath.Join(opts.Mounts.Results, r.TaskID, "workspace")); !os.IsNotExist(err) {
+		t.Fatal("workspace was copied into results", err)
+	}
+	lines, _ := os.ReadFile(filepath.Join(opts.Mounts.Results, "results.jsonl"))
 	if strings.Count(string(lines), "\n") != 1 {
 		t.Fatalf("results.jsonl: %q", lines)
 	}
-	rep, err := eval.Analyze(ctx, opts.Output)
+	rep, err := eval.Analyze(ctx, opts.Mounts.Results)
 	if err != nil || len(rep.Tasks) != 1 {
 		t.Fatal(rep, err)
 	}
@@ -174,12 +177,13 @@ func TestRunPassesAndResumes(t *testing.T) {
 	if err := eval.WriteReport(rep); err != nil {
 		t.Fatal(err)
 	}
-	// A second run with the same output directory reuses the stored result.
+	// A new attempt cannot silently reuse or overwrite existing mounted data.
 	calls := p.calls.Load()
-	again, err := eval.Run(ctx, opts)
-	if err != nil || len(again) != 1 || again[0].Session != r.Session || p.calls.Load() != calls {
+	again, err := runAndGrade(t, ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "must be empty") || len(again) != 0 || p.calls.Load() != calls {
 		t.Fatal(again, err, p.calls.Load(), calls)
 	}
+
 }
 
 func TestRunGradesFailure(t *testing.T) {
@@ -187,7 +191,7 @@ func TestRunGradesFailure(t *testing.T) {
 	opts := options(t, ladder, &script{})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	results, err := eval.Run(ctx, opts)
+	results, err := runAndGrade(t, ctx, opts)
 	if err != nil || len(results) != 1 {
 		t.Fatal(results, err)
 	}
@@ -202,7 +206,7 @@ func TestRunBudgetExhausted(t *testing.T) {
 	opts := options(t, ladder, &script{block: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	results, err := eval.Run(ctx, opts)
+	results, err := runAndGrade(t, ctx, opts)
 	if err != nil || len(results) != 1 {
 		t.Fatal(results, err)
 	}
@@ -218,7 +222,7 @@ func TestRunFinishesIdleSessionWithoutReply(t *testing.T) {
 	opts.Idle = 500 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	results, err := eval.Run(ctx, opts)
+	results, err := runAndGrade(t, ctx, opts)
 	if err != nil || len(results) != 1 {
 		t.Fatal(results, err)
 	}
@@ -226,7 +230,7 @@ func TestRunFinishesIdleSessionWithoutReply(t *testing.T) {
 	if !r.NoReply || r.TimedOut || r.Replies != 0 || r.Outcome != eval.Passed || r.Duration > 3500*time.Millisecond {
 		t.Fatalf("%+v", r)
 	}
-	rep, err := eval.Analyze(ctx, opts.Output)
+	rep, err := eval.Analyze(ctx, opts.Mounts.Results)
 	if err != nil || len(rep.Tiers) != 1 || rep.Tiers[0].NoReply != 1 || !strings.Contains(rep.Markdown(), "(no reply)") {
 		t.Fatal(rep, err)
 	}
@@ -240,8 +244,8 @@ func TestRunClassifiesNeverConnectedSessionAsError(t *testing.T) {
 	opts := options(t, ladder, &script{fail: errors.New(`vllm: submit: Post "http://model.test/v1/chat/completions": dial tcp: connection refused`)})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	results, err := eval.Run(ctx, opts)
-	if err != nil || len(results) != 1 {
+	results, err := runAndGrade(t, ctx, opts)
+	if err == nil || len(results) != 1 {
 		t.Fatal(results, err)
 	}
 	r := results[0]
@@ -260,4 +264,42 @@ func TestSelfCheck(t *testing.T) {
 	if len(checks) != 1 || !checks[0].OK() {
 		t.Fatalf("%+v", checks)
 	}
+}
+
+func publicProblems(t *testing.T, ladder string) string {
+	t.Helper()
+	public := t.TempDir()
+	tasks, err := eval.LoadLadder(ladder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		dest := filepath.Join(public, task.Tier, filepath.Base(task.Dir))
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(task.Dir, "task.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, "task.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.CopyFS(filepath.Join(dest, "workspace"), os.DirFS(task.WorkspaceDir())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return public
+}
+
+func runAndGrade(t *testing.T, ctx context.Context, opts eval.Options) ([]eval.Result, error) {
+	t.Helper()
+	results, err := eval.Run(ctx, opts)
+	if err != nil || len(results) == 0 || results[0].Outcome != eval.Submitted {
+		return results, err
+	}
+	mounts := opts.Mounts
+	mounts.Workspace = t.TempDir()
+	result, err := eval.GradeSubmission(ctx, mounts)
+	return []eval.Result{result}, err
 }

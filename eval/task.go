@@ -1,5 +1,5 @@
-// Package eval runs the strap harness against a ladder of coding tasks, grades
-// each attempt with hidden tests, and summarizes the recorded traces.
+// Package eval runs coding tasks in fixed container workspaces, publishes
+// submissions to an outbox, and grades them in a separate process.
 //
 // A ladder is a directory tree: <ladder>/<tier>/<task>/ holding task.json, a
 // workspace/ module that the agent sees, hidden/ test files copied in after the
@@ -60,10 +60,10 @@ func (t Task) HiddenDir() string    { return filepath.Join(t.Dir, "hidden") }
 func (t Task) ReferenceDir() string { return filepath.Join(t.Dir, "reference") }
 
 // Validate checks the task's files without running anything.
-func (t Task) Validate() error {
+func (t Task) validatePublic() error {
 	var errs []error
-	if t.ID == "" {
-		errs = append(errs, errors.New("id is required"))
+	if t.ID == "" || t.ID == "." || t.ID == ".." || strings.ContainsAny(t.ID, "/\\") {
+		errs = append(errs, errors.New("id must be a nonempty single path component"))
 	}
 	if _, ok := tierOrder[t.Tier]; !ok {
 		errs = append(errs, fmt.Errorf("tier %q must be easy, medium or hard", t.Tier))
@@ -83,6 +83,15 @@ func (t Task) Validate() error {
 	}
 	if _, err := os.Stat(filepath.Join(t.WorkspaceDir(), "go.mod")); err != nil {
 		errs = append(errs, errors.New("workspace/go.mod is required"))
+	}
+	return errors.Join(errs...)
+}
+
+// Validate includes private grading assets; the agent phase only validates public files.
+func (t Task) Validate() error {
+	var errs []error
+	if err := t.validatePublic(); err != nil {
+		errs = append(errs, err)
 	}
 	hidden, err := goFiles(t.HiddenDir())
 	if err != nil {
@@ -137,7 +146,9 @@ func goFiles(dir string) ([]string, error) {
 }
 
 // LoadTask reads one task directory.
-func LoadTask(dir string) (Task, error) {
+func LoadTask(dir string) (Task, error) { return loadTask(dir, true) }
+
+func loadTask(dir string, grading bool) (Task, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "task.json"))
 	if err != nil {
 		return Task{}, err
@@ -149,7 +160,11 @@ func LoadTask(dir string) (Task, error) {
 		return Task{}, fmt.Errorf("%s: %w", filepath.Join(dir, "task.json"), err)
 	}
 	t.Dir = dir
-	if err := t.Validate(); err != nil {
+	validate := t.validatePublic
+	if grading {
+		validate = t.Validate
+	}
+	if err := validate(); err != nil {
 		return Task{}, fmt.Errorf("%s: %w", dir, err)
 	}
 	return t, nil
@@ -157,7 +172,12 @@ func LoadTask(dir string) (Task, error) {
 
 // LoadLadder reads every task under <dir>/<tier>/<name>/task.json and returns
 // them ordered by tier, then directory name.
-func LoadLadder(dir string) ([]Task, error) {
+func LoadLadder(dir string) ([]Task, error) { return loadLadder(dir, true) }
+
+// LoadProblems reads only task metadata and starter files, without accessing hidden tests.
+func LoadProblems(dir string) ([]Task, error) { return loadLadder(dir, false) }
+
+func loadLadder(dir string, grading bool) ([]Task, error) {
 	var tasks []Task
 	seen := map[string]string{}
 	var errs []error
@@ -177,7 +197,7 @@ func LoadLadder(dir string) ([]Task, error) {
 			if _, err := os.Stat(filepath.Join(taskDir, "task.json")); err != nil {
 				continue
 			}
-			t, err := LoadTask(taskDir)
+			t, err := loadTask(taskDir, grading)
 			if err != nil {
 				errs = append(errs, err)
 				continue
