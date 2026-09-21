@@ -73,7 +73,7 @@ func TestPlanDockPersistsAcrossHistoryAndTracksAcceptedUpdates(t *testing.T) {
 		t.Fatal("completion disappeared or changed disclosure", dockText(m))
 	}
 	enter(m, "/clear")
-	if !strings.Contains(dockText(m), "Build a native notes app") {
+	if m.currentPlan() == nil || m.currentPlan().plan.Title != p.Title || !strings.Contains(dockText(m), "all steps accepted") {
 		t.Fatal("clearing chat deleted the plan")
 	}
 }

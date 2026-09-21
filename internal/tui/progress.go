@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/work"
@@ -44,6 +45,15 @@ func (m *model) hasProgressReports(notice *message.WorkProgressNotice) bool {
 // with a label changes how Markdown parses it.
 func progressField(label, value string) string {
 	return "**" + label + ":**\n\n" + value
+}
+
+func progressSummaryField(label, value string) string {
+	// Block values keep their own paragraph so headings, lists, and code retain
+	// their Markdown meaning. Short narrative fields fit on one terminal row.
+	if value == "" || strings.Contains(value, "\n") || strings.HasPrefix(value, "    ") || strings.HasPrefix(value, "\t") || strings.ContainsAny(value[:1], "#>*-+`~0123456789") {
+		return progressField(label, value)
+	}
+	return "**" + label + ":** " + value
 }
 
 func progressBody(e work.Event) string {
@@ -115,7 +125,7 @@ func progressSummary(e work.Event) string {
 			}
 			for _, field := range [][2]string{{"Next", p.NextStep}, {"Uncertainty", p.Uncertainty}, {"Blocked", p.Blocker}, {"Decision needed", p.DecisionNeed}} {
 				if field[1] != "" {
-					blocks = append(blocks, progressField(field[0], field[1]))
+					blocks = append(blocks, progressSummaryField(field[0], field[1]))
 				}
 			}
 		}
@@ -141,30 +151,56 @@ func (m *model) reportExpanded(e *entry) bool {
 
 func (m *model) renderProgress(e *entry, firstRow int) string {
 	width := max(1, min(83, m.viewport.Width-1))
-	indent := 2
-	var lines []string
-	heading := dimStyle.Render(e.label + " · " + e.meta)
+	style, label, disclosure := keywordStyle, "↳ Progress", "Report details"
+	if e.label == "Work" {
+		style, label, disclosure = accentStyle, "◆ Work", "Assignment details"
+	}
+	heading := style.Bold(true).Render(label)
 	if len(e.actors) > 0 {
-		heading = agentIcon(e.actors[0]) + " " + heading
-		m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.actors[0], row: firstRow, column: 0})
+		column := 2 + ansi.StringWidth(heading) + 1
+		heading += " " + agentIcon(e.actors[0])
+		m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.actors[0], row: firstRow, column: column})
 	}
-	lines = append(lines, heading, "")
-	for _, line := range strings.Split(m.renderBodyWidth(e, max(1, width-indent)), "\n") {
-		lines = append(lines, "  "+line)
+	if e.meta != "" {
+		heading += " · " + dimStyle.Render(e.meta)
 	}
-	lines = append(lines, "")
-	key := foldKey{serial: e.serial}
-	open := m.reportExpanded(e)
-	m.folds.targets = append(m.folds.targets, foldTarget{key: key, row: firstRow + len(lines), column: 2})
-	lines = append(lines, "  "+m.foldMarker(key, open)+dimStyle.Render(" Report details"))
-	if open {
-		lines = append(lines, "")
-		for _, line := range strings.Split(m.renderBodyWidth(e.reportDetail, max(1, width-indent)), "\n") {
-			lines = append(lines, "  "+line)
+	inner := max(1, width-2)
+	lines := strings.Split(ansi.Wrap(heading, inner, ""), "\n")
+	inCode := false
+	first := true
+	for _, line := range strings.Split(m.renderBodyWidth(e, inner), "\n") {
+		plain := strings.TrimSpace(ansi.Strip(line))
+		if strings.HasPrefix(plain, "┌─ code") {
+			inCode = true
+		}
+		if plain != "" || inCode {
+			if first && !inCode {
+				line = lipgloss.NewStyle().Bold(true).Render(line)
+			}
+			lines = append(lines, line)
+			first = false
+		}
+		if plain == "└─" {
+			inCode = false
+		}
+	}
+	if e.reportDetail != nil {
+		key := foldKey{serial: e.serial}
+		open := m.reportExpanded(e)
+		m.folds.targets = append(m.folds.targets, foldTarget{key: key, row: firstRow + len(lines), column: 2})
+		lines = append(lines, m.foldMarker(key, open)+dimStyle.Render(" "+disclosure))
+		if open {
+			lines = append(lines, strings.Split(m.renderBodyWidth(e.reportDetail, inner), "\n")...)
 		}
 	}
 	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], max(1, m.viewport.Width-1), "")
+		rail := "│ "
+		if i == 0 {
+			rail = "┌ "
+		} else if i == len(lines)-1 {
+			rail = "└ "
+		}
+		lines[i] = ansi.Truncate(style.Render(rail)+lines[i], max(1, m.viewport.Width-1), "")
 	}
 	return strings.Join(lines, "\n")
 }

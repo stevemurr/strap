@@ -204,7 +204,7 @@ func TestRosterMouseAndMultilineSelectionStayInTheirPanes(t *testing.T) {
 	x, y = screenLocation(t, m.View(), "FIRST")
 	_, endY := screenLocation(t, m.View(), "SECOND")
 	m.copyText = func(text string) error {
-		if text != "FIRST\nSECOND" {
+		if text != "FIRST\n└ SECOND" {
 			t.Errorf("copy included the sidebar: %q", text)
 		}
 		return nil

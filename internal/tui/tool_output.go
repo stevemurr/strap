@@ -11,6 +11,9 @@ import (
 // Decode only the built-in result envelopes. The recorded result is unchanged;
 // unfamiliar or malformed results remain literal text in the view.
 func (d *toolDisplay) nativeOutput(raw string) {
+	if d.languageOutput(raw) {
+		return
+	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal([]byte(raw), &fields) != nil {
 		return
@@ -50,6 +53,10 @@ func (d *toolDisplay) nativeOutput(raw string) {
 			return
 		}
 		d.result = boundedToolText(result.Content, 32768)
+		d.numbered = true
+		if result.Path != "" {
+			d.path = safeText(result.Path)
+		}
 		if result.More || result.Truncated {
 			d.notice = "Partial file view"
 		}

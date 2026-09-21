@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stevemurr/strap/agent"
 )
@@ -16,6 +17,8 @@ import (
 // Replaced on completion, never mutated: frozen entries retain their snapshot.
 type toolDisplay struct {
 	name, preview, arguments, result, failure, notice string
+	path                                              string
+	numbered                                          bool
 	started, finished                                 time.Time
 }
 
@@ -38,6 +41,8 @@ func displayTool(a agent.ToolActivity) *toolDisplay {
 	}
 	if json.Unmarshal(a.Call.Arguments, &envelope) == nil {
 		args := envelope.Input
+		_ = json.Unmarshal(args["path"], &d.path)
+		d.path = safeText(d.path)
 		for _, key := range []string{"path", "url", "command", "query", "pattern", "task", "agent_id"} {
 			var value string
 			if json.Unmarshal(args[key], &value) == nil && strings.TrimSpace(value) != "" {
@@ -141,16 +146,27 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 	case "search", "search_files", "web_search":
 		verb = "Searched"
 	}
-	add(style.Render(mark) + " " + agentIcon(e.tool.agent) + " " + verb + " " + routeStyle.Render(d.preview))
 	resultRows := e.toolResultRows(max(1, width-4))
+	commandLines := strings.Split(e.toolLayout.preview, "\n")
+	add(style.Render(mark) + " " + agentIcon(e.tool.agent) + " " + lipgloss.NewStyle().Bold(true).Render(verb) + " " + commandLines[0])
+	for _, line := range commandLines[1:] {
+		for _, row := range strings.Split(ansi.Hardwrap(line, max(1, width-4), true), "\n") {
+			add(dimStyle.Render("  │ ") + row)
+		}
+	}
 	if d.name == "report_work_progress" && !open && d.failure == "" && !d.finished.IsZero() {
 		resultRows = []string{"Progress recorded · report below"}
 	}
 	if open {
 		if d.name != "shell" && d.arguments != "" && d.arguments != "{}" {
-			add(dimStyle.Render("  Arguments\n" + indentActivity(d.arguments, "  │ ")))
+			add(dimStyle.Render("  Arguments"))
+			for _, line := range strings.Split(ansi.Hardwrap(e.toolLayout.arguments, max(1, width-4), true), "\n") {
+				add(dimStyle.Render("  │ ") + line)
+			}
 		}
-		add(dimStyle.Render(indentActivity(strings.Join(resultRows, "\n"), "  │ ")))
+		for _, line := range resultRows {
+			add(dimStyle.Render("  │ ") + line)
+		}
 		if e.tokens != nil {
 			add(dimStyle.Render("  " + e.tokens.label()))
 		}
@@ -164,7 +180,7 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 			if i == 0 {
 				prefix = "  └ "
 			}
-			add(dimStyle.Render(prefix + line))
+			add(dimStyle.Render(prefix) + line)
 		}
 	}
 	if len(resultRows) > 2 || open {

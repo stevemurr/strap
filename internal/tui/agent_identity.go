@@ -94,7 +94,7 @@ func (m *model) overlayBadgePeek(view string, width, height int) string {
 }
 
 func (m *model) renderMessage(e *entry, firstRow int) string {
-	if e.reportDetail != nil {
+	if e.reportDetail != nil || e.label == "Work" || e.label == "Progress" {
 		return m.renderProgress(e, firstRow)
 	}
 	width := max(1, m.viewport.Width-1)
