@@ -15,7 +15,10 @@ import (
 )
 
 type ShellConfig struct {
-	Dir string
+	// AfterRun runs after waiting for a started command and attempting cleanup.
+	// It must return promptly and support concurrent calls.
+	AfterRun func()
+	Dir      string
 	// Program defaults to bash, falling back to /bin/sh.
 	Program string
 	// Nil selects PATH, HOME, TMPDIR, LANG, LC_ALL and TERM from the host.
@@ -151,6 +154,9 @@ func (s *Shell) handle(ctx context.Context, _ Call, args shellArgs) (Result, err
 		result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
 		encoded, encodeErr := JSON(result)
 		return encoded, errors.Join(fmt.Errorf("start shell: %w", startErr), encodeErr)
+	}
+	if s.config.AfterRun != nil {
+		defer s.config.AfterRun()
 	}
 	result.Started = true
 	waitErr := cmd.Wait()

@@ -26,6 +26,7 @@ import (
 	"github.com/stevemurr/strap/internal/resource"
 	"github.com/stevemurr/strap/internal/transport"
 	"github.com/stevemurr/strap/internal/workflow"
+	"github.com/stevemurr/strap/lsp"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/prompt"
 	"github.com/stevemurr/strap/provider"
@@ -51,6 +52,7 @@ type ResearchExecutionConfig struct {
 	Env         []string      `json:"env"`
 }
 type Config struct {
+	LSP                   *lsp.Config                 `json:"lsp,omitempty"` // Nil disables experimental language tools.
 	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Telemetry             TelemetryConfig             `json:"telemetry"`
@@ -69,7 +71,8 @@ type Config struct {
 // DefaultConfig returns independent library defaults without acquiring resources.
 // The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
-	return Config{ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://127.0.0.1:8000", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{},
+	languages := lsp.DefaultConfig()
+	return Config{ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://127.0.0.1:8000", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{}, LSP: &languages,
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, Researcher: AgentConfig{Prompt: researcherPrompt.Clone()}}
 }
 
@@ -93,6 +96,7 @@ type OwnedResource struct {
 // also registered in Resources. Resource ownership transfers when New is called,
 // including when construction fails and returns a cleanup handle.
 type Dependencies struct {
+	LSP                                    lsp.Dependencies
 	CaptureFailure                         func(error)       // Optional independent diagnostic sink; must return promptly.
 	Provider                               provider.Provider // Shared fallback for all roles, useful for eval fakes.
 	Root, Implementor, Auditor, Researcher AgentDependencies
@@ -149,6 +153,14 @@ func (e *StartupError) Close(ctx context.Context) error { return e.cleanup.Close
 
 func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err error) {
 	cfg = cloneConfig(cfg)
+	for _, role := range []*AgentConfig{&cfg.Root, &cfg.Implementor, &cfg.Auditor, &cfg.Researcher} {
+		if !slices.Contains(role.Prompt.Instructions, fileInstruction) {
+			role.Prompt.Instructions = append(role.Prompt.Instructions, fileInstruction)
+		}
+		if cfg.LSP != nil && !slices.Contains(role.Prompt.Instructions, languageInstruction) {
+			role.Prompt.Instructions = append(role.Prompt.Instructions, languageInstruction)
+		}
+	}
 	execution, cancelExecution := context.WithCancel(context.WithoutCancel(ctx))
 	s := &Session{projectionGate: make(chan struct{}, 1), config: cloneConfig(cfg), resources: resource.New(), state: Open, cancelExecution: cancelExecution, admission: admission.New(execution)}
 	defer func() {
@@ -291,13 +303,33 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err != nil {
 		return nil, err
 	}
+	var languages *lsp.Manager
+	var languageTools []tool.Tool
+	var changed func(string)
+	var afterRun func()
+	if cfg.LSP != nil {
+		languageConfig := cfg.LSP.Clone()
+		languageConfig.Dir = cfg.Dir
+		languages, err = lsp.New(languageConfig, deps.LSP)
+		if err != nil {
+			return nil, err
+		}
+		s.resources.Add("lsp", languages)
+		languageTools, err = tool.LSPTools(languages)
+		if err != nil {
+			return nil, err
+		}
+		changed = languages.Changed
+		afterRun = func() { languages.Changed("") }
+	}
 	var local []tool.Tool
 	if cfg.LocalTools {
-		local, err = localTools(cfg.Dir)
+		local, err = localToolsWithChanges(cfg.Dir, changed, afterRun)
 		if err != nil {
 			return nil, err
 		}
 	}
+	local = append(local, languageTools...)
 	if cfg.Web != nil {
 		web, e := tool.NewWeb(*cfg.Web)
 		if e != nil {
@@ -305,6 +337,13 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		}
 		s.resources.Add("web", web)
 		local = append(local, web.Tools()...)
+	}
+	var feedback *languageFeedback
+	if languages != nil {
+		feedback = &languageFeedback{manager: languages, seen: map[identity.ActorID]string{}}
+		for i, t := range local {
+			local[i] = feedback.wrap(t)
+		}
 	}
 	c := conversation.New(execution, conversation.WithInboxAdmission(s.inboxAdmission), conversation.WithWakeContext(s.wakeContext), conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
 	s.controller = c
@@ -331,10 +370,13 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
 	var researchShell tool.Tool
 	if cfg.LocalTools && cfg.ResearchExecution.Enabled {
-		researchShell, err = tool.NewShell(tool.ShellConfig{Dir: cfg.Dir, Timeout: cfg.ResearchExecution.Timeout, MaxTimeout: cfg.ResearchExecution.MaxTimeout, OutputLimit: cfg.ResearchExecution.OutputLimit, Env: cfg.ResearchExecution.Env})
+		researchShell, err = tool.NewShell(tool.ShellConfig{Dir: cfg.Dir, AfterRun: afterRun, Timeout: cfg.ResearchExecution.Timeout, MaxTimeout: cfg.ResearchExecution.MaxTimeout, OutputLimit: cfg.ResearchExecution.OutputLimit, Env: cfg.ResearchExecution.Env})
 		if err != nil {
 			return nil, err
 		}
+	}
+	if feedback != nil && researchShell != nil {
+		researchShell = feedback.wrap(researchShell)
 	}
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)},
@@ -365,7 +407,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
+	s.effective = EffectiveConfig{LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg, cfg.Root, rootSpec, deps.Root.Provider != nil || deps.Provider != nil), Implementor: describeRole(cfg, cfg.Implementor, implSpec, deps.Implementor.Provider != nil || deps.Provider != nil), Auditor: describeRole(cfg, cfg.Auditor, auditSpec, deps.Auditor.Provider != nil || deps.Provider != nil), Researcher: describeRole(cfg, cfg.Researcher, s.workflow.ResearcherSpec(), deps.Researcher.Provider != nil || deps.Provider != nil)}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err
@@ -482,12 +524,13 @@ func (s *Session) rootMayWait(ctx context.Context, c tool.Call) error {
 	return errors.New("wait_for_input rejected: you own no active delegated work, so no worker result can arrive. If the task is finished, send the final reply as a text-only response now; if work remains, assign it first")
 }
 
-func localTools(dir string) ([]tool.Tool, error) {
-	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir})
+func localTools(dir string) ([]tool.Tool, error) { return localToolsWithChanges(dir, nil, nil) }
+func localToolsWithChanges(dir string, changed func(string), afterRun func()) ([]tool.Tool, error) {
+	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir, AfterRun: afterRun})
 	if err != nil {
 		return nil, err
 	}
-	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir})
+	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir, OnChange: changed})
 	if err != nil {
 		return nil, err
 	}
@@ -499,6 +542,10 @@ func localTools(dir string) ([]tool.Tool, error) {
 }
 
 func cloneConfig(c Config) Config {
+	if c.LSP != nil {
+		v := c.LSP.Clone()
+		c.LSP = &v
+	}
 	c.ResearchExecution.Env = slices.Clone(c.ResearchExecution.Env)
 	c.Model = cloneModel(c.Model)
 	if c.Web != nil {

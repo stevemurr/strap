@@ -4,14 +4,18 @@ go 1.24.0
 
 require (
 	github.com/atotto/clipboard v0.1.4
+	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/charmbracelet/x/ansi v0.10.1
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/muesli/termenv v0.16.0
 	github.com/rivo/uniseg v0.4.7
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/sourcegraph/jsonrpc2 v0.2.0
+	golang.org/x/mod v0.23.0
 	golang.org/x/net v0.33.0
 	golang.org/x/term v0.31.0
 )

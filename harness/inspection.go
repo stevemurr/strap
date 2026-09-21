@@ -9,6 +9,7 @@ import (
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/eventlog"
+	"github.com/stevemurr/strap/lsp"
 	"github.com/stevemurr/strap/prompt"
 	"github.com/stevemurr/strap/provider"
 )
@@ -21,6 +22,7 @@ type RoleConfiguration struct {
 	Tools            []provider.ToolDefinition `json:"tools"`
 }
 type EffectiveConfig struct {
+	LSP                   *LSPConfiguration           `json:"lsp,omitempty"`
 	ToolContractVersion   string                      `json:"tool_contract_version"`
 	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
@@ -72,6 +74,11 @@ func describeRole(cfg Config, role AgentConfig, spec agent.Spec, injected bool) 
 // inferred from the unused model defaults. Dynamic CreateAgent specs are separate.
 func (s *Session) Configuration() EffectiveConfig {
 	c := s.effective
+	if c.LSP != nil {
+		v := *c.LSP
+		v.Servers = append([]string(nil), v.Servers...)
+		c.LSP = &v
+	}
 	c.ResearchExecution.Env = append([]string(nil), c.ResearchExecution.Env...)
 	for _, r := range []*RoleConfiguration{&c.Root, &c.Implementor, &c.Auditor, &c.Researcher} {
 		r.Prompt = r.Prompt.Clone()
@@ -116,4 +123,25 @@ func (s *Session) Inspect() Inspection {
 	}
 	s.mu.Unlock()
 	return Inspection{Outcome: outcome, ID: s.ID(), State: s.State(), Capture: s.Capture(), Coverage: Coverage{DomainEvents: true, ToolDiagnostics: true, ModelHistory: true, StreamingOutput: true}, Config: s.Configuration()}
+}
+
+// LSPConfiguration identifies the immutable server configuration without exposing
+// environment values, command arguments, or arbitrary initialization settings.
+type LSPConfiguration struct {
+	Experimental bool     `json:"experimental"`
+	Servers      []string `json:"servers"`
+	Fingerprint  string   `json:"fingerprint"`
+}
+
+func describeLSP(cfg *lsp.Config) *LSPConfiguration {
+	if cfg == nil {
+		return nil
+	}
+	raw, _ := json.Marshal(cfg)
+	sum := sha256.Sum256(raw)
+	out := &LSPConfiguration{Experimental: true, Fingerprint: hex.EncodeToString(sum[:])}
+	for _, server := range cfg.Servers {
+		out.Servers = append(out.Servers, server.ID)
+	}
+	return out
 }

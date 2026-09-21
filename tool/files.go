@@ -15,6 +15,9 @@ import (
 )
 
 type FilesConfig struct {
+	// OnChange runs after a committed write and after releasing the file lock.
+	// It must return promptly and support concurrent calls.
+	OnChange func(path string)
 	// Dir is the base for relative paths; absolute paths are used directly.
 	Dir string
 	// Defaults: files up to 1 MiB and read output up to 64 KiB.
@@ -166,7 +169,13 @@ func (f *Files) write(ctx context.Context, _ Call, args writeArgs) (Result, erro
 	if err := f.lock(ctx); err != nil {
 		return Result{}, err
 	}
-	defer f.unlock()
+	changed := ""
+	defer func() {
+		f.unlock()
+		if changed != "" && f.config.OnChange != nil {
+			f.config.OnChange(changed)
+		}
+	}()
 	path, err := f.resolve(args.Path)
 	if err != nil {
 		return Result{}, err
@@ -174,6 +183,7 @@ func (f *Files) write(ctx context.Context, _ Call, args writeArgs) (Result, erro
 	if err := f.atomicWriteText(ctx, path, args.Content); err != nil {
 		return Result{}, err
 	}
+	changed = path
 	return JSON(WriteFileResult{Path: args.Path, BytesWritten: len(args.Content)})
 }
 
@@ -181,7 +191,13 @@ func (f *Files) edit(ctx context.Context, _ Call, args editArgs) (result Result,
 	if err := f.lock(ctx); err != nil {
 		return Result{}, err
 	}
-	defer f.unlock()
+	changed := ""
+	defer func() {
+		f.unlock()
+		if changed != "" && f.config.OnChange != nil {
+			f.config.OnChange(changed)
+		}
+	}()
 	path, err := f.resolve(args.Path)
 	if err != nil {
 		return Result{}, err
@@ -210,6 +226,7 @@ func (f *Files) edit(ctx context.Context, _ Call, args editArgs) (result Result,
 	if err := f.atomicWriteText(ctx, path, updated); err != nil {
 		return Result{}, err
 	}
+	changed = path
 	return JSON(EditFileResult{Path: args.Path, Replacements: 1})
 }
 
