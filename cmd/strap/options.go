@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/internal/lspconfig"
 	"github.com/stevemurr/strap/provider/vllm"
 )
 
@@ -22,6 +23,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	o.config.Model = harness.ModelConfig{Backend: "vllm", Timeout: o.config.Model.Timeout}
 	flags := flag.NewFlagSet("strap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	languageFlags := lspconfig.Flags(flags)
 	configPath := flags.String("config", "", "Model catalog JSON (default $XDG_CONFIG_HOME/strap/models.json or ~/.config/strap/models.json, then bundled catalog)")
 	profile := flags.String("profile", "", "Saved model profile (default selected by the catalog)")
 	modelFlags(flags, &o.config.Model)
@@ -70,6 +72,10 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	}
 	if !*webEnabled {
 		o.config.Web = nil
+	}
+	o.config.LSP, err = languageFlags.Resolve()
+	if err != nil {
+		return options{}, err
 	}
 	return o, nil
 }

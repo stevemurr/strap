@@ -820,6 +820,29 @@ readers, cancelled navigation, and two external searches. The model check asks
 the configured server to search, read, and cite an official source. Optional executable overrides
 are `STRAP_WKRENDER`, `STRAP_AGENT_BROWSER`, and `STRAP_BROWSER_EXECUTABLE`.
 
+## Language servers (experimental)
+
+Semantic code traversal is enabled by default for Go, Rust, Python,
+JavaScript/TypeScript, and Bash. Install the corresponding language servers on
+`PATH`, then run Strap normally:
+
+```sh
+go run ./cmd/strap -C /path/to/project
+```
+
+The seven tools provide status, symbol search, file outlines, inspection,
+definition/type/implementation navigation, references, and diagnostics. All roles
+share one session-owned manager and receive instructions for semantic search,
+navigation, and checking edits. Servers start lazily; missing executables do not
+prevent startup. `-lsp-config <file>` replaces the presets with a complete server
+configuration. `-lsp=false` disables the feature, including in eval sessions.
+
+See [setup, tool contracts, extension API, and freshness limits](docs/lsp.md).
+Interoperability fixtures cover all six languages. [Live Qwen3.6 checks](docs/evals/2026-09-20-lsp-reliability.md)
+exercise tool selection, targeting, reference reuse and recovery costs. Source
+targets use exact identifiers; Strap calculates character positions. Rename,
+code actions, and call hierarchy are not included.
+
 ## PDF reading and image results
 
 ```sh

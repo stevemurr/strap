@@ -13,6 +13,7 @@ import (
 	"github.com/stevemurr/strap/eval"
 	"github.com/stevemurr/strap/eval/interaction"
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/internal/lspconfig"
 	"github.com/stevemurr/strap/internal/modelcatalog"
 )
 
@@ -68,6 +69,7 @@ func interactionOptions(args []string, stderr io.Writer) (interaction.Options, e
 	mode := fs.String("mode", string(interaction.Scripted), "Execution mode: scripted or live")
 	scenarios := fs.String("scenario", "", "Only run these comma-separated scenario ids (default all)")
 	opts := interaction.Options{Config: harness.DefaultConfig()}
+	languageFlags := lspconfig.Flags(fs)
 	fs.StringVar(&opts.Output, "out", "", "Empty run directory (default eval/results/interaction_<commit>_<profile>_<timestamp>)")
 	fs.IntVar(&opts.Repetitions, "repeat", 1, "Sequential trials per scenario")
 	fs.IntVar(&opts.MaxCalls, "max-calls", 8, "Maximum model calls per trial")
@@ -120,6 +122,11 @@ func interactionOptions(args []string, stderr io.Writer) (interaction.Options, e
 			return opts, err
 		}
 	}
+	languages, err := languageFlags.Resolve()
+	if err != nil {
+		return opts, err
+	}
+	opts.Config.LSP = languages
 	opts.Commit = eval.BuildCommit()
 	if opts.Output == "" {
 		opts.Output = filepath.Join("eval", "results", "interaction_"+eval.RunName(opts.Commit, opts.Profile, time.Now()))
