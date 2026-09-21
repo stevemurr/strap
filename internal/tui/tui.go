@@ -46,13 +46,24 @@ type Options struct {
 }
 
 func Run(ctx context.Context, session Session, options Options) error {
+	if ctx.Err() != nil {
+		return nil
+	}
 	session, detach := observeSession(session)
 	defer detach()
 	listenCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := newModel(listenCtx, cancel, session, options)
-	p := tea.NewProgram(m, tea.WithOutput(composerOutput()), tea.WithFilter(terminalKeyFilter), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
-	_, err := p.Run()
+	input, closeInput, err := composerInput()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	defer closeInput()
+	p := tea.NewProgram(m, tea.WithFilter(terminalKeyFilter), input, tea.WithOutput(composerOutput()), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
+	_, err = p.Run()
 	if ctx.Err() != nil {
 		return nil
 	}

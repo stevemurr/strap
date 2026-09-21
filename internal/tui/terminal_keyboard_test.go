@@ -34,8 +34,9 @@ func readKeyboard(t *testing.T, probe *keyboardProbe, raw string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, err := tea.NewProgram(probe, tea.WithInput(strings.NewReader(raw+"\x04")), tea.WithOutput(io.Discard),
-		tea.WithoutRenderer(), tea.WithoutSignalHandler(), tea.WithFilter(terminalKeyFilter), tea.WithContext(ctx)).Run()
+	reader := &terminalInputReader{source: strings.NewReader(raw + "\x04")}
+	_, err := tea.NewProgram(probe, tea.WithInput(reader), tea.WithOutput(io.Discard),
+		tea.WithoutRenderer(), tea.WithoutSignalHandler(), tea.WithFilter(reader.filter), tea.WithContext(ctx)).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
