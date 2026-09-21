@@ -2,6 +2,7 @@ package evalweb
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,6 +48,15 @@ func fixture(t *testing.T) string {
 		write(run+"/hard-01/trace.jsonl", "")
 		write(run+"/easy-01/workspace/main.go", "package main")
 	}
+	// A container-style batch: one attempt per task, each at <task>/results.
+	for i, task := range []string{"easy-01", "hard-01"} {
+		tier := []string{"easy", "hard"}[i]
+		base := "batch/" + task + "/results/"
+		write(base+"run.json", `{"started_at":"2026-09-2`+fmt.Sprint(i)+`T10:00:00Z","commit":"abc1234","profile":"qwen","model":{"backend":"vllm","model":"qwen"},"tasks":["`+task+`"]}`)
+		write(base+"results.jsonl", `{"task_id":"`+task+`","tier":"`+tier+`","title":"T","outcome":"passed","passed":true,"started_at":"2026-09-20T10:00:00Z","finished_at":"2026-09-20T10:01:00Z","duration_ns":60000000000,"trace":"x","workspace":"w","replies":1}
+`)
+		write(base+task+"/trace.jsonl", trace)
+	}
 	write("interaction-x/run.json", `{"version":1,"mode":"scripted","planned_trials":1,"results":null,"commit":"nogit","profile":"scripted"}`)
 	write("interaction-x/results.jsonl", `{"scenario_id":"audit-independent","trial":1,"mode":"scripted","outcome":"passed","started_at":"2026-09-17T01:00:00Z","duration_ns":1000,"trace":"audit-independent/001/trace.jsonl","manifest":"audit-independent/001/manifest.json","start":{},"through":{},"stop_reason":"batch","model_calls":2,"tool_calls":3,"harness":{"passed":4,"total":4},"behavior":{"scorable":true,"outcome_correct":true,"clean_success":true,"recovery_success":false},"assertions":[]}
 `)
@@ -72,7 +82,7 @@ func TestDiscoveryGroupsNestedRunsAndTellsFamiliesApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var runs struct{ Runs []RunSummary }
-	if rec := get(t, srv, "/api/runs", &runs); rec.Code != 200 || len(runs.Runs) != 3 {
+	if rec := get(t, srv, "/api/runs", &runs); rec.Code != 200 || len(runs.Runs) != 6 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	byPath := map[string]RunSummary{}
@@ -89,6 +99,39 @@ func TestDiscoveryGroupsNestedRunsAndTellsFamiliesApart(t *testing.T) {
 	}
 	if i.Kind != Interaction || i.Trials == nil || i.Trials.Passed != 1 || i.Trials.Clean != 1 || i.Trials.Planned != 1 {
 		t.Fatalf("%+v", i)
+	}
+	// The batch rolls its two single-task attempts into one virtual run.
+	batch := byPath["batch"]
+	if !batch.Batch || batch.Members != 2 || batch.Tasks != 2 || batch.Passed != 2 || batch.Tiers["hard"].Passed != 1 || batch.Model != "qwen" || batch.StartedAt.Day() != 20 {
+		t.Fatalf("%+v", batch)
+	}
+	if member := byPath["batch/easy-01/results"]; member.Group != "batch" || member.Name != "easy-01" {
+		t.Fatalf("%+v", member)
+	}
+}
+
+func TestBatchServesMergedReportTracesAndCompare(t *testing.T) {
+	srv, _ := New(fixture(t), nil)
+	var detail ladderDetail
+	if rec := get(t, srv, "/api/run?path=batch", &detail); rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if len(detail.Report.Tasks) != 2 || detail.Report.Tasks[0].TaskID != "easy-01" || detail.Report.Tasks[1].Tier != "hard" || len(detail.Report.Tiers) != 2 || detail.Report.Run.Model.Model != "qwen" || len(detail.Report.Run.Tasks) != 2 {
+		t.Fatalf("%+v", detail.Report)
+	}
+	if detail.Results["hard-01"].Outcome != "passed" || !detail.Summary.Batch {
+		t.Fatalf("%+v", detail)
+	}
+	var page TracePage
+	if rec := get(t, srv, "/api/trace?run=batch&file=hard-01/trace.jsonl", &page); rec.Code != 200 || page.Total != 4 {
+		t.Fatal(rec.Body.String())
+	}
+	var cmp struct{ Runs []ladderDetail }
+	if rec := get(t, srv, "/api/compare?run=batch&run=a_qwen_20260920-100000", &cmp); rec.Code != 200 || len(cmp.Runs) != 2 || cmp.Runs[0].Summary.Tasks != 2 {
+		t.Fatal(rec.Body.String())
+	}
+	if rec := get(t, srv, "/api/run?path=batch/easy-01", nil); rec.Code == 200 {
+		t.Fatal("an attempt directory without results.jsonl is not a run")
 	}
 }
 

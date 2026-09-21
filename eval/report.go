@@ -125,7 +125,7 @@ func Analyze(ctx context.Context, dir string) (Report, error) {
 		m := analyzeTask(ctx, dir, latest[id])
 		rep.Tasks = append(rep.Tasks, m)
 	}
-	rep.Tiers = summarize(rep.Tasks)
+	rep.Tiers = Summarize(rep.Tasks)
 	return rep, nil
 }
 
@@ -286,7 +286,8 @@ func scanTrace(ctx context.Context, path string, m *TaskMetrics) error {
 
 var reportedKinds = map[string]bool{"output_started": true, "agent_started": true, "agent_registered": true, "agent_exited": true, "usage": true, "output_finished": true, "context_tokens": true, "tool": true, "message": true, "work": true, "diagnostic": true}
 
-func summarize(tasks []TaskMetrics) []TierSummary {
+// Summarize rolls task metrics up per tier, in ladder order.
+func Summarize(tasks []TaskMetrics) []TierSummary {
 	byTier := map[string]*TierSummary{}
 	for _, t := range tasks {
 		s := byTier[t.Tier]

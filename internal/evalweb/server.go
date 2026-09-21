@@ -106,26 +106,41 @@ func (s *Server) index(force bool) ([]RunSummary, error) {
 	return runs, nil
 }
 
-// resolve maps a request path onto a run directory beneath the root.
-func (s *Server) resolve(rel string) (string, error) {
+// locate maps a request path onto a run directory beneath the root, and
+// reports whether it is a batch of attempts rather than a single run.
+func (s *Server) locate(rel string) (dir string, batch bool, err error) {
 	if rel == "" {
-		return "", errors.New("run is required")
+		return "", false, errors.New("run is required")
 	}
 	clean := filepath.Clean(filepath.FromSlash(rel))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", errors.New("run must be a path beneath the results directory")
+		return "", false, errors.New("run must be a path beneath the results directory")
 	}
-	dir := filepath.Join(s.root, clean)
-	if _, err := os.Stat(filepath.Join(dir, "results.jsonl")); err != nil {
-		return "", fmt.Errorf("no run at %s", rel)
+	dir = filepath.Join(s.root, clean)
+	if _, err := os.Stat(filepath.Join(dir, "results.jsonl")); err == nil {
+		return dir, false, nil
 	}
-	return dir, nil
+	if len(batchMembers(dir)) > 0 {
+		return dir, true, nil
+	}
+	return "", false, fmt.Errorf("no run at %s", rel)
+}
+
+func (s *Server) resolve(rel string) (string, error) {
+	dir, batch, err := s.locate(rel)
+	if err == nil && batch {
+		return "", fmt.Errorf("%s is a batch, not a single run", rel)
+	}
+	return dir, err
 }
 
 func (s *Server) summary(rel string) (RunSummary, error) {
-	dir, err := s.resolve(rel)
+	dir, batch, err := s.locate(rel)
 	if err != nil {
 		return RunSummary{}, err
+	}
+	if batch {
+		return s.batchSummary(dir, rel), nil
 	}
 	return summarize(dir, filepath.ToSlash(filepath.Clean(rel))), nil
 }
@@ -133,9 +148,12 @@ func (s *Server) summary(rel string) (RunSummary, error) {
 // ladder analyses a run once per change of its results file. Analysis walks
 // every trace, so the cache is keyed on the results file's size and mtime.
 func (s *Server) ladder(ctx context.Context, rel string) (*ladderDetail, error) {
-	dir, err := s.resolve(rel)
+	dir, batch, err := s.locate(rel)
 	if err != nil {
 		return nil, err
+	}
+	if batch {
+		return s.batchDetail(ctx, dir, rel)
 	}
 	info, err := os.Stat(filepath.Join(dir, "results.jsonl"))
 	if err != nil {
@@ -235,7 +253,7 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	dir, err := s.resolve(q.Get("run"))
+	dir, batch, err := s.locate(q.Get("run"))
 	if err != nil {
 		fail(w, http.StatusNotFound, err)
 		return
@@ -245,7 +263,11 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, errors.New("file must be a trace beneath the run"))
 		return
 	}
-	page, err := readTrace(filepath.Join(dir, file), traceQuery{
+	trace := filepath.Join(dir, file)
+	if batch {
+		trace = batchTrace(dir, file)
+	}
+	page, err := readTrace(trace, traceQuery{
 		after: atoi(q.Get("after")), limit: atoi(q.Get("limit")),
 		kinds: splitList(q.Get("kinds")), agent: q.Get("agent"),
 	})

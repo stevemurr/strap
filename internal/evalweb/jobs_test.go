@@ -118,7 +118,17 @@ func TestJobRunsGradesAndStreamsProgress(t *testing.T) {
 	// The finished attempt appears in the index under the batch group.
 	var runs struct{ Runs []RunSummary }
 	get(t, srv, "/api/runs", &runs)
-	if len(runs.Runs) != 1 || runs.Runs[0].Group != snap.Name || runs.Runs[0].Name != "easy-01-budget-pair" || runs.Runs[0].Failed != 1 {
+	// Both the attempt and the batch it belongs to are listed.
+	var member, batch *RunSummary
+	for i := range runs.Runs {
+		switch {
+		case runs.Runs[i].Batch:
+			batch = &runs.Runs[i]
+		case runs.Runs[i].Group == snap.Name:
+			member = &runs.Runs[i]
+		}
+	}
+	if len(runs.Runs) != 2 || member == nil || member.Name != "easy-01-budget-pair" || member.Failed != 1 || batch == nil || batch.Path != snap.Name || batch.Members != 1 {
 		t.Fatalf("%+v", runs.Runs)
 	}
 	// Replaying from the last id yields nothing new but still ends.

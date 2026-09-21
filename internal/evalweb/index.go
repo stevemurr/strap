@@ -44,6 +44,8 @@ type RunSummary struct {
 	Backend   string    `json:"backend,omitempty"`
 	HasReport bool      `json:"has_report"`
 	Error     string    `json:"error,omitempty"`
+	Batch     bool      `json:"batch,omitempty"`
+	Members   int       `json:"members,omitempty"`
 
 	Tasks       int                  `json:"tasks"`
 	Passed      int                  `json:"passed"`
@@ -107,6 +109,7 @@ func discover(root string) ([]RunSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	runs = addBatches(root, runs)
 	sort.SliceStable(runs, func(i, j int) bool {
 		if !runs[i].StartedAt.Equal(runs[j].StartedAt) {
 			return runs[i].StartedAt.After(runs[j].StartedAt)

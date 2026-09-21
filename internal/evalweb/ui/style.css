@@ -87,6 +87,14 @@ input[type="search"] { width: 100%; padding: 6px 8px; border: 1px solid var(--ru
 .group .name { font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .group .score { font-family: var(--mono); }
 .group .arrow { font-size: 10px; }
+.group.batch { grid-template-columns: 18px minmax(0, 1fr) auto; padding: 7px 14px 7px 10px; align-items: center; border-left: 3px solid transparent; position: static; }
+.group.batch .name { font-size: 12px; overflow-wrap: anywhere; white-space: normal; line-height: 1.3; }
+.group.batch .meta { color: var(--muted); font-size: 11.5px; font-family: var(--sans); }
+.group.batch:hover { background: var(--bg); }
+.group.batch.active { border-left-color: var(--accent); background: var(--accent-soft); }
+.group.batch .score { display: block; text-align: right; }
+.arrow-btn { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px 4px; float: right; font-size: 11px; }
+.run-list .run { margin-left: 14px; border-left-width: 3px; }
 .run { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 14px 7px 10px; border-left: 3px solid transparent; cursor: pointer; }
 .run:hover { background: var(--bg); }
 .run.active { border-left-color: var(--accent); background: var(--accent-soft); }

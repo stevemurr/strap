@@ -103,22 +103,40 @@ function renderRuns() {
     return;
   }
   const groups = new Map();
+  const batches = new Map();
   for (const r of runs) {
+    if (r.batch) { batches.set(r.path, r); continue; }
     const key = r.group || 'runs';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
+  // A batch whose members are all filtered out still shows when it matches.
+  for (const [p, b] of batches) if (!groups.has(p)) groups.set(p, []);
   // Nested groups (container batches, comparison bundles, sweeps) start
   // folded to one line with their totals; the group holding the current run
   // is always open.
   for (const [name, members] of groups) {
     const nested = name !== 'runs';
+    const batch = batches.get(name);
     const holdsCurrent = members.some(r => r.path === current.run || (current.view === 'compare' && current.runs.includes(r.path)));
     const open = !nested || needle || holdsCurrent || state.open.has(name);
     const ladder = members.filter(r => r.kind === 'ladder');
-    const totals = ladder.length ? `${ladder.reduce((a, r) => a + r.passed, 0)}/${ladder.reduce((a, r) => a + r.tasks, 0)}` : '';
-    list.append(h('div', { class: 'group', role: 'button', tabindex: 0, onclick: () => { if (!nested) return; state.open.has(name) && !holdsCurrent ? state.open.delete(name) : state.open.add(name); if (open && !holdsCurrent) state.open.delete(name); renderRuns(); } },
-      h('span', { class: 'arrow' }, nested ? (open ? '▾' : '▸') : ''), h('span', { class: 'name', title: name }, name, h('span', { style: 'color:var(--muted)' }, ` ${members.length}`)), h('span', { class: 'score' }, totals)));
+    const totals = batch ? `${batch.passed}/${batch.tasks}` : ladder.length ? `${ladder.reduce((a, r) => a + r.passed, 0)}/${ladder.reduce((a, r) => a + r.tasks, 0)}` : '';
+    const toggle = () => { if (!nested) return; open && !holdsCurrent ? state.open.delete(name) : state.open.add(name); renderRuns(); };
+    if (batch) {
+      // A batch reads as one run: the row opens the merged view and can be
+      // ticked for comparison; the arrow lists the attempts beneath it.
+      const box = h('input', { type: 'checkbox', title: 'Select for comparison', onclick: e => e.stopPropagation(), onchange: e => { e.target.checked ? state.selected.add(name) : state.selected.delete(name); updateCompare(); } });
+      box.checked = state.selected.has(name);
+      const isActive = current.run === name || (current.view === 'compare' && current.runs.includes(name));
+      list.append(h('div', { class: 'group batch' + (isActive ? ' active' : ''), role: 'link', tabindex: 0, onclick: () => location.hash = runHref(name), onkeydown: e => { if (e.key === 'Enter') location.hash = runHref(name); } },
+        box, h('span', {}, h('span', { class: 'name', title: name }, name), h('div', { class: 'meta' }, [batch.model, short(batch.commit), `${batch.members} attempt${batch.members === 1 ? '' : 's'}`].filter(Boolean).join(' · ')),
+          batch.tasks ? h('div', { class: 'bar' }, h('i', { style: `width:${100 * batch.passed / batch.tasks}%` })) : null),
+        h('span', {}, h('div', { class: 'score' }, totals), h('button', { class: 'arrow-btn', title: open ? 'Hide attempts' : 'Show attempts', onclick: e => { e.stopPropagation(); toggle(); } }, open ? '▾' : '▸'))));
+    } else {
+      list.append(h('div', { class: 'group', role: 'button', tabindex: 0, onclick: toggle },
+        h('span', { class: 'arrow' }, nested ? (open ? '▾' : '▸') : ''), h('span', { class: 'name', title: name }, name, h('span', { style: 'color:var(--muted)' }, ` ${members.length}`)), h('span', { class: 'score' }, totals)));
+    }
     if (open) for (const r of members) list.append(runRow(r, current));
   }
 }
@@ -188,6 +206,7 @@ function header(summary, extra = []) {
       s.profile ? h('span', {}, 'profile ', h('b', {}, s.profile)) : null,
       s.commit ? h('span', {}, 'commit ', h('code', {}, s.commit)) : null,
       s.started_at ? h('span', {}, 'started ', h('b', {}, when(s.started_at))) : null,
+      s.batch ? h('span', {}, 'batch of ', h('b', {}, s.members), ' attempts, one task each') : null,
       ...extra),
   ];
 }
