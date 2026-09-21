@@ -37,7 +37,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 		defer cancel()
 		err = errors.Join(err, session.Dispose(cleanup))
 	}()
-	return tui.Run(ctx, session, tui.Options{Model: cfg.Model.Model, Endpoint: cfg.Model.BaseURL})
+	return tui.Run(ctx, session, tui.Options{Dir: cfg.Dir, Model: cfg.Model.Model, Endpoint: cfg.Model.BaseURL})
 }
 
 // version is stamped by the release build; a source build reports "dev" so a

@@ -37,6 +37,9 @@ type completionState struct {
 
 func (m *model) completionMatches() []slashCommand {
 	text := m.input.Value()
+	if matches := m.fileCompletionMatches(); len(matches) > 0 {
+		return matches
+	}
 	if m.plans.focused || m.streamUI.rosterFocused || m.completion.dismissed || !strings.HasPrefix(text, "/") ||
 		strings.ContainsFunc(text, unicode.IsSpace) || m.input.LineInfo().StartColumn+m.input.LineInfo().ColumnOffset != utf8.RuneCountInString(text) {
 		return nil
@@ -72,6 +75,9 @@ func (m *model) syncCompletion() {
 // Completion only edits the draft. An exact command goes through the usual
 // Enter handler, so selecting a partial /q never quits the app immediately.
 func (m *model) completionKey(key string) bool {
+	if _, ok := m.activeFileMention(); ok {
+		return m.completeFile(key)
+	}
 	matches := m.completionMatches()
 	if len(matches) == 0 {
 		return false

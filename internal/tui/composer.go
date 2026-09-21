@@ -90,6 +90,21 @@ func (m *model) composerMouse(event tea.MouseMsg) (bool, tea.Cmd) {
 }
 
 func (m *model) composerHint() string {
+	if m.attachmentJob != nil {
+		return "Loading text attachments… Esc cancels"
+	}
+	if _, ok := m.activeFileMention(); ok {
+		if m.fileCompletion.err != "" {
+			return "Files: " + safeText(m.fileCompletion.err)
+		}
+		if m.fileCompletion.cancel != nil {
+			return "Finding files… Esc dismisses"
+		}
+		if len(m.fileCompletion.candidates) == 0 {
+			return "No matching files or folders · Esc dismisses"
+		}
+		return "↑/↓ select · Tab complete/open folder · Enter send exact path · Esc dismiss"
+	}
 	if m.selecting {
 		return m.footer()
 	}
@@ -106,7 +121,7 @@ func (m *model) composerHint() string {
 		return "↑/↓ select · Tab complete · Enter confirm · Esc dismiss"
 	}
 	if m.input.Focused() && m.input.Value() != "" {
-		return "/ commands · Enter send · Shift+Enter newline"
+		return "@ files · / commands · Enter send · Shift+Enter newline"
 	}
 	if m.currentPlan() != nil {
 		return "Ctrl+P plan · F8 steps"

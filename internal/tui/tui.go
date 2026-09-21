@@ -41,6 +41,7 @@ type Session interface {
 }
 
 type Options struct {
+	Dir      string // Base directory for @ references; empty uses the process working directory.
 	Model    string
 	Endpoint string
 }
@@ -90,6 +91,7 @@ type entry struct {
 	outputFinished    bool
 	output            *identity.OutputID
 	message           identity.MessageID
+	hasAttachments    bool
 	label, meta, body string
 	at                time.Time
 	renderWidth       int
@@ -138,6 +140,8 @@ type model struct {
 	markdown          *glamour.TermRenderer
 	markdownWidth     int
 	completion        completionState
+	fileCompletion    fileCompletionState
+	attachmentJob     *attachmentJob
 	mouseSelection    *mouseSelection
 	copyText          func(string) error
 	nextTableID       uint64
@@ -180,14 +184,25 @@ func (m *model) listen() tea.Cmd {
 	}
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 	if m.quitting {
 		return m, nil
 	}
 	m.syncCompletion()
-	defer m.syncCompletion()
+	defer func() {
+		m.syncCompletion()
+		if next := m.scheduleFileCompletion(); next != nil {
+			cmd = tea.Batch(cmd, next)
+		}
+	}()
 	defer m.markStreamRead()
 	switch msg := msg.(type) {
+	case attachmentsLoaded:
+		m.finishAttachments(msg)
+		return m, nil
+	case fileCompletionsLoaded:
+		m.finishFileCompletion(msg)
+		return m, nil
 	case interrupted:
 		m.interrupting = false
 		if msg.err != nil {
@@ -297,6 +312,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	case tea.KeyMsg:
+		if msg.String() == "esc" && m.attachmentJob != nil {
+			m.attachmentJob.cancel()
+			m.attachmentJob = nil
+			m.add("Files", "Attachment loading canceled; draft preserved.", true)
+			return m, nil
+		}
 		if msg.String() == "esc" && m.badges.peek != nil {
 			m.badges.peek = nil
 			return m, nil
@@ -402,7 +423,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.selecting {
 		return m, nil
 	}
-	var cmd tea.Cmd
 	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyRunes {
 		key.Runes = []rune(normalizeInput(string(key.Runes)))
 		msg = key
@@ -424,7 +444,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n/plan [id]    Focus the persistent plan; Ctrl+P toggles the complete outline and current work item, F8 focuses steps. Up/down selects steps; Enter opens updates and criteria; PgUp/PgDn scrolls the outline or details; c returns to the outline; [/] switches plans; Esc returns to input.\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Shift+Enter (enhanced terminals) / Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside slash completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages and progress reports render Markdown. Report details keeps objectives, IDs, and source evidence available through its disclosure. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n/plan [id]    Focus the persistent plan; Ctrl+P toggles the complete outline and current work item, F8 focuses steps. Up/down selects steps; Enter opens updates and criteria; PgUp/PgDn scrolls the outline or details; c returns to the outline; [/] switches plans; Esc returns to input.\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType @ for text files/folders (quoted paths support spaces). Tab completes or opens folders; Enter sends exact paths. Attachments: UTF-8 text, 256 KiB/file, 1 MiB/message; folders honor Git ignores and report skips. Esc cancels loading.\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Shift+Enter (enhanced terminals) / Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside command/file completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages and progress reports render Markdown. Report details keeps objectives, IDs, and source evidence available through its disclosure. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -493,19 +513,37 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		m.add("System", "The root has stopped. Exit and restart strap to begin a new conversation.", true)
 		return m, nil
 	}
-	receipt, err := m.session.Send(m.session.Root(), text)
-	if err != nil {
-		m.add("Error", err.Error(), true)
+	if m.attachmentJob != nil {
 		return m, nil
 	}
+	for _, ref := range fileMentions(text) {
+		if ref.path != "" || !ref.complete {
+			return m, m.startAttachments(text)
+		}
+	}
+	m.sendDraft(text, text)
+	return m, nil
+}
+
+func (m *model) sendDraft(draft, payload string) bool {
+	if m.closed || m.rootStopped {
+		m.add("Error", "The root has stopped; draft preserved.", true)
+		return false
+	}
+	receipt, err := m.session.Send(m.session.Root(), payload)
+	if err != nil {
+		m.add("Error", err.Error(), true)
+		return false
+	}
 	m.pending[receipt.MessageID] = receipt.Recipient
-	m.history = append(m.history, text)
+	m.history = append(m.history, draft)
 	m.historyIndex = len(m.history)
 	m.draft = ""
 	m.input.Reset()
-	m.addAttributed("You", fmt.Sprintf("user → %s · %s", m.session.Root(), receipt.MessageID), text, true, m.session.Root())
+	m.addAttributed("You", fmt.Sprintf("user → %s · %s", m.session.Root(), receipt.MessageID), draft, true, m.session.Root())
 	m.entries[len(m.entries)-1].message = receipt.MessageID
-	return m, nil
+	m.entries[len(m.entries)-1].hasAttachments = payload != draft
+	return true
 }
 
 func (m *model) observe(event conversation.Event) {
@@ -624,7 +662,9 @@ func (m *model) observe(event conversation.Event) {
 		if msg.From == message.User {
 			for i := range m.entries {
 				if msg.ID != "" && m.entries[i].message == msg.ID {
-					m.entries[i].body = safeText(msg.Content)
+					if !m.entries[i].hasAttachments {
+						m.entries[i].body = safeText(msg.Content)
+					}
 					m.entries[i].renderWidth = 0
 					if !m.selecting {
 						m.renderTranscript(false)

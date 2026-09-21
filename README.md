@@ -313,12 +313,40 @@ to select and Tab to complete. Enter on a partial command fills it in; Enter on
 a complete command runs it. Escape dismisses suggestions. Commands that accept
 an agent ID leave space to type the argument after completion.
 
+Type `@` to browse files and folders, then type a path to filter the list.
+Up / Down selects; Tab completes a file or opens a folder. Enter completes a
+partial reference; Enter on an exact path sends the draft. Use `@src/main.go`,
+`@src/`, or `@"notes/design draft.md"`. Relative paths resolve from Strap's working
+directory (including `-C`); absolute paths also work. Mentions must start at a word boundary.
+Trailing sentence punctuation is excluded; quote paths containing such punctuation.
+Emails, escaped `\@` text, and mentions inside Markdown code spans/fences stay literal.
+
+Attachments support UTF-8 text and code, including extensionless files. Binary
+content and PDF, Word, spreadsheet, and presentation formats are unsupported.
+Each file is limited to 256 KiB; the combined contents and the formatted attachment
+section are each limited to 1 MiB, with at most 256 files and 10,000 visited folder
+entries. These are byte limits, not a guarantee that a model's context window
+will fit the message. Files are never silently truncated.
+
+Folders expand recursively in sorted order. Inside repositories, Git evaluates
+ignore rules (Git must be installed); outside repositories no ignore rules apply.
+Git metadata, symbolic links, ignored files, unsupported formats, and oversized
+files are skipped during folder expansion, with a summary of exclusions. Explicit
+references to those files fail with an explanation. Empty selections and combined
+budget overflows keep the draft unsent so you can narrow the references.
+
+File discovery and attachment loading run asynchronously. Escape cancels loading;
+editing the draft during loading prevents sending the old draft. Contents are
+appended in a separate section of the model's message. The composer history keeps
+your original prompt, so replaying it reloads current file contents without
+expanding old attachments again.
+
 Enter sends the entire draft. Alt+Enter or Ctrl+J inserts a newline; multiline
 paste stays in the draft until you send it. The input grows up to six visible
 rows and scrolls to keep the cursor visible. Up / Down moves within multiline
 or wrapped drafts; Alt+Up / Alt+Down recalls message history and restores your
 unfinished draft. Single-line drafts also retain Up / Down history navigation.
-Tab inserts four spaces outside slash completion. Slash commands run only from
+Tab inserts four spaces outside command and file completion. Slash commands run only from
 a single-line draft, so pasted multiline text beginning with `/` is sent as a
 message. Leading indentation and trailing newlines are preserved when sending.
 
