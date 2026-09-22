@@ -22,6 +22,7 @@ type RoleConfiguration struct {
 	Tools            []provider.ToolDefinition `json:"tools"`
 }
 type EffectiveConfig struct {
+	DeepResearch          DeepResearchConfig          `json:"deep_research"`
 	LSP                   *LSPConfiguration           `json:"lsp,omitempty"`
 	ToolContractVersion   string                      `json:"tool_contract_version"`
 	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
@@ -70,6 +71,10 @@ func describeRole(m ModelConfig, spec agent.Spec, injected bool) RoleConfigurati
 // inferred from the unused model defaults. Dynamic CreateAgent specs are separate.
 func (s *Session) Configuration() EffectiveConfig {
 	c := s.effective
+	if c.DeepResearch.Model != nil {
+		m := cloneModel(*c.DeepResearch.Model)
+		c.DeepResearch.Model = &m
+	}
 	if c.LSP != nil {
 		v := *c.LSP
 		v.Servers = append([]string(nil), v.Servers...)

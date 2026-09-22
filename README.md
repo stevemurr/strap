@@ -729,6 +729,14 @@ does not stop its children; conversation close cancels and joins every agent.
 
 ## Web research
 
+Enable experimental multi-source investigations with `go run ./cmd/strap -deep-research`.
+The root assigns a researcher, which calls `deep_research` to plan, search, read,
+verify claims and retain a report. The root remains available during the run.
+`get_research_report` reads bounded report/source pages; cancellation and
+reassignment retain a partial report under the original assignment. This uses
+the web dependencies below and is disabled by default. See
+[deep research configuration and evaluation](docs/architecture/DEEP_RESEARCH_IMPLEMENTATION.md).
+
 `web_search` queries the [Tavily](https://tavily.com) search API and returns
 ranked titles, destination URLs and snippets. `open_url` uses **agent-browser**
 to load a page in its own headless Chrome session and read the rendered DOM,

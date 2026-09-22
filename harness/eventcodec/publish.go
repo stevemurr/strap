@@ -149,6 +149,8 @@ func control(e conversation.Event) (json.RawMessage, error) {
 	// Only bounded identity/status fields are needed to reduce framed records.
 	var v any
 	switch e := e.(type) {
+	case conversation.ResearchEvent:
+		v = conversation.ResearchEvent{Event: record.ResearchControl(e.Event)}
 	case conversation.AgentExited:
 		v = exitedRecord{Agent: e.Agent, Error: "agent exited; details in content"}
 	case conversation.ContextTokensEvent:

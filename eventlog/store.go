@@ -20,12 +20,12 @@ var (
 	ErrDetached = errors.New("subscription detached")
 )
 
-// Schema 5 adds the nonterminal interrupted agent lifecycle state.
-const SchemaVersion = 5
+// Schema 6 adds retained deep research lifecycle, source and report records.
+const SchemaVersion = 6
 
 // SupportedSchema includes finite content-only archives written before reasoning.
 func SupportedSchema(schema int) bool {
-	return schema == 2 || schema == 3 || schema == 4 || schema == SchemaVersion
+	return schema == 2 || schema == 3 || schema == 4 || schema == 5 || schema == SchemaVersion
 }
 
 type Data struct {

@@ -30,6 +30,7 @@ import (
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/prompt"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/research"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -52,6 +53,7 @@ type ResearchExecutionConfig struct {
 	Env         []string      `json:"env"`
 }
 type Config struct {
+	DeepResearch          DeepResearchConfig          `json:"deep_research"`
 	LSP                   *lsp.Config                 `json:"lsp,omitempty"` // Nil disables experimental language tools.
 	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
@@ -96,6 +98,8 @@ type OwnedResource struct {
 // also registered in Resources. Resource ownership transfers when New is called,
 // including when construction fails and returns a cleanup handle.
 type Dependencies struct {
+	DeepResearchProvider                   provider.Provider
+	ResearchWeb                            research.Retrieval
 	LSP                                    lsp.Dependencies
 	CaptureFailure                         func(error)       // Optional independent diagnostic sink; must return promptly.
 	Provider                               provider.Provider // Shared fallback for all roles, useful for eval fakes.
@@ -105,6 +109,7 @@ type Dependencies struct {
 }
 
 type Session struct {
+	researchReads    *inspection.ResearchReader
 	interactionMu    sync.Mutex
 	interruption     *interruptAttempt
 	progressReads    *inspection.ProgressReader
@@ -198,6 +203,20 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if cfg.ReasoningLimit < 0 {
 		return nil, errors.New("reasoning limit must not be negative")
 	}
+	if cfg.DeepResearch.Enabled {
+		cfg.DeepResearch.Limits, err = cfg.DeepResearch.Limits.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Web == nil && deps.ResearchWeb == nil {
+			return nil, errors.New("deep research requires web retrieval")
+		}
+		cfg.Researcher.Prompt.Instructions = append(cfg.Researcher.Prompt.Instructions, "For a multi-source investigation, use deep_research with your active work_id and explicit success criteria. Read its report and source evidence with get_research_report. Forward selected verified findings using report_work_progress before submit_research; report claim IDs are not ledger finding IDs. State partial outcomes and remaining gaps.")
+		cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Researchers have an opt-in deep_research tool for bounded multi-source web investigations. Assign a researcher a clear question and acceptance criteria. Read retained runs through get_research_report. You remain available while research executes; send_message does not steer an in-flight investigation.")
+	}
+	s.config.DeepResearch = cfg.DeepResearch
+	s.config.Root = cfg.Root
+	s.config.Researcher = cfg.Researcher
 	var id [16]byte
 	if _, err = rand.Read(id[:]); err != nil {
 		return nil, err
@@ -317,6 +336,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		changed = languages.Changed
 		afterRun = func() { languages.Changed("") }
 	}
+	var webRuntime *tool.Web
 	var local []tool.Tool
 	if cfg.LocalTools {
 		local, err = localToolsWithChanges(cfg.Dir, changed, afterRun)
@@ -330,6 +350,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		if e != nil {
 			return nil, e
 		}
+		webRuntime = web
 		s.resources.Add("web", web)
 		local = append(local, web.Tools()...)
 	}
@@ -373,9 +394,37 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if feedback != nil && researchShell != nil {
 		researchShell = feedback.wrap(researchShell)
 	}
+	var deepOption workflow.Option = func(*workflow.Session) {}
+	if cfg.DeepResearch.Enabled {
+		model := researcher
+		if deps.DeepResearchProvider != nil {
+			model = deps.DeepResearchProvider
+		} else if cfg.DeepResearch.Model != nil {
+			model, err = makeProvider(AgentConfig{Model: cfg.DeepResearch.Model}, AgentDependencies{})
+			if err != nil {
+				return nil, err
+			}
+		}
+		engine, e := research.New(cfg.DeepResearch.Limits, model)
+		if e != nil {
+			return nil, e
+		}
+		s.researchReads, err = inspection.NewResearchReader(readSource)
+		if err != nil {
+			return nil, err
+		}
+		s.researchReads.Authorize = s.progressReads.Authorize
+		factory := func(b research.Binding) research.Retrieval {
+			if deps.ResearchWeb != nil {
+				return deps.ResearchWeb
+			}
+			return researchWebAdapter{web: webRuntime, actor: identity.ActorID(b.Actor)}
+		}
+		deepOption = workflow.WithDeepResearch(engine, factory, s.recordResearch, s.researchReadTool())
+	}
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
 		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}, deepOption, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
 		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.progressReadTool(false)), tool.GetResearchBrief(s.progressReadTool(true))}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}))
 	rootTools := s.workflow.RootTools()
@@ -402,7 +451,18 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg.roleModel(cfg.Root), rootSpec, injected(deps.Root)), Implementor: describeRole(cfg.roleModel(cfg.Implementor), implSpec, injected(deps.Implementor)), Auditor: describeRole(cfg.roleModel(cfg.Auditor), auditSpec, injected(deps.Auditor)), Researcher: describeRole(cfg.roleModel(cfg.Researcher), s.workflow.ResearcherSpec(), injected(deps.Researcher))}
+	s.effective = EffectiveConfig{DeepResearch: cfg.DeepResearch, LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg.roleModel(cfg.Root), rootSpec, injected(deps.Root)), Implementor: describeRole(cfg.roleModel(cfg.Implementor), implSpec, injected(deps.Implementor)), Auditor: describeRole(cfg.roleModel(cfg.Auditor), auditSpec, injected(deps.Auditor)), Researcher: describeRole(cfg.roleModel(cfg.Researcher), s.workflow.ResearcherSpec(), injected(deps.Researcher))}
+	if cfg.DeepResearch.Enabled {
+		deepModel := cfg.roleModel(cfg.Researcher)
+		if cfg.DeepResearch.Model != nil {
+			deepModel = *cfg.DeepResearch.Model
+		}
+		injectedDeep := deps.DeepResearchProvider != nil || cfg.DeepResearch.Model == nil && (deps.Researcher.Provider != nil || deps.Provider != nil) || cfg.DeepResearch.Model != nil && deps.Provider != nil
+		s.effective.DeepResearch.Model = describeRole(deepModel, agent.Spec{}, injectedDeep).Model
+	} else {
+		// Unused configuration must not expose credentials either.
+		s.effective.DeepResearch.Model = nil
+	}
 	if err = s.encoder.PublishConfiguration(context.Background(), s.Configuration()); err != nil {
 		s.log.Fail(err)
 		return nil, err
@@ -539,6 +599,10 @@ func cloneConfig(c Config) Config {
 	if c.LSP != nil {
 		v := c.LSP.Clone()
 		c.LSP = &v
+	}
+	if c.DeepResearch.Model != nil {
+		m := cloneModel(*c.DeepResearch.Model)
+		c.DeepResearch.Model = &m
 	}
 	c.ResearchExecution.Env = slices.Clone(c.ResearchExecution.Env)
 	c.Model = cloneModel(c.Model)

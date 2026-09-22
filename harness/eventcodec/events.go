@@ -24,6 +24,13 @@ func describe(e conversation.Event) (eventlog.Data, any, error) {
 	var actor message.ActorID
 	var payload any = e
 	switch v := e.(type) {
+	case conversation.ResearchEvent:
+		if err := v.Event.Validate(); err != nil {
+			return eventlog.Data{}, nil, err
+		}
+		kind = "deep_research"
+		actor = message.ActorID(v.Event.Binding.Actor)
+		correlation = v.Event.RunID
 	case conversation.AgentEvent:
 		return describeAgent(v)
 	case conversation.ContextTokensEvent:
@@ -104,6 +111,8 @@ func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 	switch e.Kind {
 	case "output_started", "output_delta", "output_finished", "history_appended", "inbox_disposition", "agent_yielded":
 		return decodeAgent(e)
+	case "deep_research":
+		return decode[conversation.ResearchEvent](e.Payload)
 	case "context_tokens":
 		return decode[conversation.ContextTokensEvent](e.Payload)
 	case "diagnostic":

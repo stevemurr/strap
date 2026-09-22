@@ -212,6 +212,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := parts[2:]
+	// Use the session's stable cursor signer for both live research routes.
+	if len(path) == 2 && path[0] == "trace" && path[1] == "research-view" {
+		path = path[1:]
+	}
 	if path[0] == "trace" {
 		reader, err := session.Trace(r.Context())
 		if err != nil {
@@ -224,6 +228,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(path) == 1 {
 		switch path[0] {
+		case "research-view":
+			if r.Method == "GET" {
+				q, err := inspection.ResearchQueryFromValues(r.URL.Query())
+				if err != nil {
+					respond(w, nil, err)
+					return
+				}
+				page, err := session.ReadResearchReport(r.Context(), identity.ActorID(r.URL.Query().Get("actor")), q)
+				respond(w, page, err)
+				return
+			}
 		case "work":
 			if r.Method == "GET" {
 				q, e := inspection.WorkQuery(r.URL.Query())

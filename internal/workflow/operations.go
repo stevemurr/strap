@@ -9,6 +9,7 @@ import (
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/internal/admission"
+	"github.com/stevemurr/strap/research"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 )
@@ -26,7 +27,15 @@ func (s *Session) UpdatePlan(ctx context.Context, actor identity.ActorID, u work
 }
 
 func (s *Session) CancelWork(ctx context.Context, actor identity.ActorID, r work.CancelRequest) (work.Work, error) {
-	return admitted(s, ctx, func(context.Context) (work.Work, error) { return s.Store.Cancel(actor, r) })
+	return admitted(s, ctx, func(context.Context) (work.Work, error) {
+		s.researchMu.Lock()
+		defer s.researchMu.Unlock()
+		w, err := s.Store.Cancel(actor, r)
+		if err == nil {
+			s.retireResearchLocked(r.ID, context.Canceled)
+		}
+		return w, err
+	})
 }
 
 func (s *Session) SubmitWork(ctx context.Context, actor identity.ActorID, r work.SubmitRequest) (work.SubmitReceipt, error) {
@@ -203,7 +212,13 @@ func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r wo
 	if err = run.Err(); err != nil {
 		return work.Work{}, err
 	}
-	return s.Store.Reassign(actor, r)
+	s.researchMu.Lock()
+	defer s.researchMu.Unlock()
+	result, err := s.Store.Reassign(actor, r)
+	if err == nil {
+		s.retireResearchLocked(r.ID, research.ErrReassigned)
+	}
+	return result, err
 }
 
 // AssignWork registers work for asynchronous dispatch without creating an agent.

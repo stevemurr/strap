@@ -52,6 +52,7 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /plans/{plan}?actor=...` | Plan snapshot |
 | `GET /submissions/{submission}?actor=...` | Submission snapshot |
 | `GET /audits/{audit}?actor=...` | Audit snapshot |
+| `GET /research-view?actor=...&mode=runs&work_id=...` | Opt-in deep research runs; `mode=report` or `sources` requires `report_id`; `mode=source` also requires `source_id` |
 | `GET /events?after=N&limit=N&max_bytes=N` | Finite retained page, accepted head, exclusive cursor and seal outcome |
 | `GET /outputs/{agent}/{call}` | Output metadata, applied cursor and source health |
 | `GET /outputs/{agent}/{call}/text?channel=content|reasoning&through=N&offset=N&max_bytes=N` | UTF-8 text page at a fixed session prefix; `through` is required |

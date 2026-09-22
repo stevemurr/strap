@@ -126,13 +126,18 @@ archives are finite failed input; they cannot silently start running again.
 
 ## API migration
 
-This implementation writes schema **5**. Readers also accept schemas 2, 3 and 4, normalizing
+This implementation writes schema **6**. Readers also accept schemas 2, 3, 4 and 5, normalizing
 schema-2 output deltas to content-only without rewriting stored records or hashes.
 Schema 2 does not establish whether the provider generated reasoning; it did not
 retain that channel. Schema-3 deltas require an explicit valid channel. Schema 4 adds immutable application `agent_registered` records. Older archives
 without these facts show `role: unknown`, `registered: false`, and no inferred
 eligible kinds. Schema 5 adds the nonterminal `interrupted` agent state. Older
 readers reject schema 5 instead of misinterpreting interruption as termination.
+Schema 6 adds assignment-bound `deep_research` lifecycle, source, usage and report
+records. Source text and wide report bodies use the existing content framing.
+Research inspection restores retained evidence without restarting execution;
+an archive without a terminal research record shows `incomplete` and its last
+accepted checkpoint. Schema-5 readers reject schema 6 explicitly.
 Schema-1 archives have narrower coverage
 and are rejected by the new archive reader/reducer rather than being presented as
 fully recoverable sessions. Provider implementations now implement

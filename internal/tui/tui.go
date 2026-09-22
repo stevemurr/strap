@@ -79,6 +79,7 @@ type received struct {
 }
 
 type entry struct {
+	researchRun       string
 	reportDetail      *entry
 	reportRefs        []message.ProgressReportRef
 	activityOutput    *identity.OutputID
@@ -524,6 +525,8 @@ func (m *model) observe(event conversation.Event) {
 	defer m.markStreamRead()
 	m.observeStreamEvent(event)
 	switch e := event.(type) {
+	case conversation.ResearchEvent:
+		m.observeResearch(e.Event)
 	case conversation.AgentEvent:
 		m.observeOutput(e.Event)
 	case conversation.ToolBatchEvent:

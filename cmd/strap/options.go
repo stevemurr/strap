@@ -28,6 +28,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.StringVar(&o.config.Dir, "C", o.config.Dir, "Working directory for shell and file tools")
 	flags.StringVar(&o.config.Events.JSONLPath, "record", "", "Record session events and tool diagnostics to a new JSONL file")
 	flags.StringVar(&o.listen, "listen", "", "Serve the harness HTTP API at a loopback address (requires STRAP_API_TOKEN)")
+	flags.BoolVar(&o.config.DeepResearch.Enabled, "deep-research", false, "Enable experimental researcher deep research with retained evidence and verification")
 	webEnabled := flags.Bool("web", o.config.Web != nil, "Enable web_search and open_url (backends start lazily)")
 	flags.StringVar(&o.config.Web.WKRenderPath, "wkrender", "", "Path to wkrender (default PATH or ~/.harness/bin/wkrender)")
 	flags.StringVar(&o.config.Web.AgentBrowserPath, "agent-browser", "", "Path to agent-browser (default PATH or Strap's isolated installation)")

@@ -16,6 +16,7 @@ import (
 	"github.com/stevemurr/strap/inbox"
 	"github.com/stevemurr/strap/internal/admission"
 	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/research"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
@@ -30,6 +31,12 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
+	researchMu         sync.Mutex
+	researchRun        *activeResearch
+	deepResearch       *research.Engine
+	researchWeb        func(research.Binding) research.Retrieval
+	researchRecord     research.Recorder
+	researchRead       tool.Tool
 	interrupted        atomic.Bool
 	interruptDrain     chan chan error
 	evidenceLookup     work.EvidenceLookup
@@ -91,6 +98,9 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	if s.publish == nil {
 		s.events = inbox.New[conversation.Event]()
 	}
+	if s.researchRead != nil {
+		s.progressReads = append(s.progressReads, s.researchRead)
+	}
 	s.implementor.Tools = append(s.implementor.Tools, s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, s.progressTool())
 	s.implementor.Tools = append(s.implementor.Tools, tool.SubmitWork(func(ctx context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
@@ -104,6 +114,9 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 		return result(v, e)
 	}))
 	if s.researcher.Provider != nil {
+		if s.deepResearch != nil {
+			s.researcher.Tools = append(s.researcher.Tools, s.deepResearchTool())
+		}
 		if s.researchShell != nil {
 			s.researcher.Tools = append(s.researcher.Tools, s.researchDiagnosticTool())
 		}

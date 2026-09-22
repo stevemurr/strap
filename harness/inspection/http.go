@@ -19,6 +19,7 @@ import (
 // Handler serves read-only inspection of a borrowed reader. The embedding host
 // must authorize access before calling it. It never opens caller-supplied paths.
 func Handler(reader *Reader) http.Handler {
+	researchReader, researchReaderErr := NewResearchReader(reader)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		write := func(value any, err error) {
@@ -53,6 +54,20 @@ func Handler(reader *Reader) http.Handler {
 			return
 		}
 		q := r.URL.Query()
+		if strings.Trim(r.URL.Path, "/") == "research-view" {
+			if researchReaderErr != nil {
+				write(nil, researchReaderErr)
+				return
+			}
+			query, e := ResearchQueryFromValues(q)
+			if e != nil {
+				write(nil, e)
+				return
+			}
+			value, e := researchReader.Read(r.Context(), identity.ActorID(q.Get("actor")), query)
+			write(value, e)
+			return
+		}
 		if strings.Trim(r.URL.Path, "/") == "work" {
 			query, e := WorkQuery(q)
 			if e != nil {

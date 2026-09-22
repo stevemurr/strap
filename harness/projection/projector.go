@@ -57,6 +57,7 @@ type WorkView struct {
 	Record  eventlog.Cursor `json:"record"`
 }
 type Projector struct {
+	researchRuns  map[string]ResearchView
 	executionRefs map[string]bool
 	bindings      map[string]identity.ActorID
 	lastBatch     map[identity.ActorID]agent.ToolBatch
@@ -82,7 +83,7 @@ type Projector struct {
 }
 
 func New(session identity.SessionID) *Projector {
-	return &Projector{executionRefs: map[string]bool{}, bindings: map[string]identity.ActorID{}, lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]struct{}{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
+	return &Projector{researchRuns: map[string]ResearchView{}, executionRefs: map[string]bool{}, bindings: map[string]identity.ActorID{}, lastBatch: map[identity.ActorID]agent.ToolBatch{}, registrations: map[identity.ActorID]roster.Registration{}, workViews: map[work.ID]WorkView{}, toolStates: map[string]toolState{}, calls: map[identity.ActorID]uint64{}, messageIDs: map[identity.MessageID]struct{}{}, workEvents: map[work.EventID]bool{}, usage: map[identity.ActorID]agent.UsageSnapshot{}, limits: map[identity.ActorID]*int64{}, session: string(session), cursor: eventlog.Cursor{Session: string(session)}, outputs: map[identity.OutputID]OutputView{}, agents: map[identity.ActorID]conversation.AgentInfo{}, histories: map[identity.ActorID][]HistoryView{}, receipts: map[identity.MessageID]message.Receipt{}, chunks: map[identity.ContentID]*chunkState{}, contents: map[identity.ContentID]eventlog.ContentRef{}, facts: map[string][]eventlog.Cursor{}}
 }
 func (p *Projector) Cursor() eventlog.Cursor { p.mu.RLock(); defer p.mu.RUnlock(); return p.cursor }
 func (p *Projector) Apply(e eventlog.Record) error {
@@ -122,6 +123,12 @@ func (p *Projector) Apply(e eventlog.Record) error {
 	var commit func()
 	actor := identity.ActorID(e.Agent)
 	switch e.Kind {
+	case "deep_research":
+		var err error
+		commit, err = p.applyResearch(e, isFramed)
+		if err != nil {
+			return err
+		}
 	case "session_started":
 		var v struct {
 			ID string `json:"id"`

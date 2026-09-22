@@ -59,7 +59,7 @@ func (w *Web) open(ctx context.Context, call Call, args openArgs) (Result, error
 	if args.MaxChars != nil {
 		limit = *args.MaxChars
 	}
-	ctx, done, err := w.begin(ctx, w.config.OpenTimeout)
+	ctx, done, err := w.begin(ctx, 0)
 	if err != nil {
 		return Result{}, err
 	}
@@ -77,12 +77,20 @@ func (w *Web) open(ctx context.Context, call Call, args openArgs) (Result, error
 	if w.browserErr != nil {
 		return Result{}, fmt.Errorf("open_url requires agent-browser: %w", w.browserErr)
 	}
+	queue, cancelQueue := context.WithTimeout(ctx, w.config.OpenQueueTimeout)
+	defer cancelQueue()
 	select {
 	case w.openSlots <- struct{}{}:
-	case <-ctx.Done():
-		return Result{}, ctx.Err()
+	case <-queue.Done():
+		return Result{}, fmt.Errorf("open_url queue: %w", queue.Err())
 	}
 	defer func() { <-w.openSlots }()
+	if err := queue.Err(); err != nil {
+		return Result{}, fmt.Errorf("open_url queue: %w", err)
+	}
+	cancelQueue()
+	ctx, cancelRead := context.WithTimeout(ctx, w.config.OpenTimeout)
+	defer cancelRead()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
