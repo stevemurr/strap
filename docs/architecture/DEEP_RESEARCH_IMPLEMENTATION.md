@@ -1,17 +1,17 @@
 # Deep research implementation
 
-Status: experimental, opt-in, 2026-09-22. Implements the
+Status: experimental, enabled by default, 2026-09-22. Implements the
 [approved proposal](DEEP_RESEARCH_PROPOSAL.md). Model quality and the benefit of
-parallel scouts remain evaluation questions; broad enablement is not approved
-by the deterministic tests alone.
+parallel scouts remain evaluation questions.
 
 ## Run it
 
 ```sh
-go run ./cmd/strap -deep-research
+go run ./cmd/strap
 ```
 
 Use the existing model configuration and [web dependencies](../../README.md#web-research).
+Disable the tool with `-deep-research=false`. `-web=false` also disables deep research.
 The root creates and assigns a researcher. The researcher calls `deep_research`
 with its active `work_id`, a question and 1–8 success criteria. All input keys are
 required by the tool contract; `context`, `depth`, `max_minutes`, and `max_tokens`
@@ -24,7 +24,9 @@ input and other work; messaging the researcher does not steer a running call.
 Cancel the work, reassign it, interrupt the session, or close execution to stop
 it. Accepted evidence is retained, and the result describes why it stopped.
 
-Library hosts set `harness.Config.DeepResearch.Enabled`. `DeepResearch.Model`
+`harness.DefaultConfig()` enables deep research. Library hosts can set
+`Config.DeepResearch.Enabled = false` to disable it. A nil `Config.Web` omits
+deep research unless the host supplies `Dependencies.ResearchWeb`. `DeepResearch.Model`
 can select a dedicated provider configuration; otherwise it inherits the
 researcher's provider. Injected `Dependencies.DeepResearchProvider` takes
 precedence. `Dependencies.ResearchWeb` supplies typed retrieval for tests or
@@ -177,5 +179,4 @@ of a verifier-disabled run.
 
 Live-model trials have not yet been run for this implementation. Human calibration,
 the existing-researcher baseline, a full verifier-off cost ablation, live-web smoke
-coverage, and the proposal's quality thresholds remain release gates. The feature
-and parallel mode stay opt-in while those measurements are pending.
+coverage, and the proposal's quality thresholds have not yet been validated.

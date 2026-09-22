@@ -74,7 +74,7 @@ type Config struct {
 // The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
 	languages := lsp.DefaultConfig()
-	return Config{ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://127.0.0.1:8000", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{}, LSP: &languages,
+	return Config{DeepResearch: DeepResearchConfig{Enabled: true}, ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://127.0.0.1:8000", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{}, LSP: &languages,
 		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, Researcher: AgentConfig{Prompt: researcherPrompt.Clone()}}
 }
 
@@ -203,16 +203,17 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if cfg.ReasoningLimit < 0 {
 		return nil, errors.New("reasoning limit must not be negative")
 	}
+	// Web-disabled hosts stay offline unless they explicitly inject retrieval.
+	if cfg.Web == nil && deps.ResearchWeb == nil {
+		cfg.DeepResearch.Enabled = false
+	}
 	if cfg.DeepResearch.Enabled {
 		cfg.DeepResearch.Limits, err = cfg.DeepResearch.Limits.Resolve()
 		if err != nil {
 			return nil, err
 		}
-		if cfg.Web == nil && deps.ResearchWeb == nil {
-			return nil, errors.New("deep research requires web retrieval")
-		}
 		cfg.Researcher.Prompt.Instructions = append(cfg.Researcher.Prompt.Instructions, "For a multi-source investigation, use deep_research with your active work_id and explicit success criteria. Read its report and source evidence with get_research_report. Forward selected verified findings using report_work_progress before submit_research; report claim IDs are not ledger finding IDs. State partial outcomes and remaining gaps.")
-		cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Researchers have an opt-in deep_research tool for bounded multi-source web investigations. Assign a researcher a clear question and acceptance criteria. Read retained runs through get_research_report. You remain available while research executes; send_message does not steer an in-flight investigation.")
+		cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Researchers have a deep_research tool for bounded multi-source web investigations. Assign a researcher a clear question and acceptance criteria. Read retained runs through get_research_report. You remain available while research executes; send_message does not steer an in-flight investigation.")
 	}
 	s.config.DeepResearch = cfg.DeepResearch
 	s.config.Root = cfg.Root

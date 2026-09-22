@@ -133,6 +133,60 @@ func deepConfig(t *testing.T) harness.Config {
 	cfg.Events.Queue.Bytes = 8192
 	return cfg
 }
+
+func TestDeepResearchDefaultsAndRetrievalAvailability(t *testing.T) {
+	for _, tt := range []struct {
+		name                            string
+		disabled, noWeb, injected, want bool
+	}{
+		{name: "default", want: true},
+		{name: "disabled", disabled: true},
+		{name: "no retrieval", noWeb: true},
+		{name: "injected retrieval", noWeb: true, injected: true, want: true},
+		{name: "disabled with injected retrieval", disabled: true, noWeb: true, injected: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := harness.DefaultConfig()
+			if !cfg.DeepResearch.Enabled {
+				t.Fatal("deep research is not enabled by default")
+			}
+			cfg.Dir, cfg.LocalTools, cfg.LSP = t.TempDir(), false, nil
+			cfg.Telemetry.ContextTokens = false
+			if tt.disabled {
+				cfg.DeepResearch.Enabled = false
+			}
+			if tt.noWeb {
+				cfg.Web = nil
+			}
+			deps := harness.Dependencies{Provider: textResponse("ready")}
+			if tt.injected {
+				deps.ResearchWeb = deepWeb{}
+			}
+			s, err := harness.New(context.Background(), cfg, deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Dispose(context.Background())
+			effective := s.Configuration()
+			if s.Config().DeepResearch.Enabled != tt.want || effective.DeepResearch.Enabled != tt.want {
+				t.Fatal("effective configuration does not reflect available retrieval")
+			}
+			registered := false
+			for _, def := range effective.Researcher.Tools {
+				registered = registered || def.Name == "deep_research"
+			}
+			if registered != tt.want {
+				t.Fatalf("research tool registered = %v, want %v", registered, tt.want)
+			}
+			for _, def := range effective.Root.Tools {
+				if def.Name == "deep_research" {
+					t.Fatal("root received blocking research tool")
+				}
+			}
+		})
+	}
+}
+
 func readDeep(t *testing.T, s *harness.Session, q research.ReadQuery) []byte {
 	t.Helper()
 	return readDeepPages(t, func(q research.ReadQuery) (inspection.ResearchPage, error) {
