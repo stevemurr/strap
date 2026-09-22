@@ -200,6 +200,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		Path     string `json:"path"`
 		Name     string `json:"name"`
 		Archived *bool  `json:"archived"`
+		Delete   bool   `json:"delete"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	dec.DisallowUnknownFields()
@@ -224,7 +225,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if found.Status == "running" {
-		fail(w, 409, errors.New("wait for this eval to finish before archiving or renaming"))
+		fail(w, 409, errors.New("wait for this eval to finish before changing or deleting it"))
 		return
 	}
 	if len(request.Name) > 160 {
@@ -237,9 +238,33 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
-	rel, err := filepath.Rel(s.root, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	root, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		fail(w, 400, errors.New("run must remain beneath results root"))
+		return
+	}
+	if request.Delete {
+		for _, run := range runs {
+			if run.Status == "running" && strings.HasPrefix(run.Path, found.Path+"/") {
+				fail(w, 409, errors.New("this evaluation contains a running task"))
+				return
+			}
+		}
+		s.mu.Lock()
+		err = os.RemoveAll(dir)
+		s.indexed = time.Time{}
+		s.reports = map[string]cachedReport{}
+		s.mu.Unlock()
+		if err != nil {
+			fail(w, 500, fmt.Errorf("delete run: %w", err))
+			return
+		}
+		writeJSON(w, map[string]bool{"deleted": true})
 		return
 	}
 	s.mu.Lock()

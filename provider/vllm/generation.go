@@ -19,6 +19,7 @@ type Generation struct {
 	MaxTokens            *int     `json:"max_tokens,omitempty"`             // > 0; output budget, not context length.
 	ForceNonemptyContent *bool    `json:"force_nonempty_content,omitempty"` // Requires support in the served chat template.
 	EnableThinking       *bool    `json:"enable_thinking,omitempty"`        // Requires support in the served chat template.
+	PreserveThinking     *bool    `json:"preserve_thinking,omitempty"`      // Qwen template: retain thinking from earlier user turns.
 	ReasoningEffort      *string  `json:"reasoning_effort,omitempty"`       // Qwen template: low, medium, or xhigh.
 
 }
@@ -37,6 +38,7 @@ func (g Generation) Clone() Generation {
 	g.RepetitionPenalty = copyValue(g.RepetitionPenalty)
 	g.MaxTokens = copyValue(g.MaxTokens)
 	g.EnableThinking = copyValue(g.EnableThinking)
+	g.PreserveThinking = copyValue(g.PreserveThinking)
 	g.ReasoningEffort = copyValue(g.ReasoningEffort)
 	g.ForceNonemptyContent = copyValue(g.ForceNonemptyContent)
 	return g
@@ -55,6 +57,7 @@ type generationFields struct {
 
 type templateFields struct {
 	EnableThinking       *bool   `json:"enable_thinking,omitempty"`
+	PreserveThinking     *bool   `json:"preserve_thinking,omitempty"`
 	ForceNonemptyContent *bool   `json:"force_nonempty_content,omitempty"`
 	ReasoningEffort      *string `json:"reasoning_effort,omitempty"`
 }
@@ -106,8 +109,8 @@ func (g Generation) freeze() (generationFields, error) {
 		MinP: g.MinP, PresencePenalty: g.PresencePenalty,
 		RepetitionPenalty: g.RepetitionPenalty, MaxTokens: g.MaxTokens,
 	}
-	if g.EnableThinking != nil || g.ForceNonemptyContent != nil || g.ReasoningEffort != nil {
-		fields.ChatTemplate = &templateFields{EnableThinking: g.EnableThinking, ForceNonemptyContent: g.ForceNonemptyContent, ReasoningEffort: g.ReasoningEffort}
+	if g.EnableThinking != nil || g.PreserveThinking != nil || g.ForceNonemptyContent != nil || g.ReasoningEffort != nil {
+		fields.ChatTemplate = &templateFields{EnableThinking: g.EnableThinking, PreserveThinking: g.PreserveThinking, ForceNonemptyContent: g.ForceNonemptyContent, ReasoningEffort: g.ReasoningEffort}
 	}
 	return fields, nil
 }

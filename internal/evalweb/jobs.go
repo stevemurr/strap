@@ -49,26 +49,33 @@ type JobEvent struct {
 	Phase  string    `json:"phase,omitempty"`
 }
 
+type AgentContext struct {
+	Revision uint64 `json:"revision"`
+	Tokens   int64  `json:"tokens"`
+	Error    string `json:"error,omitempty"`
+}
+
 // TaskState is the live and final view of one task in a job.
 type TaskState struct {
-	ID           string     `json:"id"`
-	Tier         string     `json:"tier"`
-	Title        string     `json:"title"`
-	Phase        string     `json:"phase"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-	Outcome      string     `json:"outcome,omitempty"`
-	Passed       bool       `json:"passed"`
-	TimedOut     bool       `json:"timed_out"`
-	NoReply      bool       `json:"no_reply"`
-	Error        string     `json:"error,omitempty"`
-	ModelCalls   int        `json:"model_calls"`
-	ToolCalls    int        `json:"tool_calls"`
-	ToolErrors   int        `json:"tool_errors"`
-	InputTokens  int64      `json:"input_tokens"`
-	OutputTokens int64      `json:"output_tokens"`
-	Agents       int        `json:"agents"`
-	Results      string     `json:"results,omitempty"`
+	Context      map[string]AgentContext `json:"context,omitempty"`
+	ID           string                  `json:"id"`
+	Tier         string                  `json:"tier"`
+	Title        string                  `json:"title"`
+	Phase        string                  `json:"phase"`
+	StartedAt    *time.Time              `json:"started_at,omitempty"`
+	FinishedAt   *time.Time              `json:"finished_at,omitempty"`
+	Outcome      string                  `json:"outcome,omitempty"`
+	Passed       bool                    `json:"passed"`
+	TimedOut     bool                    `json:"timed_out"`
+	NoReply      bool                    `json:"no_reply"`
+	Error        string                  `json:"error,omitempty"`
+	ModelCalls   int                     `json:"model_calls"`
+	ToolCalls    int                     `json:"tool_calls"`
+	ToolErrors   int                     `json:"tool_errors"`
+	InputTokens  int64                   `json:"input_tokens"`
+	OutputTokens int64                   `json:"output_tokens"`
+	Agents       int                     `json:"agents"`
+	Results      string                  `json:"results,omitempty"`
 }
 
 // JobSnapshot is the JSON view of a job.
@@ -113,6 +120,12 @@ func (j *job) snapshot() JobSnapshot {
 	tasks := make([]*TaskState, len(j.tasks))
 	for i, t := range j.tasks {
 		copied := *t
+		if t.Context != nil {
+			copied.Context = make(map[string]AgentContext, len(t.Context))
+			for id, c := range t.Context {
+				copied.Context[id] = c
+			}
+		}
 		tasks[i] = &copied
 	}
 	return JobSnapshot{ID: j.id, Name: j.name, Dir: j.dir, Status: j.status, StartedAt: j.started, FinishedAt: j.finished, Error: j.err, Tasks: tasks, Events: len(j.events), Metadata: j.metadata}
@@ -224,6 +237,21 @@ func (j *job) observe(p eval.Progress) {
 		} else {
 			e.Text = "usage unknown"
 		}
+	case conversation.ContextTokensEvent:
+		if t.Context == nil {
+			t.Context = map[string]AgentContext{}
+		}
+		previous, exists := t.Context[string(ev.Agent)]
+		if exists && ev.Revision < previous.Revision {
+			return
+		}
+		t.Context[string(ev.Agent)] = AgentContext{Revision: ev.Revision, Tokens: ev.Count, Error: ev.Error}
+		e.Kind, e.Agent = "context_tokens", string(ev.Agent)
+		if ev.Error != "" {
+			e.Text = "Context measurement unavailable: " + ev.Error
+		} else {
+			e.Text = fmt.Sprintf("%d context tokens", ev.Count)
+		}
 	case conversation.DiagnosticEvent:
 		e.Kind, e.Text = "diagnostic", ev.Level+": "+ev.Message
 	case conversation.WorkEvent:
@@ -271,8 +299,9 @@ func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
 		s.mu.Unlock()
 	}()
 	j.emit(JobEvent{Kind: "job", Text: "Preparing eval containers"})
-	inputs, prepareErr := r.prepareContainers(ctx, filepath.Join(s.root, j.dir), tasks)
+	inputs, prepareErr := r.prepareContainers(ctx, filepath.Join(s.root, j.dir), tasks, j.emit)
 	if prepareErr != nil {
+		j.emit(JobEvent{Kind: "build", Phase: "failed", Text: prepareErr.Error()})
 		j.mu.Lock()
 		j.err = prepareErr.Error()
 		j.mu.Unlock()
@@ -384,7 +413,7 @@ func (s *Server) startJob(ids []string, options ...newEval) (*job, error) {
 	name := fmt.Sprintf("eval-%d", now.UnixNano())
 	display := strings.TrimSpace(request.Name)
 	if display == "" {
-		display = configured.Config.Model.Model + " · " + now.Format("Jan 2, 15:04")
+		display = defaultEvalName(configured.Config.Model.Model, tasks)
 	}
 	metadata := configured.metadata(display, now)
 	if err := os.MkdirAll(filepath.Join(s.root, name), 0o755); err != nil {
@@ -549,4 +578,27 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// Default names describe the selected work; the library records the start date separately.
+func defaultEvalName(model string, tasks []eval.Task) string {
+	scope := fmt.Sprintf("%d problems", len(tasks))
+	if len(tasks) == 1 {
+		scope = tasks[0].Title
+		if scope == "" {
+			scope = tasks[0].ID
+		}
+	} else if len(tasks) > 1 {
+		tier := tasks[0].Tier
+		for _, task := range tasks {
+			if task.Tier != tier {
+				tier = ""
+				break
+			}
+		}
+		if tier != "" {
+			scope = fmt.Sprintf("%d %s problems", len(tasks), tier)
+		}
+	}
+	return model + " · " + scope
 }

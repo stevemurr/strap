@@ -3,6 +3,7 @@ package evalweb
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,13 @@ type containerInputs struct{ config, problems, grading string }
 
 // Snapshot one batch's inputs. Only public problem fixtures and the resolved
 // config are mounted into agents; the private ladder is grader-only.
-func (r *Runner) prepareContainers(ctx context.Context, dir string, tasks []eval.Task) (containerInputs, error) {
+func (r *Runner) prepareContainers(ctx context.Context, dir string, tasks []eval.Task, observers ...func(JobEvent)) (containerInputs, error) {
+	report := func(e JobEvent) {
+		for _, observe := range observers {
+			observe(e)
+		}
+	}
+	report(JobEvent{Kind: "build", Phase: "preparing", Text: "Preparing container inputs"})
 	inputs := containerInputs{config: filepath.Join(dir, "config"), problems: filepath.Join(dir, "problems"), grading: filepath.Join(dir, "grading")}
 	if err := os.MkdirAll(inputs.config, 0o700); err != nil {
 		return inputs, err
@@ -92,11 +99,17 @@ func (r *Runner) prepareContainers(ctx context.Context, dir string, tasks []eval
 		}
 		defer log.Close()
 		cmd := r.commandContext(ctx, "build", "-f", recipe, "-t", r.image(), source)
-		cmd.Stdout, cmd.Stderr = log, log
-		if err := cmd.Run(); err != nil {
+		report(JobEvent{Kind: "build", Phase: "building", Text: "Building " + r.image()})
+		progress := &buildProgressWriter{report: report}
+		output := io.MultiWriter(log, progress)
+		cmd.Stdout, cmd.Stderr = output, output
+		err = cmd.Run()
+		progress.flush()
+		if err != nil {
 			return inputs, fmt.Errorf("build eval image (see build.log): %w", err)
 		}
 	}
+	report(JobEvent{Kind: "build", Phase: "ready", Text: "Container image ready: " + r.image()})
 	return inputs, nil
 }
 
@@ -111,6 +124,14 @@ func bind(source, target string, readonly bool) (string, error) {
 		mount += ",readonly"
 	}
 	return mount, nil
+}
+
+func containerName(jobID, taskID string) string {
+	// The runtime limits IDs to 63 characters, including the phase suffix.
+	// Hash both IDs to keep names bounded and distinct even when task IDs share
+	// a long prefix or contain characters the runtime does not accept.
+	sum := sha256.Sum256([]byte(jobID + "\x00" + taskID))
+	return fmt.Sprintf("strap-eval-web-%x", sum[:16])
 }
 
 func (r *Runner) containerTask(ctx context.Context, j *job, task eval.Task, attempt string, inputs containerInputs) (eval.Result, error) {
@@ -132,7 +153,7 @@ func (r *Runner) containerTask(ctx context.Context, j *job, task eval.Task, atte
 	}
 	// Job id and task id never become shell code. Unique names bound cancellation
 	// cleanup to containers owned by this job, not any other running service.
-	name := "strap-eval-web-" + j.id + "-" + task.ID
+	name := containerName(j.id, task.ID)
 	args, err := makeArgs(name+"-agent", [][3]string{{workspace, "/workspace", ""}, {results, "/results", ""}, {outbox, "/outbox", ""}, {inputs.config, "/config", "ro"}, {inputs.problems, "/problems", "ro"}})
 	if err != nil {
 		return result, err

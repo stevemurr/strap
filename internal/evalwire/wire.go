@@ -65,7 +65,7 @@ func FromProgress(p eval.Progress) (Progress, bool, error) {
 	switch p.Event.(type) {
 	case conversation.ToolEvent, conversation.MessageEvent, conversation.CommentaryEvent,
 		conversation.AgentStarted, conversation.AgentExited, conversation.AgentStateChanged,
-		conversation.UsageEvent, conversation.DiagnosticEvent, conversation.WorkEvent:
+		conversation.UsageEvent, conversation.ContextTokensEvent, conversation.DiagnosticEvent, conversation.WorkEvent:
 	default:
 		return r, false, nil
 	}

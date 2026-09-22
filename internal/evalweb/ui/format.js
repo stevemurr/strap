@@ -1,35 +1,23 @@
 'use strict';
-// Render a conservative Markdown subset with DOM nodes only. Model text is
-// untrusted: raw HTML is always text and links allow only http(s).
+// GFM, including tables and task lists. Model HTML remains visible text;
+// sanitization is a second boundary for generated markup and unsafe URLs.
 function markdown(text) {
-  const root=document.createElement('div');root.className='markdown';
-  const inline=(el,text)=>{
-    const token=/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
-    let at=0;
-    for(const match of text.matchAll(token)) {
-      el.append(document.createTextNode(text.slice(at,match.index)));
-      const t=match[0];let node;
-      if(t.startsWith('`')){node=document.createElement('code');node.textContent=t.slice(1,-1);}
-      else if(t.startsWith('**')){node=document.createElement('strong');node.textContent=t.slice(2,-2);}
-      else{const parts=/^\[([^\]]+)\]\((.+)\)$/.exec(t);node=document.createElement('a');node.textContent=parts[1];node.href=parts[2];node.rel='noopener noreferrer';node.target='_blank';}
-      el.append(node);at=match.index+t.length;
-    }
-    el.append(document.createTextNode(text.slice(at)));
-  };
-  let code=null, list=null;
-  for(const line of String(text??'').split('\n')) {
-    if(line.startsWith('```')) {
-      if(code){code=null;}else{const pre=document.createElement('pre');code=document.createElement('code');pre.append(code);root.append(pre);if(line.slice(3).trim())pre.setAttribute('aria-label',line.slice(3).trim()+' code');}
-      list=null;continue;
-    }
-    if(code){code.textContent+=line+'\n';continue;}
-    if(!line.trim()){list=null;continue;}
-    const bullet=/^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(line);
-    if(bullet){if(!list){list=document.createElement(/^\s*\d/.test(line)?'ol':'ul');root.append(list);}const li=document.createElement('li');inline(li,bullet[1]);list.append(li);continue;}
-    list=null;
-    const heading=/^(#{1,6})\s+(.+)$/.exec(line);
-    const el=document.createElement(heading?'h'+Math.min(heading[1].length+2,6):line.startsWith('> ')?'blockquote':'p');
-    inline(el,heading?heading[2]:line.startsWith('> ')?line.slice(2):line);root.append(el);
-  }
+  const root = document.createElement('div');
+  root.className = 'markdown';
+  const escapeHTML = value => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const renderer = new marked.Renderer();
+  renderer.html = ({text}) => escapeHTML(text);
+  root.innerHTML = DOMPurify.sanitize(marked.parse(String(text ?? ''), {gfm:true, renderer}), {
+    USE_PROFILES:{html:true}, FORBID_TAGS:['img','video','audio','iframe','style','form'],
+    FORBID_ATTR:['style','id','name'],
+  });
+  root.querySelectorAll('a').forEach(link => {
+    if (!/^https?:\/\//i.test(link.getAttribute('href') || '')) link.removeAttribute('href');
+    else { link.target='_blank'; link.rel='noopener noreferrer'; }
+  });
+  root.querySelectorAll('table').forEach(table => {
+    const scroll=document.createElement('div');scroll.className='markdown-table';
+    table.before(scroll);scroll.append(table);
+  });
   return root;
 }

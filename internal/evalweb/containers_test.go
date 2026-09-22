@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,12 @@ func TestContainerHelperProcess(t *testing.T) {
 			os.Exit(9)
 		}
 		os.Exit(0)
+	}
+	for i, a := range args {
+		if a == "--name" && (len(args[i+1]) > 63 || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`).MatchString(args[i+1])) {
+			fmt.Fprintln(os.Stderr, "invalid container ID:", args[i+1])
+			os.Exit(2)
+		}
 	}
 	mounts := map[string]string{}
 	for i, a := range args {
@@ -184,6 +191,7 @@ func testContainerTask(t *testing.T, mode string) (*Runner, *job, eval.Task, str
 
 func TestContainerTaskMountsAndProgress(t *testing.T) {
 	r, j, task, attempt, state, inputs := testContainerTask(t, "")
+	j.id = "1790034210710114000"
 	result, err := r.containerTask(context.Background(), j, task, attempt, inputs)
 	if err != nil || result.Outcome != eval.Failed {
 		t.Fatal(result, err)
@@ -261,9 +269,38 @@ func TestContainerCancellationStopsOnlyOwnedAgent(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatal(got)
 	}
-	name := "strap-eval-web-owned-test-" + task.ID + "-agent"
+	name := containerName(j.id, task.ID) + "-agent"
 	if strings.Join(got[1], " ") != "stop "+name || strings.Join(got[2], " ") != "delete "+name {
 		t.Fatal(got)
+	}
+}
+
+func TestContainerNamesFitRuntimeLimit(t *testing.T) {
+	tasks, err := eval.LoadProblems("../../eval/ladder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{strings.Repeat("long-prefix-", 20) + "a", strings.Repeat("long-prefix-", 20) + "b", "custom task_名前"} {
+		tasks = append(tasks, eval.Task{ID: id})
+	}
+	valid := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+	seen := map[string]bool{}
+	for _, jobID := range []string{"1790034210710114000", "1790034210710114001"} {
+		for _, task := range tasks {
+			for _, phase := range []string{"agent", "grader"} {
+				name := containerName(jobID, task.ID) + "-" + phase
+				if len(name) > 63 || !valid.MatchString(name) {
+					t.Errorf("%s/%s: invalid container ID %q (%d bytes)", task.ID, phase, name, len(name))
+				}
+				if seen[name] {
+					t.Errorf("container ID reused: %s", name)
+				}
+				seen[name] = true
+				if again := containerName(jobID, task.ID) + "-" + phase; again != name {
+					t.Errorf("container ID changed: %q != %q", again, name)
+				}
+			}
+		}
 	}
 }
 

@@ -8,23 +8,30 @@
 </head>
 <body>
 <div class="app">
-  <aside class="side">
+  <aside class="side" id="sidebar">
     <div class="side-head">
-      <h1>strap eval</h1>
-      <div class="root" id="root" title=""></div>
-      <a class="button" href="#/">Evaluations</a>
-      <a class="button quiet" href="#/archive">Archive</a>
-      <div class="side-actions">
-        <a id="launch" class="button" href="#/launch" hidden>New eval</a>
-        <button id="compare-btn" class="button" hidden>Compare 0 runs</button>
-        <button id="refresh" class="button quiet" title="Rescan the results directory">Rescan</button>
-      </div>
-      <a id="running" class="running" href="#/" hidden></a>
+      <a class="brand" href="#/" aria-label="Strap home"><svg id="strap-mark" viewBox="0 0 38 11" width="72" height="24" aria-hidden="true"></svg><span>Strap</span></a>
+      <a class="sidebar-link" href="#/"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M7 16v-4m5 4V8m5 8v-6"/></svg><span>Evaluations</span></a>
     </div>
-    <nav id="runs" class="run-list" aria-label="Runs"></nav>
+    <nav class="running-list" aria-label="Running evaluations"><a id="running" class="running" href="#/" hidden></a></nav>
+    <div class="side-footer">
+      <a class="toolbar-button" href="#/settings" aria-label="Settings" title="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m10 3-.6 2.2-1.8 1L5.4 6 3.5 9.3l1.6 1.6v2.2l-1.6 1.6L5.4 18l2.2-.2 1.8 1L10 21h4l.6-2.2 1.8-1 2.2.2 1.9-3.3-1.6-1.6v-2.2l1.6-1.6L18.6 6l-2.2.2-1.8-1L14 3z"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></a>
+      <button id="refresh" class="toolbar-button" aria-label="Rescan evaluations" title="Rescan evaluations"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.2 7a8 8 0 0 1 13.3-1L20 8M4 16l1.5 2A8 8 0 0 0 18.8 17"/></svg><span>Rescan</span></button>
+    </div>
   </aside>
-  <main id="main" class="main"></main>
+  <div class="workspace">
+    <header class="toolbar">
+      <button id="sidebar-toggle" class="toolbar-button" aria-label="Hide sidebar" aria-controls="sidebar" aria-expanded="true" title="Hide sidebar">
+        <svg width="20" height="18" viewBox="0 0 20 18" fill="none" aria-hidden="true"><rect x="1.5" y="2" width="17" height="14" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M7 2v14" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+      <h1 id="toolbar-title">Evaluations</h1>
+      <div id="toolbar-actions" class="toolbar-actions"></div>
+    </header>
+    <main id="main" class="main"></main>
+  </div>
 </div>
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
 <script src="format.js"></script>
 <script src="app.js"></script>
 </body>

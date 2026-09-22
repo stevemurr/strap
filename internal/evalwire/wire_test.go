@@ -47,6 +47,7 @@ func TestProgressPreservesToolFailuresAndUsage(t *testing.T) {
 	in, out := int64(10), int64(20)
 	task := eval.Task{ID: "easy-01"}
 	events := []conversation.Event{
+		conversation.ContextTokensEvent{Agent: "worker", Revision: 7, Count: 4096},
 		conversation.ToolEvent{Agent: "worker", Activity: agent.ToolActivity{Call: provider.ToolCall{Name: "read_file", Arguments: json.RawMessage(`{"input":{"path":"/workspace/missing.go"}}`)}, StartedAt: now, FinishedAt: now.Add(time.Second), Err: errors.New("file does not exist")}},
 		conversation.UsageEvent{Agent: "worker", Observation: agent.UsageObservation{Usage: &provider.Usage{InputTokens: &in, OutputTokens: &out}}},
 	}
@@ -67,6 +68,10 @@ func TestProgressPreservesToolFailuresAndUsage(t *testing.T) {
 		switch e := got.Event.(type) {
 		case conversation.ToolEvent:
 			if e.Activity.Err == nil || e.Activity.Err.Error() != "file does not exist" || e.Activity.Call.Name != "read_file" {
+				t.Fatal(e)
+			}
+		case conversation.ContextTokensEvent:
+			if e.Agent != "worker" || e.Revision != 7 || e.Count != 4096 {
 				t.Fatal(e)
 			}
 		case conversation.UsageEvent:

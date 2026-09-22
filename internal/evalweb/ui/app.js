@@ -66,6 +66,7 @@ function route() {
   const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
   const q = new URLSearchParams(query);
   if (parts[0] === 'compare') return { view: 'compare', runs: (q.get('runs') || '').split('|').filter(Boolean) };
+  if (parts[0] === 'settings') return { view: 'settings' };
   if (parts[0] === 'launch') return { view: 'launch' };
   if (parts[0] === 'job' && parts[1]) return { view: 'job', id: parts[1] };
   if (parts[0] === 'run' && parts.length >= 2) {
@@ -74,7 +75,7 @@ function route() {
     if (tr > 1) return { view: 'trial', run: parts.slice(1, tr).join('/'), scenario: parts[tr + 1], trial: parts[tr + 2] };
     return { view: 'run', run: parts.slice(1).join('/'), tab: q.get('tab') || 'overview' };
   }
-  return { view: 'home', archive: parts[0] === 'archive' };
+  return { view: 'home' };
 }
 const runHref = p => `#/run/${p.split('/').map(encodeURIComponent).join('/')}`;
 const taskHref = (p, id) => `${runHref(p)}/task/${encodeURIComponent(id)}`;
@@ -86,9 +87,6 @@ async function loadRuns(refresh) {
   const data = await api('/api/runs' + (refresh ? '?refresh=1' : ''));
   state.runs = data.runs || [];
   state.root = data.root;
-  const root = $('#root');
-  root.textContent = data.root;
-  root.title = data.root;
   renderRuns();
 }
 
@@ -98,8 +96,9 @@ function libraryRuns() {
 }
 function runName(r) { return r.display_name || r.name || 'Evaluation'; }
 function renderRuns() {
-  const runs = libraryRuns();
-  mount($('#runs'), h('div', { class: 'library-count' }, `${runs.filter(r => !r.archived).length} evaluations`, h('div', {}, `${runs.filter(r => r.archived).length} archived`)));
+  const settings=route().view==='settings';
+  $('.sidebar-link').classList.toggle('active',!settings);
+  if(route().view!=='job')$('#toolbar-title').textContent=settings?'Settings':route().view==='launch'?'New evaluation':'Evaluations';
 }
 async function saveRun(path, changes) {
   const response = await fetch('/api/library', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path,...changes})});
@@ -110,6 +109,7 @@ async function saveRun(path, changes) {
 
 function updateCompare() {
   const btn = $('#compare-btn');
+  if(!btn)return;
   const n = state.selected.size;
   btn.hidden = n < 2;
   btn.textContent = `Compare ${n} runs`;
@@ -117,12 +117,22 @@ function updateCompare() {
 }
 
 // Main views
+let disposeView=()=>{};
 async function render() {
+  disposeView();disposeView=()=>{};
+  $('#toolbar-actions').replaceChildren();
+  $('#toolbar-problems')?.remove();
+  $('#toolbar-title').hidden=false;
   const main = $('#main');
   const r = route();
+  main.classList.toggle('job-main',r.view==='job');
+  $('.toolbar').classList.toggle('job-toolbar',r.view==='job');
+  $('#toolbar-title').removeAttribute('title');
+  if(r.view==='job')$('#toolbar-title').textContent='Loading evaluation…';
   renderRuns();
   try {
     if (r.view === 'home') { await loadRuns(false); await refreshRunning(); return renderHome(main); }
+    if (r.view === 'settings') return renderSettings(main);
     if (r.view === 'launch') return await renderLaunch(main);
     if (r.view === 'job') return await renderJob(main, r.id);
     if (r.view === 'compare') return await renderCompare(main, r.runs);
@@ -136,68 +146,97 @@ async function render() {
   }
 }
 
+function preference(key, fallback) {
+  try { return localStorage.getItem('eval-'+key)||fallback; } catch { return fallback; }
+}
+function savePreference(key,value) { try { localStorage.setItem('eval-'+key,value); } catch {} }
+function applyAppearance(value) {
+  if(value==='system')delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme=value;
+}
+function renderSettings(main) {
+  const choice=(label,key,values,fallback,change)=>h('label',{class:'settings-row'},h('span',{},label),h('select',{'aria-label':label,onchange:e=>{savePreference(key,e.target.value);change?.(e.target.value);}},values.map(([v,l])=>h('option',{value:v,selected:preference(key,fallback)===v},l))));
+  mount(main,h('div',{class:'head'},h('h2',{},'Settings')),h('div',{class:'app-settings'},
+    h('h3',{},'Storage'),h('section',{class:'settings-card'},h('label',{class:'path-setting'},'Results path',h('input',{type:'text',readonly:true,value:state.root,'aria-label':'Results path'})),h('p',{class:'muted'},'The results folder is set when the dashboard server starts.')),
+    h('h3',{},'Appearance'),h('section',{class:'settings-card'},choice('Appearance','appearance',[['system','System'],['light','Light'],['dark','Dark']],'system',applyAppearance)),
+    h('h3',{},'Evaluation log'),h('section',{class:'settings-card'},choice('Default rows per page','page-size',['5','10','20','50'].map(x=>[x,x]),'10',()=>{state.library.page=1;delete state.library.pageSize;}))));
+}
 function renderHome(main) {
-  const archived = !!route().archive;
   const all = libraryRuns();
   const f = state.library;
-  const table = h('div', {class:'section scroll library-table'});
-  const count = h('span', {class:'flag'});
-  const error = h('div', {class:'error', role:'status'});
-  const search = h('input', {type:'search', placeholder:'Search name, model, configuration or commit', value:f.search || '', oninput:e=>{f.search=e.target.value;draw();}});
-  function select(key, label, values) {
-    return h('label', {class:'field'}, label, h('select', {'aria-label':label,onchange:e=>{f[key]=e.target.value;draw();}}, values.map(([v,l])=>h('option',{value:v,selected:v===(f[key]||'')},l))));
+  const body=h('tbody',{}), pager=h('div',{class:'pagination'});
+  const count=h('span',{class:'muted'}), error=h('div',{class:'error',role:'status'});
+  const compare=h('button',{id:'compare-btn',class:'button',hidden:true,onclick:()=>location.hash=compareHref([...state.selected])});
+  const change=()=>{f.page=1;draw();};
+  const search=h('input',{type:'search','aria-label':'Search evaluations',placeholder:'Search evaluations…',value:f.search||'',oninput:e=>{f.search=e.target.value;change();}});
+  const unique=key=>[...new Set(all.map(r=>r[key]).filter(Boolean))];
+  const branches=unique('branch'),commits=unique('commit');
+  function select(key,label,values) {
+    return h('select',{'aria-label':label,onchange:e=>{f[key]=e.target.value;change();}},values.map(([v,l])=>h('option',{value:v,selected:v===(f[key]||'')},l)));
   }
-  const unique = key => [...new Set(all.map(r=>r[key]).filter(Boolean))];
-  const branches = unique('branch');
-  const commits = unique('commit');
-  const bar = h('div',{class:'library-filters'},
-    select('branch','Branch',[['','All branches'],['@latest','Latest recorded branch'],['@unknown','Unknown branch'],...branches.map(x=>[x,x])]),
-    select('commit','Commit (newest run first)',[['','All commits'],['@latest','Latest recorded commit'],...commits.map(x=>[x,short(x)])]),
-    select('model','Model',[['','All models'],...unique('model').map(x=>[x,x])]),
-    select('thinking','Thinking',[['','Any'],['true','Enabled'],['false','Disabled'],['default','Server default']]),
-    ...['from','to'].map(key=>h('label',{class:'field'},key==='from'?'Started on or after':'Started on or before',h('input',{type:'date',value:f[key]||'',onchange:e=>{f[key]=e.target.value;draw();}}))),
-    select('sort','Sort',[['','Newest started'],['old','Oldest started'],['name','Name'],['score','Pass rate']]),
-    h('button',{class:'button',onclick:()=>{state.library={};renderHome(main);}},'Clear filters'));
+  const column=(title,...filters)=>h('th',{scope:'col'},h('span',{class:'column-title'},title),h('div',{class:'column-filters'},filters));
+  const head=h('thead',{},h('tr',{},h('th',{'aria-label':'Compare'}),
+    column('Evaluation',select('status','Status',[['','All statuses'],...unique('status').map(x=>[x,x])])),
+    column('Started',h('details',{class:'date-filter'},h('summary',{},'Date range'),h('div',{class:'date-range'},...['from','to'].map(key=>h('label',{},key==='from'?'From':'To',h('input',{type:'date','aria-label':key==='from'?'Started on or after':'Started on or before',value:f[key]||'',onchange:e=>{f[key]=e.target.value;change();}})))))),
+    column('Model',select('model','Model',[['','All models'],...unique('model').map(x=>[x,x])]),select('thinking','Thinking',[['','Any thinking'],['true','Thinking on'],['false','Thinking off'],['default','Server default']])),
+    column('Source',select('branch','Branch',[['','All branches'],['@latest','Latest recorded branch'],['@unknown','Unknown branch'],...branches.map(x=>[x,x])]),select('commit','Commit (newest run first)',[['','All commits'],['@latest','Latest recorded commit'],...commits.map(x=>[x,short(x)])])),
+    column('Passed',select('result','Result',[['','All'],['all','All passed'],['some','Has failures'],['none','No results']])),h('th',{'aria-label':'Actions'})));
   function draw() {
-    const rows = all.filter(r=>{
-      if (!!r.archived!==archived) return false;
-      if (f.search && !JSON.stringify([runName(r),r.model,r.profile,r.commit,r.branch,r.configuration,r.role_models]).toLowerCase().includes(f.search.toLowerCase())) return false;
+    const rows=all.filter(r=>{
+      if(f.status&&r.status!==f.status)return false;
+      if(f.search&&!JSON.stringify([runName(r),r.model,r.profile,r.commit,r.branch,r.configuration,r.role_models]).toLowerCase().includes(f.search.toLowerCase()))return false;
       const branch=f.branch==='@latest'?branches[0]:f.branch;
-      if (f.branch==='@latest' && !branches.length) return false;
-      if (branch==='@unknown'?!!r.branch:(branch && r.branch!==branch)) return false;
+      if(f.branch==='@latest'&&!branches.length)return false;
+      if(branch==='@unknown'?!!r.branch:(branch&&r.branch!==branch))return false;
       const commit=f.commit==='@latest'?commits[0]:f.commit;
-      if (f.commit==='@latest' && !commits.length) return false;
-      if (commit && r.commit!==commit) return false;
-      if (f.model && r.model!==f.model) return false;
+      if(f.commit==='@latest'&&!commits.length)return false;
+      if(commit&&r.commit!==commit)return false;
+      if(f.model&&r.model!==f.model)return false;
       const thinking=r.configuration?.generation?.enable_thinking;
-      if (f.thinking && (f.thinking==='default'?thinking!==undefined:String(thinking)!==f.thinking)) return false;
+      if(f.thinking&&(f.thinking==='default'?thinking!==undefined:String(thinking)!==f.thinking))return false;
       const date=new Date(r.started_at);
-      if (f.from && date<new Date(f.from+'T00:00:00')) return false;
-      if (f.to && date>new Date(f.to+'T23:59:59.999')) return false;
+      if(f.from&&(!Number.isFinite(+date)||date<new Date(f.from+'T00:00:00')))return false;
+      if(f.to&&(!Number.isFinite(+date)||date>new Date(f.to+'T23:59:59.999')))return false;
+      if(f.result==='all'&&(!r.tasks||r.passed!==r.tasks))return false;
+      if(f.result==='some'&&!(r.tasks>r.passed))return false;
+      if(f.result==='none'&&r.tasks)return false;
       return true;
     }).sort((a,b)=>f.sort==='name'?runName(a).localeCompare(runName(b)):f.sort==='score'?(b.passed/(b.tasks||1)-a.passed/(a.tasks||1)):(new Date(b.started_at)-new Date(a.started_at))*(f.sort==='old'?-1:1));
-    count.textContent=`${rows.length} ${archived?'archived':'evaluations'}`;
-    const action = (r,label,fn) => h('button',{class:'button small',disabled:r.status==='running',title:r.status==='running'?'Available after the eval finishes':label,onclick:async()=>{try{await fn();}catch(e){error.textContent=e.message;}}},label);
-    const trs=rows.map(r=>{
+    const size=Number(f.pageSize||preference('page-size','10'));
+    const pages=Math.max(1,Math.ceil(rows.length/size));
+    f.page=Math.min(Math.max(1,f.page||1),pages);
+    const start=(f.page-1)*size;
+    count.textContent=`${rows.length} evaluations`;
+    const action=(r,label,fn)=>h('button',{class:'menu-action',disabled:r.status==='running',onclick:async()=>{try{await fn();}catch(e){error.textContent=e.message;}}},label);
+    mount(body,rows.slice(start,start+size).map(r=>{
       const box=h('input',{type:'checkbox','aria-label':`Compare ${runName(r)}`,disabled:r.kind!=='ladder'||!r.tasks,onchange:e=>{e.target.checked?state.selected.add(r.path):state.selected.delete(r.path);updateCompare();}});box.checked=state.selected.has(r.path);
-      const target=r.job_id?`#/job/${r.job_id}`:runHref(r.path);
-      return h('tr',{},h('td',{},box),h('td',{},r.tasks||r.job_id?h('a',{href:target,class:'run-title'},runName(r)):h('b',{},runName(r)),h('div',{class:'muted'},r.archive_reason||r.status||r.kind)),
-        h('td',{},when(r.started_at)||'Unknown'),h('td',{},r.model||'Unknown',h('div',{class:'muted'},configLabel(r.configuration))),
-        h('td',{},r.branch||'Unknown branch',h('div',{},h('code',{title:r.commit},short(r.commit)||'Unknown commit'))),
-        h('td',{class:'num'},`${r.passed}/${r.tasks}`),
-        h('td',{class:'row-actions'},action(r,'Rename',async()=>{const name=prompt('Eval name',runName(r));if(name?.trim())await saveRun(r.path,{name:name.trim()});}),action(r,archived?'Restore':'Archive',()=>saveRun(r.path,{archived:!archived})),
-          h('details',{},h('summary',{},'Configuration'),h('pre',{},JSON.stringify({model:r.configuration,roles:r.role_models,folder:r.path},null,2)))));
-    });
-    mount(table,rows.length?h('table',{},h('thead',{},h('tr',{},['','Evaluation','Date started','Model / settings','Source','Passed','Manage'].map(x=>h('th',{},x)))),h('tbody',{},trs)):h('div',{class:'empty'},'No evaluations match these filters.'));
+      const date=new Date(r.started_at), valid=Number.isFinite(+date)&&date.getFullYear()>1;
+      const menu=h('details',{class:'row-menu'},h('summary',{'aria-label':`Actions for ${runName(r)}`,title:'Actions'},'•••'),h('div',{class:'menu-panel'},
+        action(r,'Rename',async()=>{const name=prompt('Eval name',runName(r));if(name?.trim())await saveRun(r.path,{name:name.trim()});}),
+        h('button',{class:'menu-action',onclick:()=>{menu.open=false;showConfiguration(r);}},'Configuration'),
+        action(r,'Delete',async()=>{if(confirm(`Permanently delete “${runName(r)}” and its files?`)){state.selected.delete(r.path);await saveRun(r.path,{delete:true});}})));
+      return h('tr',{},h('td',{},box),h('td',{},r.tasks||r.job_id?h('a',{href:r.job_id?`#/job/${r.job_id}`:runHref(r.path),class:'run-title'},runName(r)):h('span',{class:'run-title'},runName(r)),h('div',{class:'run-status'},h('i',{class:r.status==='running'?'status-dot live':'status-dot'}),r.status||r.kind||'Incomplete')),
+        h('td',{class:'date-cell'},valid?date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'Unknown',h('div',{class:'muted'},valid?date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'')),
+        h('td',{},r.model||'Unknown',h('div',{class:'muted'},configLabel(r.configuration))),
+        h('td',{},r.branch||'Unknown branch',h('div',{class:'muted'},short(r.commit)||'Unknown commit')),
+        h('td',{class:'score-cell'},h('span',{class:'score-value'},`${r.passed||0}`,h('span',{class:'muted'},` / ${r.tasks||0}`)),h('div',{class:'score-track'},h('i',{style:`width:${r.tasks?Math.min(100,100*r.passed/r.tasks):0}%`})) ),h('td',{class:'actions-cell'},menu));
+    }));
+    if(!rows.length)mount(body,h('tr',{},h('td',{colspan:7,class:'empty'},'No evaluations match these filters.')));
+    mount(pager,h('span',{class:'muted'},rows.length?`${start+1}–${Math.min(start+size,rows.length)} of ${rows.length}`:'0 evaluations'),h('label',{},'Rows per page ',h('select',{'aria-label':'Rows per page',onchange:e=>{f.pageSize=e.target.value;change();}},['5','10','20','50'].map(n=>h('option',{value:n,selected:Number(n)===size},n)))),h('div',{class:'page-controls'},h('button',{class:'button',disabled:f.page===1,'aria-label':'Previous page',onclick:()=>{f.page--;draw();}},'‹'),h('span',{},`${f.page} / ${pages}`),h('button',{class:'button',disabled:f.page===pages,'aria-label':'Next page',onclick:()=>{f.page++;draw();}},'›')));
+    updateCompare();
   }
-  mount(main,h('div',{class:'head'},h('h2',{},archived?'Archive':'Evaluations'),h('a',{class:'button primary',href:'#/launch',hidden:!runner?.enabled},'New eval'),count),
-    archived?h('p',{class:'muted'},'Attempts without readable results are archived automatically. Files are retained; restore any attempt to keep it in the library.'):null,
-    search,bar,error,table);
+  function showConfiguration(r) {
+    const dialog=h('dialog',{class:'configuration-dialog'},h('div',{class:'head'},h('h3',{},runName(r)),h('button',{class:'button',onclick:()=>dialog.close()},'Done')),h('pre',{},JSON.stringify({model:r.configuration,roles:r.role_models,folder:r.path},null,2)));
+    dialog.addEventListener('close',()=>dialog.remove());main.append(dialog);dialog.showModal();
+  }
+  mount(main,h('div',{class:'head library-head'},h('h2',{},'Evaluations'),count,h('a',{class:'button primary',href:'#/launch',hidden:!runner?.enabled},'New eval')),
+    h('div',{class:'library-tools'},search,compare,select('sort','Sort',[['','Newest first'],['old','Oldest first'],['name','Name'],['score','Pass rate']]),h('button',{class:'button quiet',onclick:()=>{state.library={pageSize:f.pageSize};renderHome(main);}},'Clear filters')),error,
+    h('div',{class:'library-card'},h('div',{class:'library-table'},h('table',{},head,body)),pager));
   draw();
 }
 function configLabel(model) {
  const g=model?.generation||{};
- return [g.enable_thinking===undefined?'Thinking: default':g.enable_thinking?'Thinking on':'Thinking off',g.temperature===undefined?'Temperature: default':`Temperature ${g.temperature}`].join(' · ');
+ return [g.enable_thinking===undefined?'Thinking: default':g.enable_thinking?'Thinking on':'Thinking off',g.preserve_thinking===undefined?null:`Preserve thinking ${g.preserve_thinking?'on':'off'}`,g.temperature===undefined?'Temperature: default':`Temperature ${g.temperature}`].filter(Boolean).join(' · ');
 }
 
 function header(summary, extra = []) {
@@ -492,7 +531,6 @@ async function renderCompare(main, paths) {
 let runner = null;
 async function loadRunner() {
   try { runner = await api('/api/runner'); } catch { runner = { enabled: false }; }
-  $('#launch').hidden = !runner.enabled;
   await refreshRunning();
 }
 async function refreshRunning() {
@@ -530,6 +568,8 @@ async function renderLaunch(main) {
     generation.append(field(label,settings[key]));
   };
   choice('enable_thinking','Thinking',[['true','Enabled'],['false','Disabled']]);
+  choice('preserve_thinking','Preserve thinking',[['true','Enabled'],['false','Disabled']]);
+  settings.preserve_thinking.parentElement.append(h('span',{class:'muted'},'Keep thinking from earlier turns when supported by the model.'));
   choice('reasoning_effort','Reasoning effort',[['low','Low'],['medium','Medium'],['xhigh','Extra high']]);
   choice('force_nonempty_content','Require nonempty content',[['true','Enabled'],['false','Disabled']]);
   for(const [key,label,min,max,step] of [
@@ -563,7 +603,7 @@ async function renderLaunch(main) {
     start.disabled = true;
     note.textContent = 'Starting…';
     try {
-      const res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: [...chosen], name:name.value.trim(), apply_to_roles:allRoles.checked, model:{model:model.value.trim(),backend:backend.value,base_url:endpoint.value.trim(),timeout_ns:Math.round(Number(timeout.value)*60e9),generation:backend.value==='vllm'?Object.fromEntries(Object.entries(settings).filter(([,el])=>el.value!=='').map(([key,el])=>[key,['enable_thinking','force_nonempty_content'].includes(key)?el.value==='true':key==='reasoning_effort'?el.value:Number(el.value)])):{}} }) });
+      const res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: [...chosen], name:name.value.trim(), apply_to_roles:allRoles.checked, model:{model:model.value.trim(),backend:backend.value,base_url:endpoint.value.trim(),timeout_ns:Math.round(Number(timeout.value)*60e9),generation:backend.value==='vllm'?Object.fromEntries(Object.entries(settings).filter(([,el])=>el.value!=='').map(([key,el])=>[key,['enable_thinking','preserve_thinking','force_nonempty_content'].includes(key)?el.value==='true':key==='reasoning_effort'?el.value:Number(el.value)])):{}} }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || res.statusText);
       location.hash = `#/job/${body.id}`;
@@ -582,72 +622,149 @@ async function renderLaunch(main) {
 async function renderJob(main, id) {
   let snap = await api(`/api/jobs/${id}`);
   let selected=snap.tasks.find(t=>['running','starting','grading'].includes(t.phase))?.id || snap.tasks[0]?.id;
-  const events=[];const seen=new Set();const closed=new Set();
-  const table=h('table',{class:'dense'});
-  const feed=h('div',{class:'feed progress-tree'});
-  const heading=h('h3',{});
+  const events=[];const seen=new Set();
+  let agentFilter='', pinnedProblem=false;
+  const table=h('div',{class:'problem-list','aria-label':'Problems'});
+  const problemRows=new Map();
+  const problemSummary=h('summary',{class:'problem-summary','aria-label':'Choose problem and view evaluation progress'});
+  const overview=h('div',{class:'problem-overview'});
+  const problems=h('details',{id:'toolbar-problems',class:'problem-dropdown'},problemSummary,h('div',{class:'problem-popover'},overview,table));
+  let foldAnimation;
+  problems.setExpanded=open=>{
+    foldAnimation?.cancel();
+    const panel=problems.querySelector('.problem-popover');
+    problemSummary.setAttribute('aria-expanded',String(open));
+    panel.inert=!open;
+    if(open)problems.open=true;
+    if(matchMedia('(prefers-reduced-motion: reduce)').matches){problems.open=open;return;}
+    foldAnimation=panel.animate(open?[{opacity:0,transform:'translateY(-5px) scale(.985)'},{opacity:1,transform:'none'}]:[{opacity:1,transform:'none'},{opacity:0,transform:'translateY(-5px) scale(.985)'}],{duration:170,easing:'ease',fill:'both'});
+    foldAnimation.onfinish=()=>{problems.open=open;foldAnimation.cancel();foldAnimation=null;};
+  };
+  problemSummary.setAttribute('aria-expanded','false');
+  problemSummary.addEventListener('click',e=>{e.preventDefault();problems.setExpanded(problemSummary.getAttribute('aria-expanded')!=='true');});
+  const feed=h('div',{class:'feed activity-feed'});
+  const tree=h('nav',{class:'agent-tree','aria-label':'Agent hierarchy'});
+  const contextPanel=h('section',{class:'context-panel','aria-label':'Agent context usage'});
+  const attention=h('section',{class:'attention-panel','aria-label':'Needs attention',hidden:true});
+  const stats=h('div',{class:'problem-stats','aria-label':'Problem statistics'});
+  const controlIcon=path=>{
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    for(const [key,value] of Object.entries({width:18,height:18,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':1.6,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
+    const shape=document.createElementNS(svg.namespaceURI,'path');shape.setAttribute('d',path);svg.append(shape);return svg;
+  };
+  const buildLabel=h('span',{},'Waiting');
+  const buildOutput=h('pre',{});
+  const buildPanel=h('div',{class:'build-overlay',id:'container-log-panel',hidden:true},h('div',{class:'container-log-heading'},h('h3',{},'Container'),buildLabel),buildOutput);
+  const build=h('div',{class:'build-indicator container-status'},h('button',{class:'toolbar-button container-toggle','aria-label':'Container status','aria-controls':'container-log-panel','aria-expanded':'false',title:'Container: waiting — Show logs',onclick:e=>{buildPanel.hidden=!buildPanel.hidden;e.currentTarget.setAttribute('aria-expanded',String(!buildPanel.hidden));}},controlIcon('M12 3 3 8v9l9 5 9-5V8z M3 8l9 5 9-5 M12 13v9 M7.5 5.5l9 5'),h('span',{class:'build-spinner','aria-hidden':true})));
+
   const status=h('span',{});
   const notice=h('div',{class:'error',role:'status'});
-  const cancel=h('button',{class:'button',onclick:async()=>{cancel.disabled=true;try{const res=await fetch(`/api/jobs/${id}/cancel`,{method:'POST'});if(!res.ok)throw new Error((await res.json()).error);}catch(e){notice.textContent=e.message;cancel.disabled=false;}}},'Cancel eval');
-  const follow=h('label',{},h('input',{type:'checkbox',checked:true}),' Follow progress');let follows=true;
-  follow.firstChild.addEventListener('change',e=>follows=e.target.checked);
+  const cancel=h('button',{class:'toolbar-button cancel-control','aria-label':'Cancel eval',title:'Cancel evaluation',onclick:async()=>{cancel.disabled=true;try{const res=await fetch(`/api/jobs/${id}/cancel`,{method:'POST'});if(!res.ok)throw new Error((await res.json()).error);}catch(e){notice.textContent=e.message;cancel.disabled=false;}}},controlIcon('M8 3h8l5 5v8l-5 5H8l-5-5V8z M9 9h6v6H9z'));
+  const controls=h('div',{class:'eval-controls',role:'group','aria-label':'Evaluation controls'},cancel,build,buildPanel);
+  let follows=true,lastScroll=0;
+  const atBottom=()=>feed.scrollHeight-feed.clientHeight-feed.scrollTop<=4;
+  feed.tabIndex=0;
+  feed.setAttribute('aria-label','Agent activity');
+  feed.addEventListener('wheel',e=>{if(e.deltaY<0)follows=false;},{passive:true});
+  feed.addEventListener('keydown',e=>{if(['ArrowUp','PageUp','Home'].includes(e.key))follows=false;});
+  feed.addEventListener('scroll',()=>{
+    // Our render restores scrollTop before this asynchronous event fires.
+    // Only a changed position represents the reader moving through the log.
+    if(feed.scrollTop!==lastScroll){follows=atBottom();lastScroll=feed.scrollTop;}
+  },{passive:true});
   const elapsed=t=>t.started_at?dur(((t.finished_at?new Date(t.finished_at):new Date())-new Date(t.started_at))*1e6):'';
-  const selectTask=t=>{selected=t.id;drawTable();drawTree();};
+  const selectTask=t=>{selected=t.id;pinnedProblem=true;agentFilter='';problems.setExpanded(false);problemSummary.focus();follows=true;drawTable();drawTree();};
   function drawTable() {
+    drawStats();
     const done=snap.tasks.filter(t=>t.phase==='finished');
     mount(status,snap.status==='running'?h('span',{class:'pulse'}):null,h('b',{},snap.status),` · ${done.length}/${snap.tasks.length} finished · ${done.filter(t=>t.passed).length} passed`,snap.error?h('span',{class:'error'},` · ${snap.error}`):null);
     cancel.hidden=snap.status!=='running';
-    mount(table,h('thead',{},h('tr',{},['Problem','Phase','Outcome','Time','Calls','Tools','Tool errors','Agents','Tokens in','Tokens out',''].map(l=>h('th',{},l)))),
-      h('tbody',{},snap.tasks.map(t=>h('tr',{class:'row'+(selected===t.id?' selected':''),tabindex:0,'aria-selected':selected===t.id,onclick:()=>selectTask(t),onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectTask(t);}}},
-        h('td',{},h('b',{},t.title||t.id),h('div',{class:'muted'},t.id)),h('td',{},h('span',{class:`phase ${t.phase}`},t.phase)),
-        h('td',{},t.outcome?outcomeTag(t):'',t.error?h('div',{class:'error'},clipText(t.error,120)):null),
-        h('td',{class:'num'},elapsed(t)),...['model_calls','tool_calls','tool_errors','agents','input_tokens','output_tokens'].map(k=>h('td',{class:'num'},num(t[k]))),
-        h('td',{},t.results?h('a',{href:runHref(t.results),onclick:e=>e.stopPropagation()},'Results'):'')))));
+    const active=snap.tasks.find(t=>['running','starting','grading'].includes(t.phase));
+    if(!pinnedProblem && active && selected!==active.id){selected=active.id;agentFilter='';drawTree();drawStats();}
+    const chosen=snap.tasks.find(t=>t.id===selected);
+    mount(problemSummary,h('span',{class:'header-problem-text'},h('span',{class:'problem-title'},chosen?.title||chosen?.id||'No problems'),h('progress',{class:'header-progress',max:snap.tasks.length||1,value:done.length,'aria-label':'Overall progress'})),h('span',{class:'header-problem-count'},`${done.length}/${snap.tasks.length}`),h('span',{class:'problem-chevron','aria-hidden':true},'⌄'));
+    mount(overview,h('div',{class:'problem-overview-heading'},h('h3',{},'Problem set'),h('span',{class:'muted'},`${done.length} of ${snap.tasks.length} finished`)),h('progress',{max:snap.tasks.length||1,value:done.length,'aria-label':'Evaluation completion'}),status,h('div',{class:'muted'},snap.metadata?.model?.model||'', ' · ',configLabel(snap.metadata?.model)),h('div',{class:'muted'},'Started ',when(snap.started_at)));
+    for(const t of snap.tasks){
+      let row=problemRows.get(t.id);
+      if(!row){row=h('button',{type:'button',class:'problem-option',onclick:()=>selectTask(t)});problemRows.set(t.id,row);table.append(row);}
+      row.classList.toggle('selected',selected===t.id);
+      row.setAttribute('aria-pressed',String(selected===t.id));
+      mount(row,h('span',{class:'problem-option-check','aria-hidden':true},selected===t.id?'✓':''),h('span',{class:'problem-option-text'},h('span',{},t.title||t.id),h('span',{class:'muted'},t.id)),h('span',{class:'problem-option-state'},t.outcome?outcomeTag(t):h('span',{class:`phase ${t.phase}`},t.phase),h('span',{class:'muted'},elapsed(t))));
+    }
+    if(!snap.tasks.length)mount(table,h('div',{class:'empty'},'No problems in this evaluation.'));
+  }
+
+  function contextLabel(agent) {
+    const context=snap.tasks.find(t=>t.id===selected)?.context?.[agent];
+    return !context||context.error?'Context not available':`${num(context.tokens)} context tokens`;
+  }
+  function drawStats() {
+    const task=snap.tasks.find(t=>t.id===selected);
+    const metrics=[['Elapsed',task?.started_at?elapsed(task):'—','Wall time'],['Model calls',num(task?.model_calls),'Completed calls'],['Tool calls',num(task?.tool_calls),'Completed calls'],['Tool errors',num(task?.tool_errors),'Failed tool calls'],['Input tokens',num(task?.input_tokens),'Across all calls'],['Output tokens',num(task?.output_tokens),'Across all calls']];
+    mount(stats,metrics.map(([label,value,hint])=>h('div',{class:'stat-card'+(label==='Tool errors'&&task?.tool_errors?' has-errors':''),'data-metric':label},h('span',{class:'stat-label'},label),h('strong',{class:'stat-value'},value),h('span',{class:'stat-hint'},hint))));
+    const contexts=Object.keys(task?.context||{}).filter(agent=>!agentFilter||agentFilter===agent);
+    mount(contextPanel,h('div',{class:'eyebrow'},'Context per agent'),h('p',{class:'muted'},'Latest measured context'),contexts.length?contexts.map(agent=>h('div',{class:'context-entry'},h('span',{},agent),h('span',{'data-context-agent':agent},contextLabel(agent)))):h('p',{class:'muted'},'No context measurements yet.'));
   }
   function drawTree() {
-    const task=snap.tasks.find(t=>t.id===selected);
-    heading.textContent=task?`${task.title||task.id} · progress`:'Progress';
     const scroll=feed.scrollTop;
-    const items=events.filter(e=>e.task===selected || !e.task);
-    feed.replaceChildren();
+    const items=events.filter(e=>e.task===selected);
     const agents=new Map();
-    const groups=new Map();
     for(const e of items)if(e.agent&&!agents.has(e.agent))agents.set(e.agent,e.parent||'');else if(e.agent&&e.parent)agents.set(e.agent,e.parent);
-    for(const [agent] of agents) {
-      const body=h('div',{class:'agent-events'});
-      const key=selected+':'+agent;
-      const group=h('details',{open:!closed.has(key),ontoggle:e=>{e.target.open?closed.delete(key):closed.add(key);}},h('summary',{},agent),body);
-      groups.set(agent,{group,body});
-    }
+    // Resolve only recorded parent relationships. Chronology never determines nesting.
     const parents=new Map();
     for(const [agent,parent] of agents) {
       let p=parent;const ancestors=new Set([agent]);let cycle=false;
       while(p&&agents.has(p)){if(ancestors.has(p)){cycle=true;break;}ancestors.add(p);p=agents.get(p);}
-      parents.set(agent,!cycle&&groups.has(parent)?parent:'');
+      parents.set(agent,!cycle&&agents.has(parent)?parent:'');
     }
-    const placed=new Set();
-    function place(agent) {
-      if(placed.has(agent))return;
-      const parent=parents.get(agent);if(parent)place(parent);
-      (parent?groups.get(parent).body:feed).append(groups.get(agent).group);placed.add(agent);
+    const agentButton=(agent,label)=>h('button',{class:'agent-button'+(agentFilter===agent?' active':''),'aria-pressed':agentFilter===agent,onclick:()=>{agentFilter=agent;follows=true;drawTree();}},label);
+    function branch(parent) {
+      return h('ul',{},[...parents].filter(([,p])=>p===parent).map(([agent])=>h('li',{'data-agent':agent},agentButton(agent,agent),h('span',{class:'agent-parent'},parents.get(agent)?`Child of ${parents.get(agent)}`:'Root agent'),branch(agent))));
     }
-    for(const e of items) {
-      if(e.agent)place(e.agent);
-      const row=h('div',{class:`line ${e.kind}`},h('div',{class:'t'},new Date(e.at).toLocaleTimeString('en-US',{hour12:false})),h('div',{class:'k'},e.kind==='phase'?e.phase:e.kind),h('div',{class:'x'},markdown(e.text||'')));
-      (groups.get(e.agent)?.body||feed).append(row);
+    mount(tree,h('div',{class:'eyebrow'},'Agents'),agentButton('','All agents'),branch(''));
+    const visible=items.filter(e=>!agentFilter||e.agent===agentFilter);
+    mount(feed,h('div',{class:'log-columns','aria-hidden':'true'},['Time','Agent','Action','Tool','Contents'].map(label=>h('span',{},label))),visible.map(e=>{
+      const isTool=['tool','tool_done','tool_error'].includes(e.kind);
+      const text=e.text||'';
+      const match=isTool?/^([^\s:]+)(?:[ :]|\n|$)/.exec(text):null;
+      const tool=match?.[1]||'';
+      // Existing stored events encode the tool in the first line. Remove only
+      // that prefix, retaining arguments, output, errors and duration verbatim.
+      const body=tool?text.slice(tool.length).replace(/^: ?/,'').trim():text;
+      const outcome=e.kind==='tool_done'?'Success':e.kind==='tool_error'?'Failed':'';
+      const action=isTool?'Tool':e.kind==='phase'?e.phase:e.kind.replaceAll('_',' ');
+      return h('div',{class:`line ${e.kind}`,'data-event-seq':e.seq},h('time',{class:'t',datetime:e.at},new Date(e.at).toLocaleTimeString('en-US',{hour12:false})),h('span',{class:'event-agent'},e.agent||'Problem'),h('span',{class:'k'},action),h('div',{class:'event-tool'},h('span',{class:'compact-action'},action),h('code',{},tool||'—'),outcome?h('span',{class:'tool-outcome '+(e.kind==='tool_error'?'failed':'passed')},outcome):null),h('div',{class:'x'},markdown(body)));
+    }));
+    drawStats();
+    const failures=items.filter(e=>e.kind==='tool_error'||e.kind==='error');
+    attention.hidden=!failures.length;
+    mount(attention,h('div',{class:'eyebrow'},'Needs attention'),failures.map(e=>h('button',{class:'failure-shortcut',onclick:()=>{agentFilter=e.agent||'';follows=false;drawTree();const row=feed.querySelector(`[data-event-seq="${e.seq}"]`);if(row){feed.scrollTop=row.offsetTop-feed.offsetTop-32;lastScroll=feed.scrollTop;row.classList.add('highlighted');}}},h('span',{},clipText(e.text?.split('\n')[0]||'Error',100)),h('small',{},e.agent||'Problem',' · ',new Date(e.at).toLocaleTimeString('en-US',{hour12:false})))));
+    if(!visible.length)feed.append(h('div',{class:'empty',style:'padding:18px'},'Waiting for activity…'));
+    const builds=events.filter(e=>e.kind==='build');
+    if(builds.length){
+      const latest=builds[builds.length-1];
+      buildLabel.textContent=latest.phase==='failed'?'Build failed':latest.phase==='ready'?'Image ready':latest.phase==='preparing'?'Preparing…':'Building…';
+      build.firstChild.title=`Container: ${buildLabel.textContent} — Show logs`;
+      build.classList.toggle('is-building',latest.phase==='building'||latest.phase==='preparing');
+      build.classList.toggle('build-failed',latest.phase==='failed');
+      build.classList.toggle('build-ready',latest.phase==='ready');
+      buildOutput.textContent=builds.map(e=>e.text).join('\n');
     }
-    if(!items.length)feed.append(h('div',{class:'empty',style:'padding:18px'},'Waiting for this problem to start.'));
     feed.scrollTop=follows?feed.scrollHeight:scroll;
+    lastScroll=feed.scrollTop;
   }
   drawTable();drawTree();
-  mount(main,h('div',{class:'head'},h('h2',{},snap.name),h('a',{href:'#/'},'← Evaluations')),
-    h('div',{class:'facts'},status,h('span',{},'Started ',when(snap.started_at)),h('span',{},snap.metadata?.model?.model||''),h('span',{},configLabel(snap.metadata?.model))),
-    h('div',{class:'launch-bar'},cancel,notice),h('div',{class:'section scroll'},table),
-    h('div',{class:'progress-heading'},heading,follow),h('p',{class:'muted'},'Select a problem to inspect its agent tree. Expand an agent to read actions, output, Markdown and code.'),feed);
+  $('#toolbar-title').textContent=snap.name;
+  $('#toolbar-title').title=snap.name;
+  $('#toolbar-title').hidden=false;
+  $('#toolbar-actions').before(problems);
+  mount($('#toolbar-actions'));
+  mount(main,notice,stats,h('div',{class:'progress-layout'},h('div',{class:'agent-column'},controls,tree,contextPanel,attention),feed));
   const source=new EventSource(`/api/jobs/${id}/events`);
   const tick=setInterval(drawTable,1000);
   let pending=false;
-  const stop=()=>{source.close();clearInterval(tick);};
+  const stop=()=>{source.close();clearInterval(tick);foldAnimation?.cancel();};
+  disposeView=stop;
   source.addEventListener('progress',ev=>{
     const e=JSON.parse(ev.data);if(seen.has(e.seq))return;seen.add(e.seq);events.push(e);
     if(!pending){pending=true;requestAnimationFrame(()=>{pending=false;if(feed.isConnected)drawTree();});}
@@ -660,9 +777,28 @@ async function renderJob(main, id) {
 function clipText(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
 
 // Wiring
+document.addEventListener('click',e=>document.querySelectorAll('.row-menu[open], .problem-dropdown[open]').forEach(menu=>{if(!menu.contains(e.target))menu.setExpanded?menu.setExpanded(false):menu.open=false;}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.row-menu[open], .problem-dropdown[open]').forEach(menu=>{menu.setExpanded?menu.setExpanded(false):menu.open=false;menu.firstChild.focus();});});
+const gun=['........................O...........','......................O.O...........','............OO......OO............OO','...........O...O....OO............OO','OO........O.....O...OO..............','OO........O...O.OO....O.O...........','..........O.....O.......O...........','...........O...O....................','............OO......................'];
+gun.forEach((row,y)=>[...row].forEach((cell,x)=>{if(cell==='O'){const dot=document.createElementNS('http://www.w3.org/2000/svg','rect');for(const [key,value] of Object.entries({x:x+1,y:y+1,width:.85,height:.85,fill:'currentColor'}))dot.setAttribute(key,value);$('#strap-mark').append(dot);}}));
+function setSidebar(hidden) {
+  $('.app').classList.toggle('sidebar-hidden',hidden);
+  $('#sidebar').inert=hidden;
+  $('#sidebar').setAttribute('aria-hidden',String(hidden));
+  sidebarHidden=hidden;
+  const toggle=$('#sidebar-toggle');
+  toggle.setAttribute('aria-expanded',String(!hidden));
+  toggle.setAttribute('aria-label',hidden?'Show sidebar':'Hide sidebar');
+  toggle.title=hidden?'Show sidebar':'Hide sidebar';
+  try { localStorage.setItem('eval-sidebar-hidden',String(hidden)); } catch {}
+}
+let sidebarHidden=false;
+try { sidebarHidden=localStorage.getItem('eval-sidebar-hidden')==='true'; } catch {}
+applyAppearance(preference('appearance','system'));
+setSidebar(sidebarHidden);
+$('#sidebar-toggle').addEventListener('click',()=>setSidebar(!sidebarHidden));
 window.addEventListener('hashchange', render);
-$('#compare-btn').addEventListener('click', () => location.hash = compareHref([...state.selected]));
-$('#refresh').addEventListener('click', () => loadRuns(true).then(render));
+$('#refresh').addEventListener('click', async e => {const button=e.currentTarget;button.disabled=true;try{await loadRuns(true);await render();}catch(err){alert(err.message);}finally{button.disabled=false;}});
 Promise.all([loadRuns(false), loadRunner()]).then(() => {
   const r = route();
   if (r.view === 'compare') for (const p of r.runs) state.selected.add(p);

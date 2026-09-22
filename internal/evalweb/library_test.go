@@ -24,6 +24,7 @@ func TestEvalConfigurationIsValidatedAndIsolated(t *testing.T) {
 	m.Model = "new-model"
 	m.Generation.Temperature = &zero
 	m.Generation.EnableThinking = &thinking
+	m.Generation.PreserveThinking = &thinking
 	configured, err := r.configured(newEval{Model: &m, ApplyToRoles: true})
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +75,7 @@ func TestNamedRunPersistsConfigurationIntoContainerSnapshot(t *testing.T) {
 	temp, thinking := 0.0, false
 	m.Generation.Temperature = &temp
 	m.Generation.EnableThinking = &thinking
+	m.Generation.PreserveThinking = &thinking
 	j, err := srv.startJob([]string{"easy-01-budget-pair"}, newEval{Name: "Greedy baseline", Model: &m, ApplyToRoles: true})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +96,7 @@ func TestNamedRunPersistsConfigurationIntoContainerSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Harness.Model.Generation.EnableThinking == nil || *config.Harness.Model.Generation.EnableThinking || *config.Harness.Model.Generation.Temperature != 0 {
+	if config.Harness.Model.Generation.PreserveThinking == nil || *config.Harness.Model.Generation.PreserveThinking || config.Harness.Model.Generation.EnableThinking == nil || *config.Harness.Model.Generation.EnableThinking || *config.Harness.Model.Generation.Temperature != 0 {
 		t.Fatal("explicit zero/false did not reach container")
 	}
 	fresh, _ := New(srv.root, nil)
@@ -264,5 +266,60 @@ func TestRunMetadataRecordsBuildSourceBranch(t *testing.T) {
 	r.Commit = "unrelated-commit"
 	if meta = r.metadata("", time.Now()); meta.Branch != "" {
 		t.Fatal("inferred a branch for an unrelated reused image", meta)
+	}
+}
+
+func TestLibraryDeleteRemovesOnlySelectedEvaluation(t *testing.T) {
+	root := fixture(t)
+	dir := filepath.Join(root, "dead")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run.json"), []byte(`{"model":{"model":"test"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/library", strings.NewReader(`{"path":"dead","delete":true}`)))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("evaluation remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "batch")); err != nil {
+		t.Fatalf("unrelated evaluation changed: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/library", strings.NewReader(`{"path":"../","delete":true}`)))
+	if rec.Code != 404 {
+		t.Fatalf("unknown path accepted: %d", rec.Code)
+	}
+}
+
+func TestLibraryDeleteRejectsRunningEvaluation(t *testing.T) {
+	root := fixture(t)
+	dir := filepath.Join(root, "live")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "eval-run.json"), []byte(`{"name":"Live","status":"running"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.jobs = []*job{{id: "live", dir: "live", status: "running"}}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/library", strings.NewReader(`{"path":"live","delete":true}`)))
+	if rec.Code != 409 {
+		t.Fatalf("running evaluation accepted: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
 	}
 }
