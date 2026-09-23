@@ -72,12 +72,13 @@ func (f *Files) create(ctx context.Context, _ Call, args writeArgs) (Result, err
 	case err != nil && !errors.Is(err, os.ErrNotExist):
 		return Result{}, err
 	}
-	if err := f.atomicWriteText(ctx, path, args.Content); err != nil {
+	content, note := normalizeStrayCR(args.Content, existing)
+	if err := f.atomicWriteText(ctx, path, content); err != nil {
 		return Result{}, err
 	}
 	changed = path
-	f.labelsFor(path, existing).replaceAll(args.Content)
-	return JSON(WriteFileResult{Path: args.Path, BytesWritten: len(args.Content)})
+	f.labelsFor(path, existing).replaceAll(content)
+	return JSON(WriteFileResult{Path: args.Path, BytesWritten: len(content), Note: note})
 }
 
 func (f *Files) editLines(ctx context.Context, _ Call, args anchoredEditArgs) (result Result, err error) {

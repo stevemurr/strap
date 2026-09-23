@@ -121,6 +121,7 @@ type ReadFileResult struct {
 type WriteFileResult struct {
 	Path         string `json:"path"`
 	BytesWritten int    `json:"bytes_written"`
+	Note         string `json:"note,omitempty"`
 }
 
 type EditFileResult struct {
@@ -232,11 +233,15 @@ func (f *Files) write(ctx context.Context, _ Call, args writeArgs) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	if err := f.atomicWriteText(ctx, path, args.Content); err != nil {
+	// The replaced file only chooses the line ending, so an unreadable one
+	// (missing, oversized, binary) does not block the write.
+	existing, _ := f.readText(ctx, path)
+	content, note := normalizeStrayCR(args.Content, existing)
+	if err := f.atomicWriteText(ctx, path, content); err != nil {
 		return Result{}, err
 	}
 	changed = path
-	return JSON(WriteFileResult{Path: args.Path, BytesWritten: len(args.Content)})
+	return JSON(WriteFileResult{Path: args.Path, BytesWritten: len(content), Note: note})
 }
 
 func (f *Files) edit(ctx context.Context, _ Call, args editArgs) (result Result, err error) {
@@ -418,6 +423,26 @@ func (f *Files) validateText(text string) error {
 		return errors.New("file tools require UTF-8 text without NUL bytes")
 	}
 	return nil
+}
+
+// normalizeStrayCR repairs content whose line endings include a carriage return
+// without a following newline. No toolchain the workspace uses treats a lone CR
+// as a line break, so it is a model writing \r for \n: qwen3.6 once wrote a Go
+// file whose lines were joined by bare CRs, and every later edit_file quoting
+// those lines failed. Such content gets one convention throughout, CRLF only
+// when the file it replaces uses CRLF. Content without a lone CR is unchanged,
+// so deliberate CRLF survives.
+func normalizeStrayCR(content, existing string) (string, string) {
+	if !strings.Contains(strings.ReplaceAll(content, "\r\n", ""), "\r") {
+		return content, ""
+	}
+	text := strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\r", "\n")
+	ending := `\n`
+	if lines := strings.Count(existing, "\n"); lines > 0 && strings.Count(existing, "\r\n") == lines {
+		text = strings.ReplaceAll(text, "\n", "\r\n")
+		ending = `\r\n`
+	}
+	return text, "content had carriage returns that ended no line; every line now ends with " + ending
 }
 
 // A same-directory rename publishes complete contents. This preserves regular

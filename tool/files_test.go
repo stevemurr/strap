@@ -45,6 +45,38 @@ func callJSON(t *testing.T, operation Tool, args any, result any) string {
 	return output.Content.Text()
 }
 
+// qwen3.6 wrote \r for \n in hard-01 (eval-1790176980218248000): mixed CRLF,
+// bare CR and LF in one Go file, after which no edit_file could match its lines.
+func TestWriteFileNormalizesStrayCarriageReturns(t *testing.T) {
+	dir := t.TempDir()
+	_, kit := fileTools(t, FilesConfig{Dir: dir})
+	for _, tc := range []struct{ name, prior, content, want string }{
+		{"lf untouched", "", "a\nb\n", "a\nb\n"},
+		{"crlf untouched", "", "a\r\nb\r\n", "a\r\nb\r\n"},
+		{"stray cr to lf", "", "a\r\n//\r\tb\rc\n", "a\n//\n\tb\nc\n"},
+		{"crlf file keeps crlf", "x\r\ny\r\n", "a\rb\nc\r\n", "a\r\nb\r\nc\r\n"},
+		{"mixed file becomes lf", "x\r\ny\n", "a\rb\r\n", "a\nb\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "_"))
+			if tc.prior != "" {
+				if err := os.WriteFile(path, []byte(tc.prior), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var written WriteFileResult
+			callJSON(t, kit["write_file"], map[string]any{"path": path, "content": tc.content}, &written)
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != tc.want || written.BytesWritten != len(tc.want) {
+				t.Fatalf("wrote %q (%+v), want %q: %v", data, written, tc.want, err)
+			}
+			if (written.Note != "") != (tc.content != tc.want) {
+				t.Fatalf("note %q for content %q", written.Note, tc.content)
+			}
+		})
+	}
+}
+
 func TestFilesRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	_, kit := fileTools(t, FilesConfig{Dir: dir})
