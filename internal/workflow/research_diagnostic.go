@@ -32,7 +32,7 @@ func (s *Session) researchDiagnosticTool() tool.Tool {
 		if err != nil {
 			return tool.Result{}, err
 		}
-		binding := &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
+		binding := &tool.ExecutionBinding{EvidenceRef: s.Store.NewExecutionRef(), WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
 		args, err := tool.MarshalInput(struct {
 			Command   string `json:"command"`
 			TimeoutMS *int64 `json:"timeout_ms"`

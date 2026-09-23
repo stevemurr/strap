@@ -226,8 +226,8 @@ func (t receiptTool) InputContract() tool.Contract {
 	return p.Contract()
 }
 func (t receiptTool) Call(_ context.Context, c tool.Call) (tool.Result, error) {
-	t.calls.Add(1)
-	return tool.ExecutionResult(tool.Text(`{"output":"ok","exit_code":0}`), &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), Actor: c.Actor}, nil)
+	ref := fmt.Sprintf("execution:run%04d", t.calls.Add(1))
+	return tool.ExecutionResult(tool.Text(`{"output":"ok","exit_code":0}`), &tool.ExecutionBinding{EvidenceRef: ref, Actor: c.Actor}, nil)
 }
 
 // A fresh evidence_ref is not progress: re-running one command with one

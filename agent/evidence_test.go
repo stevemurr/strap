@@ -22,7 +22,7 @@ func (evidenceTool) Call(_ context.Context, c tool.Call) (tool.Result, error) {
 	if c.InvocationID == "" {
 		panic("missing host invocation")
 	}
-	r, err := tool.ExecutionResult(tool.Text("partial result"), &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), Actor: c.Actor}, errors.New("diagnostic failed"))
+	r, err := tool.ExecutionResult(tool.Text("partial result"), &tool.ExecutionBinding{EvidenceRef: "execution:0evtest", Actor: c.Actor}, errors.New("diagnostic failed"))
 	return r, errors.Join(err, errors.New("diagnostic failed"))
 }
 func TestEvidenceReceiptRequiresAcceptedFinishAndSurvivesToolError(t *testing.T) {

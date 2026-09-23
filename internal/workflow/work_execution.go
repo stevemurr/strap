@@ -47,7 +47,7 @@ func (e workExecution) Call(ctx context.Context, c tool.Call) (tool.Result, erro
 	if !ok {
 		return e.shell.Call(ctx, c)
 	}
-	binding := &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
+	binding := &tool.ExecutionBinding{EvidenceRef: e.s.Store.NewExecutionRef(), WorkID: string(w.ID), AssignedAtRevision: uint64(w.AssignedAtRevision), Actor: c.Actor}
 	result, err := e.shell.Call(ctx, c)
 	// The shell already bounds its output, so the receipt adds no second bound.
 	captured, encodeErr := tool.ExecutionResultWithin(result, binding, err, 0)

@@ -1,22 +1,9 @@
 package tool
 
-import (
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
-)
+import "encoding/json"
 
 const ExecutionEvidencePrefix = "execution:"
 const ExecutionResponseBytes = 16 * 1024
-
-func NewExecutionEvidenceRef() string {
-	var b [32]byte
-	_, err := rand.Read(b[:])
-	if err != nil {
-		panic(err)
-	}
-	return ExecutionEvidencePrefix + base64.RawURLEncoding.EncodeToString(b[:])
-}
 
 // ExecutionResult retains the entire captured result in host evidence and bounds
 // the serialized model receipt. Oversized captures are read through evidence pages.

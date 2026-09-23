@@ -8,7 +8,7 @@ import (
 
 func TestExecutionReceiptBoundsEscapingAndRetainsCapture(t *testing.T) {
 	original, _ := JSON(ShellResult{Output: strings.Repeat("\x00\"\\", 6000)})
-	result, err := ExecutionResult(original, &ExecutionBinding{EvidenceRef: NewExecutionEvidenceRef()}, errors.New("failed"))
+	result, err := ExecutionResult(original, &ExecutionBinding{EvidenceRef: "execution:0evtest"}, errors.New("failed"))
 	if err != nil {
 		t.Fatal(err)
 	}

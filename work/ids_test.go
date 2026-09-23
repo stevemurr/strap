@@ -41,3 +41,14 @@ func TestIdsAreOpaqueUniqueAndKindPrefixed(t *testing.T) {
 		t.Fatal("issued ids are not tracked")
 	}
 }
+
+// Execution refs are retyped by models from turns back, so they use the same
+// short suffix as other ids and share the store's uniqueness check.
+func TestExecutionRefsAreShortAndUnique(t *testing.T) {
+	shape := regexp.MustCompile(`^execution:[0-9a-z]{7}$`)
+	s := New()
+	a, b := s.NewExecutionRef(), s.NewExecutionRef()
+	if !shape.MatchString(a) || !shape.MatchString(b) || a == b || !s.issued[a] {
+		t.Fatalf("execution refs %s %s", a, b)
+	}
+}

@@ -49,7 +49,9 @@ func New(options ...Option) *Store {
 // Ids are deliberately not sequential. A model that sees brief-9 must not be
 // able to extrapolate the next id; it learns ids only from receipts, notices
 // and reads. Uniqueness is checked against every id this store has issued.
-func (s *Store) id(prefix string) string {
+func (s *Store) id(prefix string) string { return s.mint(prefix + "-") }
+
+func (s *Store) mint(prefix string) string {
 	if s.issued == nil {
 		s.issued = map[string]bool{}
 	}
@@ -58,7 +60,7 @@ func (s *Store) id(prefix string) string {
 		for len(suffix) < idLength {
 			suffix = "0" + suffix
 		}
-		candidate := prefix + "-" + suffix
+		candidate := prefix + suffix
 		if !s.issued[candidate] {
 			s.issued[candidate] = true
 			return candidate
