@@ -19,12 +19,12 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 	qwen := map[string]any{
 		"temperature": 1.0, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0,
 		"presence_penalty": 0.0, "repetition_penalty": 1.1, "max_tokens": 81920.0,
-		"chat_template_kwargs": map[string]any{"enable_thinking": true},
+		"chat_template_kwargs": map[string]any{"enable_thinking": true, "preserve_thinking": true},
 	}
 	qwenNoThink := map[string]any{
 		"temperature": 0.6, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0,
 		"presence_penalty": 0.0, "repetition_penalty": 1.0, "max_tokens": 131072.0,
-		"chat_template_kwargs": map[string]any{"enable_thinking": false},
+		"chat_template_kwargs": map[string]any{"enable_thinking": false, "preserve_thinking": true},
 	}
 	// A profile without a generation block leaves every setting to the server;
 	// flags then add exactly what they name.
@@ -39,16 +39,22 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 		{"qwen profile", []string{"-profile", "qwen3.6"}, qwen, false},
 		{"qwen without thinking", []string{"-profile", "qwen3.6-nothink"}, qwenNoThink, false},
 		{"flash next nothink", []string{"-profile", "qwen3.8-flash-next-nothink"}, map[string]any{
-			"temperature": 0.7, "top_p": 0.8, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
+			"temperature": 0.7, "top_p": 0.8, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": false, "preserve_thinking": true},
 		}, false},
 		{"flash next thinking", []string{"-profile", "qwen3.8-flash-next-thinking"}, map[string]any{
-			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "reasoning_effort": "medium"},
+			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "preserve_thinking": true, "reasoning_effort": "medium"},
 		}, false},
 		{"flash next stream", []string{"-profile", "qwen3.8-flash-next-stream"}, map[string]any{
-			"max_tokens": 400.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
+			"max_tokens": 400.0, "chat_template_kwargs": map[string]any{"enable_thinking": false, "preserve_thinking": true},
 		}, false},
 		{"flash next effort override", []string{"-profile", "qwen3.8-flash-next-thinking", "-reasoning-effort", "low"}, map[string]any{
-			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "reasoning_effort": "low"},
+			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "preserve_thinking": true, "reasoning_effort": "low"},
+		}, false},
+		{"preservation override", []string{"-profile", "qwen3.8-flash-next-thinking", "-preserve-thinking=false"}, map[string]any{
+			"temperature": 1.0, "top_p": 0.95, "max_tokens": 32000.0, "chat_template_kwargs": map[string]any{"enable_thinking": true, "preserve_thinking": false, "reasoning_effort": "medium"},
+		}, false},
+		{"preservation only", []string{"-config", bare, "-preserve-thinking"}, map[string]any{
+			"chat_template_kwargs": map[string]any{"preserve_thinking": true},
 		}, false},
 		{"effort only", []string{"-config", bare, "-reasoning-effort", "xhigh"}, map[string]any{
 			"chat_template_kwargs": map[string]any{"reasoning_effort": "xhigh"},
@@ -56,7 +62,7 @@ func TestCLIProfilesAndOverridesReachHTTP(t *testing.T) {
 		{"server defaults", []string{"-config", bare}, map[string]any{}, false},
 		{"zero and false overrides", []string{"-profile", "qwen3.6", "-temperature", "0", "-thinking=false", "-max-tokens", "4096"}, map[string]any{
 			"temperature": 0.0, "top_p": 0.95, "top_k": 20.0, "min_p": 0.0, "presence_penalty": 0.0,
-			"repetition_penalty": 1.1, "max_tokens": 4096.0, "chat_template_kwargs": map[string]any{"enable_thinking": false},
+			"repetition_penalty": 1.1, "max_tokens": 4096.0, "chat_template_kwargs": map[string]any{"enable_thinking": false, "preserve_thinking": true},
 		}, false},
 		{"overrides without saved settings", []string{"-config", bare, "-top-p", "0.8", "-top-k", "-1", "-min-p", "0", "-presence-penalty", "0", "-repetition-penalty", "1.1", "-thinking"}, map[string]any{
 			"top_p": 0.8, "top_k": -1.0, "min_p": 0.0, "presence_penalty": 0.0, "repetition_penalty": 1.1,

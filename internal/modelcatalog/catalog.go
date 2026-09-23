@@ -137,6 +137,7 @@ func Flags(flags *flag.FlagSet, model *harness.ModelConfig) {
 		})
 	}
 	boolFlag("thinking", "Override thinking mode (-thinking=false disables it)", &model.Generation.EnableThinking)
+	boolFlag("preserve-thinking", "Retain Qwen thinking from earlier user turns (requires chat-template support)", &model.Generation.PreserveThinking)
 	boolFlag("force-nonempty-content", "Require assistant content with tool calls (requires chat-template support)", &model.Generation.ForceNonemptyContent)
 
 }

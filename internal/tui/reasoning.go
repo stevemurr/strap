@@ -120,7 +120,7 @@ func (m *model) finishReasoning(msg reasoningLoaded) {
 
 func reasoningBody(v *transcriptView) string {
 	var b strings.Builder
-	b.WriteString("Recorded reasoning · excluded from model context\n\n")
+	b.WriteString("Recorded reasoning · completed responses retained in model history\n\n")
 	if v.reasoningLoading {
 		b.WriteString("Loading…\n\n")
 	}

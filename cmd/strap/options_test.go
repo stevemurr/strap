@@ -26,11 +26,11 @@ func writeCatalog(t *testing.T, body string) string {
 func TestSavedProfileAndFlagPrecedence(t *testing.T) {
 	path := writeCatalog(t, `{"default":"custom","models":{"custom":{
 		"base_url":"http://localhost:1234", "model":"saved-alias", "timeout":"2m",
-		"generation":{"temperature":0.7,"top_p":0.8,"enable_thinking":true,"force_nonempty_content":true,"reasoning_effort":"low"}
+		"generation":{"temperature":0.7,"top_p":0.8,"enable_thinking":true,"preserve_thinking":true,"force_nonempty_content":true,"reasoning_effort":"low"}
 	}}}`)
 	for _, args := range [][]string{
-		{"-config", path, "-temperature", "0", "-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-reasoning-effort", "medium"},
-		{"-reasoning-effort", "medium", "-temperature", "0", "-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-config", path},
+		{"-config", path, "-temperature", "0", "-thinking=false", "-preserve-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-reasoning-effort", "medium"},
+		{"-reasoning-effort", "medium", "-temperature", "0", "-thinking=false", "-preserve-thinking=false", "-force-nonempty-content=false", "-timeout", "3m", "-config", path},
 	} {
 		o, err := parseOptions(args, io.Discard)
 		if err != nil {
@@ -41,12 +41,12 @@ func TestSavedProfileAndFlagPrecedence(t *testing.T) {
 			t.Fatalf("unexpected model: %+v", m)
 		}
 		g := m.Generation
-		if *g.Temperature != 0 || *g.TopP != 0.8 || *g.EnableThinking || *g.ForceNonemptyContent || *g.ReasoningEffort != "medium" {
+		if *g.Temperature != 0 || *g.TopP != 0.8 || *g.EnableThinking || g.PreserveThinking == nil || *g.PreserveThinking || *g.ForceNonemptyContent || *g.ReasoningEffort != "medium" {
 			t.Fatalf("flags failed to override saved values: %+v", g)
 		}
 	}
 	o, err := parseOptions([]string{"-config", path}, io.Discard)
-	if err != nil || o.config.Model.Timeout != 2*time.Minute || *o.config.Model.Generation.Temperature != 0.7 {
+	if err != nil || o.config.Model.Timeout != 2*time.Minute || *o.config.Model.Generation.Temperature != 0.7 || o.config.Model.Generation.PreserveThinking == nil || !*o.config.Model.Generation.PreserveThinking {
 		t.Fatalf("saved defaults lost: %+v, %v", o, err)
 	}
 }

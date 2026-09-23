@@ -2,12 +2,12 @@ package harness_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,13 +16,20 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/eventcodec"
+	"github.com/stevemurr/strap/harness/inspection"
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 )
 
-func TestReasoningRecoveryNeverEntersNextHTTPRequest(t *testing.T) {
+func TestReasoningHistoryReachesNextHTTPRequestAndArchive(t *testing.T) {
+	for _, backend := range []string{"vllm", "chatcompletions"} {
+		t.Run(backend, func(t *testing.T) { testReasoningHistoryRecovery(t, backend) })
+	}
+}
+
+func testReasoningHistoryRecovery(t *testing.T, backend string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	requests := make(chan string, 2)
@@ -50,6 +57,7 @@ func TestReasoningRecoveryNeverEntersNextHTTPRequest(t *testing.T) {
 	cfg := testConfig(t, false)
 	cfg.Telemetry.ContextTokens = false
 	cfg.Model.BaseURL = server.URL
+	cfg.Model.Backend = backend
 	cfg.Events.JSONLPath = filepath.Join(t.TempDir(), "reasoning.jsonl")
 	s, err := harness.New(ctx, cfg, harness.Dependencies{})
 	if err != nil {
@@ -132,8 +140,28 @@ func TestReasoningRecoveryNeverEntersNextHTTPRequest(t *testing.T) {
 	waitReply()
 	<-requests
 	next := <-requests
-	if strings.Contains(next, "PRIVATE_REASON") || strings.Contains(next, "_TAIL") || strings.Contains(next, `"reasoning"`) || strings.Contains(next, `"reasoning_content"`) || !strings.Contains(next, "answer done") {
-		t.Fatal("reasoning leaked or answer missing in next request", next)
+	var body struct {
+		Messages []struct {
+			Role, Content, Reasoning string
+			ReasoningContent         string `json:"reasoning_content"`
+		}
+	}
+	if err := json.Unmarshal([]byte(next), &body); err != nil {
+		t.Fatal(err)
+	}
+	assistants := 0
+	for _, m := range body.Messages {
+		if m.Role == "assistant" {
+			assistants++
+			if m.Content != "answer done" || m.Reasoning != "PRIVATE_REASON_🌎_TAIL" || m.ReasoningContent != m.Reasoning {
+				t.Fatalf("reasoning/answer history lost or mixed: %+v", m)
+			}
+		} else if m.Reasoning != "" || m.ReasoningContent != "" {
+			t.Fatalf("reasoning on non-assistant message: %+v", m)
+		}
+	}
+	if assistants != 1 {
+		t.Fatalf("expected one previous assistant response, got %d", assistants)
 	}
 	if err = s.Close(ctx); err != nil {
 		t.Fatal(err)
@@ -175,5 +203,30 @@ func TestReasoningRecoveryNeverEntersNextHTTPRequest(t *testing.T) {
 	output, err := replay.Output(id)
 	if err != nil || output.ReasoningBytes != uint64(len("PRIVATE_REASON_🌎_TAIL")) || output.TextBytes != 11 || output.Status != agent.OutputComplete {
 		t.Fatal(output, err)
+	}
+	reader, err := inspection.OpenJSONL(ctx, cfg.Events.JSONLPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close(context.Background())
+	recovered, err := reader.At(ctx, eventlog.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := recovered.InspectAgentContext(ctx, s.Root(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistants = 0
+	for _, entry := range info.Transcript.Entries {
+		if m := entry.Message; m.Role == "assistant" {
+			assistants++
+			if m.Reasoning != "PRIVATE_REASON_🌎_TAIL" || m.Content.Text() != "answer done" {
+				t.Fatalf("archive lost assistant reasoning: %+v", m)
+			}
+		}
+	}
+	if assistants != 2 {
+		t.Fatalf("expected both assistant responses in archive, got %d", assistants)
 	}
 }

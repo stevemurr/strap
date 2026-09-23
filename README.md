@@ -89,8 +89,9 @@ task. The card's `16000` output limit is an API example; NVIDIA's agentic coding
 recipes drop `max_tokens` before sending requests. The profile therefore does not
 inherit Qwen's 128K output cap. For vLLM tool calling, the card specifies
 `--enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3`.
-The evaluation recipes also replay reasoning history; Strap currently does not,
-so these sampling settings alone do not reproduce NVIDIA's benchmark setup.
+Strap sends successful reasoning history back to the server; the served chat
+template controls its inclusion in the prompt. These sampling settings alone do
+not reproduce NVIDIA's benchmark setup.
 
 The Qwen profiles spell out the model card's coding settings: temperature `0.6`,
 top-p `0.95`, top-k `20`, min-p `0`, presence penalty `0`, repetition penalty `1`,
@@ -143,10 +144,27 @@ go run ./cmd/strap -model another-model -top-p 0.9
 ```
 
 Overrides include `-temperature`, `-top-p`, `-top-k`, `-min-p`,
-`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, `-thinking=false`, `-reasoning-effort`, and
+`-presence-penalty`, `-repetition-penalty`, `-max-tokens`, `-thinking=false`,
+`-preserve-thinking=false`, `-reasoning-effort`, and
 `-force-nonempty-content=false`. They require the vLLM backend. Explicitly selecting
 `-backend chatcompletions` clears saved generation settings and uses server defaults;
 explicit generation flags are then rejected.
+
+To preserve Qwen reasoning across user turns, add `"preserve_thinking": true`
+under your profile's `generation` object, or pass `-preserve-thinking`. All bundled
+Qwen profiles enable it. Omission leaves the server default: Qwen3.6 defaults to
+preserving reasoning only within the latest user turn; Qwen3.8 preserves all turns.
+Explicit `false` selects the latest-user-turn policy, including intermediate tool
+calls. See [Qwen3.6's guidance](https://huggingface.co/Qwen/Qwen3.6-27B#preserve-thinking)
+and [Qwen3.8's guidance](https://huggingface.co/Qwen/Qwen3.8-27B#disable-preserved-thinking).
+
+Both backends resend reasoning from successful assistant responses, including tool
+calls, separately from answer content. Following [Qwen's client example](https://huggingface.co/Qwen/Qwen3.8-27B#text-only-input),
+requests include identical `reasoning` and `reasoning_content` fields for server
+compatibility. Reasoning is sent even when preservation is omitted or false so
+the server can apply its own chat-template policy. vLLM token counts use the same
+history and template settings. Failed or canceled responses never enter history.
+
 All advertised tools use the same closed `{"input":{...}}` argument envelope
 and strict schemas. Every declared field is required;
 nullable fields use explicit null rather than omission. The provider sends
@@ -267,8 +285,9 @@ Thinking is omitted from the live view, including when tool output is expanded.
 Ctrl+T controls tool output only. Cmd+T requires terminal-level forwarding as Ctrl+T
 (`0x14`), where supported. The terminal normally reserves Cmd+T for a new tab,
 and Strap's input library does not receive Command modifiers directly.
-Reasoning is recorded for inspection and recovery, but never enters subsequent
-model requests. In `/transcript [id]`,
+Reasoning is recorded for inspection and recovery. Successful responses retain
+reasoning in assistant history for subsequent model requests, separately from
+answer content. In `/transcript [id]`,
 press `t` to switch between model history and reasoning inspection, `r` to refresh,
 and scroll above the top for older calls. Inspection includes active and failed
 calls and remains available after `/clear`.
@@ -731,9 +750,10 @@ does not stop its children; conversation close cancels and joins every agent.
 
 Multi-source investigations are enabled by default with `go run ./cmd/strap`.
 The root assigns a researcher, which calls `deep_research` to plan, search, read,
-verify claims and retain a report. The root remains available during the run.
-`get_research_report` reads bounded report/source pages; cancellation and
-reassignment retain a partial report under the original assignment. This uses
+verify claims and retain a run. The root remains available during the run and
+reads the researcher's delivered brief; only the researcher reads runs, through
+`get_research_run` bounded run/source pages. Cancellation and reassignment
+retain a partial run under the original assignment. This uses
 the web dependencies below. Disable it with `-deep-research=false`; `-web=false`
 also disables deep research. See
 [deep research configuration and evaluation](docs/architecture/DEEP_RESEARCH_IMPLEMENTATION.md).

@@ -113,10 +113,17 @@ func TestLiveReasoningTUI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			retained := false
 			for _, entry := range in.Transcript.Entries {
 				if strings.Contains(entry.Message.Content.Text(), reasoning.String()) {
-					t.Fatal("reasoning entered model history")
+					t.Fatal("reasoning entered answer content")
 				}
+				if entry.Message.Role == "assistant" && entry.Message.Reasoning == reasoning.String() {
+					retained = true
+				}
+			}
+			if !retained {
+				t.Fatal("successful reasoning missing from assistant history")
 			}
 			// Inspect the retained reasoning through the TUI's on-demand view too.
 			m.openTranscript(session.Root())
@@ -128,7 +135,7 @@ func TestLiveReasoningTUI(t *testing.T) {
 			if m.transcript.err != "" || len(m.transcript.reasoningOutputs) == 0 || m.transcript.reasoningOutputs[0].Text != reasoning.String() {
 				t.Fatal("TUI inspection did not recover reasoning")
 			}
-			t.Logf("reply completed at %s; reasoning chunks=%d bytes=%d; retained inspection and history exclusion verified", time.Since(start), chunks, reasoning.Len())
+			t.Logf("reply completed at %s; reasoning chunks=%d bytes=%d; retained inspection and assistant history verified", time.Since(start), chunks, reasoning.Len())
 			return
 		}
 	}

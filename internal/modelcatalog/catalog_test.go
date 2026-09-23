@@ -35,6 +35,9 @@ func TestBundledProfilesCarryTheirGenerationSettings(t *testing.T) {
 			if (want.effort == "") != (g.ReasoningEffort == nil) || (g.ReasoningEffort != nil && *g.ReasoningEffort != want.effort) {
 				t.Fatalf("reasoning effort: %v", g.ReasoningEffort)
 			}
+			if g.PreserveThinking == nil || !*g.PreserveThinking {
+				t.Fatal("Qwen profile must preserve thinking")
+			}
 			if _, err := model.NewProvider(nil); err != nil {
 				t.Fatal(err)
 			}

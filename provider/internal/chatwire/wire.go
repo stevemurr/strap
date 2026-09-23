@@ -69,10 +69,12 @@ type completion struct {
 // requestMessage supports image-bearing user content. Response decoding remains
 // text-only because this provider consumes images but does not generate them.
 type requestMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content"`
-	ToolCalls  []functionCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          any            `json:"content"`
+	Reasoning        string         `json:"reasoning,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []functionCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
 type imageURL struct {
 	URL string `json:"url"`
@@ -97,6 +99,13 @@ func Encode(model string, input provider.Request) (Request, error) {
 			return Request{}, err
 		}
 		wire := requestMessage{Role: m.Role, Content: m.Content.Text(), ToolCallID: m.ToolCallID}
+		if m.Role == "assistant" {
+			// Qwen's client guidance sends both aliases for serving-framework
+			// compatibility. Keep them identical and separate from answer text.
+			// Send history even when preserve_thinking=false: Qwen still uses
+			// reasoning from tool interactions within the latest user turn.
+			wire.Reasoning, wire.ReasoningContent = m.Reasoning, m.Reasoning
+		}
 		if m.Content.HasImages() {
 			if m.Role != "user" && m.Role != "tool" {
 				return Request{}, fmt.Errorf("images unsupported for role %q", m.Role)

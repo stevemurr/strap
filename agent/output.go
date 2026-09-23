@@ -203,13 +203,13 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 			if strings.TrimSpace(response.Content) == "" && len(response.ToolCalls) == 0 {
 				err = errors.New("model returned no text or tool calls")
 			} else {
-				pos := a.thread.append(provider.Message{Role: "assistant", Content: content.Text(response.Content), ToolCalls: response.ToolCalls})
+				pos := a.thread.append(provider.Message{Role: "assistant", Content: content.Text(response.Content), Reasoning: response.Reasoning, ToolCalls: response.ToolCalls})
 				position = &pos
 			}
 		}
 		a.control.mu.Unlock()
 		if position != nil {
-			err = a.report(HistoryAppended{Position: *position, Message: provider.Message{Role: "assistant", Content: content.Text(response.Content), ToolCalls: provider.CopyCalls(response.ToolCalls)}, Output: &id})
+			err = a.report(HistoryAppended{Position: *position, Message: provider.Message{Role: "assistant", Content: content.Text(response.Content), Reasoning: response.Reasoning, ToolCalls: provider.CopyCalls(response.ToolCalls)}, Output: &id})
 			if err != nil {
 				return response, id, err
 			} // Keep committed history; no invented terminal.

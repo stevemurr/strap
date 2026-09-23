@@ -41,7 +41,7 @@ func TestReasoningInspectionIncludesFailedCallsPagesAndIgnoresStaleReads(t *test
 	}
 	result := cmd()
 	m.Update(result)
-	if !strings.Contains(m.View(), "failed partial reasoning") || !strings.Contains(m.View(), "length limit") || !strings.Contains(m.View(), "excluded from model context") {
+	if !strings.Contains(m.View(), "failed partial reasoning") || !strings.Contains(m.View(), "length limit") || !strings.Contains(m.View(), "completed responses retained in model history") {
 		t.Fatal(m.View())
 	}
 	if strings.Contains(m.View(), "root message") {

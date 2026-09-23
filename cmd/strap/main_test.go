@@ -54,6 +54,8 @@ func TestOptionsRejectUnusableInput(t *testing.T) {
 		{catalog, []string{"-backend", "unknown"}},
 		{catalog, []string{"-backend", "chatcompletions", "-temperature", "0"}},
 		{catalog, []string{"-backend", "chatcompletions", "-thinking=false"}},
+		{catalog, []string{"-backend", "chatcompletions", "-preserve-thinking=false"}},
+		{catalog, []string{"-preserve-thinking=maybe"}},
 		{catalog, []string{"-backend", "chatcompletions", "-reasoning-effort", "low"}},
 		{catalog, []string{"-reasoning-effort", "high"}}, {catalog, []string{"-reasoning-effort", ""}},
 		{catalog, []string{"-backend", "chatcompletions", "-force-nonempty-content=false"}},

@@ -26,14 +26,17 @@ type Request struct {
 // Message is model history. Envelope preserves who actually sent inbox input.
 // Role is system, user, assistant, or tool.
 type Message struct {
-	Role       string           `json:"role"`
-	Content    content.Content  `json:"content"`
+	Role    string          `json:"role"`
+	Content content.Content `json:"content"`
+	// Reasoning belongs to successful assistant history, separate from answer content.
+	// The served chat template decides which historical thinking to include.
+	Reasoning  string           `json:"reasoning,omitempty"`
 	Envelope   *message.Message `json:"envelope"`
 	ToolCalls  []ToolCall       `json:"tool_calls"`
 	ToolCallID string           `json:"tool_call_id"`
 }
 
-// Reasoning is observation data and must never enter Message or future requests.
+// Reasoning is committed to assistant history only after the response succeeds.
 type Response struct {
 	Reasoning string     `json:"reasoning"`
 	Content   string     `json:"content"`

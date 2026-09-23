@@ -91,11 +91,21 @@ adapter still assembles complete response strings, including reasoning, so its
 peak response memory is not bounded by the coalescing buffer.
 
 Reasoning is required retained observation data, including accepted partial text
-on failure/cancellation. It is never copied to `provider.Message`, routed answer
-or commentary content, or subsequent model requests, and it does not advance
-history revisions. Provider-reported generation usage remains authoritative.
+on failure/cancellation. A successful response also commits its complete reasoning
+to `provider.Message.Reasoning` with the assistant's answer and tool calls in one
+history revision. Both provider backends resend it as identical `reasoning` and
+`reasoning_content` fields; it never enters routed answer or commentary content.
+The server's chat template decides which historical reasoning enters the prompt.
+For Qwen, `generation.preserve_thinking` controls preservation across user turns;
+false still permits reasoning within the latest user turn. Token counting uses
+the same history and template options as generation. Failed/canceled responses
+remain inspection-only. Provider-reported generation usage remains authoritative.
 A reasoning-only response cannot commit successful assistant history. Recording
 failure uses the same failed-log and execution-cancellation contract as content.
+
+New history records retain reasoning for archive inspection. Older records without
+the optional field remain readable with empty reasoning; replay does not retrofit
+observed reasoning into historical messages or resume agent execution.
 
 ## Storage and lifecycle
 
@@ -178,11 +188,11 @@ STRAP_LIVE_BASE_URL=http://model.internal:8355 \
 `STRAP_LIVE_MODEL` optionally overrides `qwen3.6`. The test sends a synthetic
 arithmetic prompt with local/browser tools disabled and an 8,192-token cap. It
 requires reasoning to render while generation is active, compares retained
-reasoning with the streamed bytes, verifies exclusion from model history, and
+reasoning with the streamed bytes, verifies retention separately from answer content, and
 opens the TUI reasoning inspector. It logs timing and byte counts without logging
 the reasoning text. Deterministic HTTP tests in `harness/reasoning_test.go` also
-verify that the next outgoing model request excludes reasoning and that replay
-from JSONL recovers the same output.
+verify that subsequent model requests include reasoning and that archive inspection
+recovers the same output and assistant history.
 
 Agent inspection joins accepted runtime facts with recorded application roles and
 work assignments. `active_work_ids` includes only active execution, not submissions
