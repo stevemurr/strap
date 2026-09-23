@@ -3,8 +3,10 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/stevemurr/strap/tool"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -43,7 +45,13 @@ func TestDurableToolDiagnosticsCorrelateRepeatedProviderIDs(t *testing.T) {
 	cfg.Dir = dir
 	cfg.Web = nil
 	cfg.Events.JSONLPath = path
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p})
+	// The root has no write tools; lend it the file editors this script drives.
+	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writers := slices.DeleteFunc(files.Tools(), func(t tool.Tool) bool { n := t.Definition().Name; return n != "write_file" && n != "edit_file" })
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Root: harness.AgentDependencies{Tools: writers}})
 	if err != nil {
 		t.Fatal(err)
 	}

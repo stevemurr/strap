@@ -208,3 +208,41 @@ func (t outcomeTool) InputContract() tool.Contract {
 	}
 	return p.Contract()
 }
+
+// receiptTool behaves like a worker shell: the same command returns the same
+// output, wrapped in an execution receipt whose evidence_ref is new each call.
+type receiptTool struct{ calls *atomic.Int32 }
+
+func (t receiptTool) Definition() provider.ToolDefinition {
+	return provider.ToolDefinition{Name: "shell", Parameters: t.InputContract().Schema()}
+}
+func (t receiptTool) InputContract() tool.Contract {
+	p, err := tool.NewParameters[struct {
+		Command string `json:"command"`
+	}]()
+	if err != nil {
+		panic(err)
+	}
+	return p.Contract()
+}
+func (t receiptTool) Call(_ context.Context, c tool.Call) (tool.Result, error) {
+	t.calls.Add(1)
+	return tool.ExecutionResult(tool.Text(`{"output":"ok","exit_code":0}`), &tool.ExecutionBinding{EvidenceRef: tool.NewExecutionEvidenceRef(), Actor: c.Actor}, nil)
+}
+
+// A fresh evidence_ref is not progress: re-running one command with one
+// outcome is still stopped.
+func TestRepeatedExecutionReceiptsAreStopped(t *testing.T) {
+	c := config()
+	var calls atomic.Int32
+	c.Spec.Tools = []tool.Tool{receiptTool{calls: &calls}}
+	c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
+		args, _ := tool.MarshalInput(map[string]string{"command": "go vet ./..."})
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "c", Name: "shell", Arguments: args}}}, nil
+	})
+	_ = c.Inbox.Send(message.Message{ID: "start", Kind: message.Instruction, Content: "begin"})
+	err := mustAgent(t, c).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "same request") || calls.Load() != 12 {
+		t.Fatalf("%v after %d calls", err, calls.Load())
+	}
+}

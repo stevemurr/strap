@@ -81,7 +81,7 @@ func TestLivePathConfigurations(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	local, err := localToolsWithChanges(dir, nil, nil)
+	local, err := localToolsWithChanges(dir, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

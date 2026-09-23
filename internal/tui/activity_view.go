@@ -62,7 +62,13 @@ func displayTool(a agent.ToolActivity) *toolDisplay {
 		d.arguments = boundedToolText(string(a.Call.Arguments), 8192)
 	}
 	d.result = boundedToolText(a.Result.Content.Text(), 32768)
-	d.nativeOutput(a.Result.Content.Text())
+	// An execution receipt wraps the tool's own result; decode the retained
+	// capture so shell runs that carry evidence refs still render natively.
+	if a.Result.Execution != nil && len(a.Result.Captured) > 0 {
+		d.nativeOutput(a.Result.Captured.Text())
+	} else {
+		d.nativeOutput(a.Result.Content.Text())
+	}
 	images := 0
 	for _, part := range a.Result.Content {
 		if part.Image != nil {
@@ -143,7 +149,7 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 		verb = "Edited"
 	case "list_directory", "list_files":
 		verb = "Listed"
-	case "search", "search_files", "web_search":
+	case "search", "search_files", "web_search", "glob", "grep_search":
 		verb = "Searched"
 	}
 	resultRows := e.toolResultRows(max(1, width-4))

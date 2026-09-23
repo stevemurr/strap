@@ -27,6 +27,10 @@ type Spec struct {
 	// ReasoningLimit is the number of reasoning bytes one model call may
 	// stream before it is cancelled; zero means unlimited. See ErrReasoningLimit.
 	ReasoningLimit uint64
+	// ReplyCheck runs before a text-only response is sent as the agent's reply.
+	// A non-empty notice is added to history instead and the model responds
+	// again. It runs at most once per exchange, so the next reply is sent.
+	ReplyCheck func(ctx context.Context, self message.ActorID) string
 }
 
 // ErrReasoningLimit marks a model call cancelled for streaming more reasoning
@@ -167,9 +171,10 @@ func (a *Agent) repeatKey(call provider.ToolCall, result tool.Result, err error)
 	return b.String()
 }
 
-// revisionFields are the receipt counters harness tools return; they change
-// on every successful call whether or not anything else did.
-var revisionFields = map[string]bool{"revision": true, "work_revision": true, "state_revision": true}
+// revisionFields are the receipt counters harness tools return, plus the
+// fresh evidence_ref on each execution receipt; they change on every
+// successful call whether or not anything else did.
+var revisionFields = map[string]bool{"revision": true, "work_revision": true, "state_revision": true, "evidence_ref": true}
 
 // normalizeArguments ignores bookkeeping only in the canonical input object.
 func normalizeArguments(raw []byte, ignored map[string]bool) string {
@@ -284,11 +289,16 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 	admitted := false
 	malformed := 0
 	overrun := 0
+	replyChecked := false
 	for {
 		if err := a.checkpoint(ctx); err != nil {
 			return err
 		}
-		for _, incoming := range a.config.Inbox.Drain() {
+		// An assignment is a unit of work with its own reply, so one never joins
+		// an exchange already running: it stays queued and starts the next one.
+		// Consumed mid-exchange, a second assignment to a busy worker was
+		// answered by a reply about the first and nothing woke the worker again.
+		for _, incoming := range a.config.Inbox.Take(func(m message.Message) bool { return m.Work == nil }) {
 			if !admitted {
 				inputs = append(inputs, incoming)
 			}
@@ -346,6 +356,16 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 			return err
 		}
 		if len(response.ToolCalls) == 0 {
+			if check := a.config.Spec.ReplyCheck; check != nil && !replyChecked {
+				replyChecked = true
+				if notice := check(ctx, a.config.ID); notice != "" {
+					// Like the notices above, a synthetic user message not tied to the output.
+					if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			_, err := a.config.Outbox.Send(ctx, message.Draft{
 				To: a.config.ReplyTo, Kind: message.Reply, ReplyTo: *last, Content: response.Content, Output: &output,
 			})

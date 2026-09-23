@@ -179,3 +179,22 @@ func TestShellCancellationKeepsPartialOutputAndCleanupFailure(t *testing.T) {
 		t.Fatal(result, err)
 	}
 }
+
+func TestShellRecommendsRipgrepOnlyWhenInstalled(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "rg"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		path string
+		want bool
+	}{{bin, true}, {t.TempDir(), false}} {
+		s, err := NewShell(ShellConfig{Dir: t.TempDir(), Env: []string{"PATH=" + c.path}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(s.Definition().Description, "rg --files"); got != c.want {
+			t.Fatalf("PATH=%s: advice %v, want %v", c.path, got, c.want)
+		}
+	}
+}

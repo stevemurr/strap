@@ -206,7 +206,9 @@ func TestRevisionRacePrematureReplyBeforeInjectionIsScorable(t *testing.T) {
 		return provider.Response{Content: "Finished."}, nil
 	})
 	r := trialResult(t, opts)
-	if r.Outcome != "failed" || r.ErrorClass != "" || !r.Behavior.Scorable || r.StopReason != "reply" || r.RevisionRace != nil || r.ModelCalls != 1 || r.ToolCalls != 0 || r.Harness.Passed != r.Harness.Total {
+	// Two model calls: the root's reply check holds back the first premature
+	// reply once while the submission still needs an audit.
+	if r.Outcome != "failed" || r.ErrorClass != "" || !r.Behavior.Scorable || r.StopReason != "reply" || r.RevisionRace != nil || r.ModelCalls != 2 || r.ToolCalls != 0 || r.Harness.Passed != r.Harness.Total {
 		t.Fatalf("no assignment must remain model failure without invented interference: %+v", r)
 	}
 	assertFailed(t, r, "race.revision_rejected")

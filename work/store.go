@@ -177,7 +177,7 @@ func known(label, none string, parts []string) string {
 func (s *Store) assigned(actor identity.ActorID, id ID, owner bool) (Work, error) {
 	w, ok := s.works[id]
 	if !ok {
-		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, id, s.knownWorks(actor))
+		return Work{}, s.missingWork(actor, id)
 	}
 	allowed := w.Assignee
 	if owner {
@@ -292,7 +292,9 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 			p.Steps[i].AcceptanceCriteria = slices.Clone(*edit.AcceptanceCriteria)
 		}
 		if !changed {
-			return Plan{}, fmt.Errorf("%w: step %s already has that title and acceptance criteria; nothing to change", ErrInvalid, *edit.ID)
+			// Roots reach for edit_step to close a step no work ever covered;
+			// say how steps actually complete.
+			return Plan{}, fmt.Errorf("%w: step %s already has that title and acceptance criteria; nothing to change. edit_step only rewords a step and cannot mark it done: a step completes when an audit accepts implementation work whose scope includes it. This step is %s; to finish it, assign it with assign_implementation, or remove it with cancel_steps if it is no longer needed", ErrInvalid, *edit.ID, p.Steps[i].Status)
 		}
 	}
 	for _, id := range u.Cancel {
@@ -391,7 +393,7 @@ func (s *Store) GetWork(actor identity.ActorID, id ID) (Work, error) {
 	defer s.mu.Unlock()
 	w, ok := s.works[id]
 	if !ok {
-		return Work{}, fmt.Errorf("%w: work %s; %s", ErrNotFound, id, s.knownWorks(actor))
+		return Work{}, s.missingWork(actor, id)
 	}
 	if !w.visibleTo(actor) {
 		return Work{}, ErrForbidden

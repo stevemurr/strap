@@ -201,3 +201,51 @@ func TestStoppedResearcherRetainsExecutionEvidenceWithoutReport(t *testing.T) {
 		t.Fatal(captured, evidence.Execution.Activity.Err, p.calls.Load())
 	}
 }
+
+// workerShellScript runs one plain shell command on its first wake, then waits.
+type workerShellScript struct {
+	calls   atomic.Int32
+	receipt chan string
+}
+
+func (p *workerShellScript) Submit(_ context.Context, r provider.Request, _ provider.Observer) (provider.Response, error) {
+	if p.calls.Add(1) == 1 {
+		args := json.RawMessage(`{"input":{"command":"printf build-ok","timeout_ms":null}}`)
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "build", Name: "shell", Arguments: args}}}, nil
+	}
+	if p.calls.Load() == 2 {
+		p.receipt <- r.Messages[len(r.Messages)-1].Content.Text()
+	}
+	return provider.Response{ToolCalls: []provider.ToolCall{{ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
+}
+
+func TestImplementorShellIssuesCitableExecutionEvidence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p := &workerShellScript{receipt: make(chan string, 2)}
+	s, err := harness.New(ctx, testConfig(t, true), harness.Dependencies{Provider: textResponse("ready"), Implementor: harness.AgentDependencies{Provider: p}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Dispose(context.Background())
+	worker := createWorker(t, s, roster.Implementor)
+	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "Build it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := await(t, p.receipt, "shell receipt")
+	var receipt struct {
+		EvidenceRef string           `json:"evidence_ref"`
+		Result      tool.ShellResult `json:"result"`
+	}
+	if err = json.Unmarshal([]byte(raw), &receipt); err != nil || !strings.HasPrefix(receipt.EvidenceRef, tool.ExecutionEvidencePrefix) || receipt.Result.Output != "build-ok" {
+		t.Fatal(raw, err)
+	}
+	if _, err = s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkID: w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Build passes", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}}); err != nil {
+		t.Fatal("own shell evidence rejected:", err)
+	}
+	composed := tool.ExecutionEvidencePrefix + "build"
+	if _, err = s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkID: w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Build passes", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: composed}}}}}); !errors.Is(err, work.ErrNotFound) {
+		t.Fatal("composed evidence accepted:", err)
+	}
+}

@@ -518,7 +518,9 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			p.workEvents[c.ID] = true
 			for _, w := range c.Works {
 				p.workViews[w.ID] = WorkView{WorkHeader: w, Record: e.Cursor()}
-				if w.Kind == work.Research && w.State == work.Active && w.AssignedAtRevision > 0 {
+				// Any active assignee may hold execution evidence: researchers
+				// through diagnostics, implementors and auditors through shell.
+				if w.State == work.Active && w.AssignedAtRevision > 0 && w.Assignee != "" {
 					p.bindings[fmt.Sprintf("%s/%d", w.ID, w.AssignedAtRevision)] = w.Assignee
 				}
 			}

@@ -63,7 +63,7 @@ func PlanTools(handle Handler[work.PlanUpdate]) []Tool {
 
 func CreatePlan(handle Handler[work.PlanUpdate]) Tool {
 	return builtin("create_plan",
-		"Create the shared plan with its initial steps and a nullable title; a null title is taken from the first step. Each step has a title and nullable acceptance_criteria, an array of strings. Omit IDs, status and revision; new steps start pending. The result issues plan_id, each step_id and revision 1. Change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan, never by creating another plan.",
+		"Create the shared plan with its initial steps and a nullable title; a null title is taken from the first step. Each step has a title and nullable acceptance_criteria, an array of strings. Omit IDs, status and revision; new steps start pending. Each step is a unit of work you will assign; a step completes only when an audit accepts the work that includes it. The result issues plan_id, each step_id and revision 1. Change an existing plan with add_step, edit_step, cancel_steps, reorder_steps or rename_plan, never by creating another plan.",
 		func(ctx context.Context, c Call, a createPlanArgs) (Result, error) {
 			steps := make([]work.StepEdit, len(a.Steps))
 			for i, step := range a.Steps {

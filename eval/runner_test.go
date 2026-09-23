@@ -20,8 +20,17 @@ import (
 	"github.com/stevemurr/strap/provider"
 )
 
+// shellWrite writes a file through the shell, the way a root without write
+// tools would have to; these tests exercise the runner, not delegation.
+func shellWrite(path, content string) map[string]any {
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return map[string]any{"command": "cat > " + path + " <<'STRAP_EOF'\n" + content + "STRAP_EOF\n", "timeout_ms": nil}
+}
+
 // script drives the root agent without a model: optionally write the solution
-// with the write_file tool, then reply.
+// through the shell, then reply.
 type script struct {
 	calls   atomic.Int32
 	write   bool
@@ -41,8 +50,8 @@ func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Obse
 	}
 	n := p.calls.Add(1)
 	if p.write && n == 1 {
-		args, _ := tool.MarshalInput(map[string]string{"path": "probe.go", "content": p.content})
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "write_file", Arguments: args}}}, nil
+		args, _ := tool.MarshalInput(shellWrite("probe.go", p.content))
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "shell", Arguments: args}}}, nil
 	}
 	if p.wait {
 		return p.delegate(r, n)
@@ -168,7 +177,7 @@ func TestRunPassesAndRetainsMounts(t *testing.T) {
 		t.Fatal(rep, err)
 	}
 	m := rep.Tasks[0]
-	if !m.Passed || m.Agents != 1 || m.Replies != 1 || m.ToolCalls["write_file"] != 1 || m.ModelCalls < 2 || m.Error != "" {
+	if !m.Passed || m.Agents != 1 || m.Replies != 1 || m.ToolCalls["shell"] != 1 || m.ModelCalls < 2 || m.Error != "" {
 		t.Fatalf("%+v", m)
 	}
 	if md := rep.Markdown(); !strings.Contains(md, "easy-00-probe") || !strings.Contains(md, "100%") {

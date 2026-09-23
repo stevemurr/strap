@@ -99,7 +99,7 @@ func (p *containerScript) Submit(_ context.Context, r provider.Request, _ provid
 		if last.Role != "tool" || strings.Contains(last.Content.Text(), "Tool error:") {
 			return provider.Response{}, fmt.Errorf("unexpected tool receipt: %s", last.Content.Text())
 		}
-		want := []string{"", fmt.Sprintf(`"output":%q`, p.workspace+"\n"), `"path":"budget.go"`, fmt.Sprintf(`"path":%q`, filepath.Join(p.workspace, "README.md")), "PairForBudget", `"path":"budget.go"`}[p.calls]
+		want := []string{"", fmt.Sprintf(`"output":%q`, p.workspace+"\n"), `"path":"budget.go"`, fmt.Sprintf(`"path":%q`, filepath.Join(p.workspace, "README.md")), "PairForBudget", `"exit_code":0`}[p.calls]
 		if !strings.Contains(last.Content.Text(), want) {
 			return provider.Response{}, fmt.Errorf("receipt lacks %q: %s", want, last.Content.Text())
 		}
@@ -119,7 +119,7 @@ func (p *containerScript) Submit(_ context.Context, r provider.Request, _ provid
 	case 4:
 		return call("lsp_outline", map[string]any{"path": "budget.go", "depth": nil, "limit": nil, "cursor": nil})
 	case 5:
-		return call("write_file", map[string]any{"path": "budget.go", "content": p.solution})
+		return call("shell", shellWrite("budget.go", p.solution))
 	default:
 		return provider.Response{Content: "Finished."}, nil
 	}

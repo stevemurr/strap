@@ -65,11 +65,19 @@ func TestDefaultLanguageToolsAndOptOut(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = s.Close(context.Background()) })
 		assembled := s.Config()
-		for _, role := range []harness.AgentConfig{assembled.Root, assembled.Implementor, assembled.Auditor, assembled.Researcher} {
+		for i, role := range []harness.AgentConfig{assembled.Root, assembled.Implementor, assembled.Auditor, assembled.Researcher} {
 			instructions := strings.Join(role.Prompt.Instructions, "\n")
+			// The root never creates files or changes code, so it gets neither guidance.
+			root := i == 0
 			if strings.Count(instructions, "For existing files, copy paths exactly from the user or tool results.") != 1 ||
-				!strings.Contains(instructions, "New files may use new paths.") {
-				t.Fatalf("enabled=%v: role lacks the shared existing/new file rule", enabled)
+				strings.Contains(instructions, "New files may use new paths.") == root {
+				t.Fatalf("enabled=%v role %d: wrong shared file rule", enabled, i)
+			}
+			if strings.Contains(instructions, "You never write, edit or create workspace files") != root {
+				t.Fatalf("enabled=%v role %d: only the root is told it never changes files", enabled, i)
+			}
+			if enabled && strings.Contains(instructions, "After changing code") == root {
+				t.Fatalf("enabled=%v role %d: wrong language guidance", enabled, i)
 			}
 		}
 		effective := s.Configuration()

@@ -33,6 +33,7 @@ type ShellConfig struct {
 type Shell struct {
 	stop   func(*exec.Cmd) error
 	config ShellConfig
+	rg     bool // ripgrep is on the command environment's PATH
 	Func[shellArgs]
 }
 
@@ -97,7 +98,7 @@ func NewShell(config ShellConfig) (*Shell, error) {
 	} else {
 		config.Env = append([]string{}, config.Env...)
 	}
-	s := &Shell{config: config, stop: stopProcessGroup}
+	s := &Shell{config: config, stop: stopProcessGroup, rg: onPath(config.Env, "rg")}
 	// The researcher's diagnostic shell binds its run to an assignment, so
 	// models reach for the same fields here, where nothing records execution.
 	params, err := NewParameters[shellArgs](Nullable("timeout_ms", "use the configured timeout"), MinLength("command", 1), Minimum("timeout_ms", 1), Maximum("timeout_ms", config.MaxTimeout.Milliseconds()),
@@ -119,7 +120,32 @@ func NewShell(config ShellConfig) (*Shell, error) {
 }
 
 func (s *Shell) description() string {
-	return fmt.Sprintf("Run a synchronous shell command in %s using %s. Returns combined stdout/stderr and exit status. Default timeout %d ms, maximum %d ms. Output is bounded, keeping both ends. No persistent shell or background jobs; descendants in the process group are stopped when the call ends. Runs with host permissions, without a sandbox.", s.config.Dir, s.config.Program, s.config.Timeout.Milliseconds(), s.config.MaxTimeout.Milliseconds())
+	text := fmt.Sprintf("Run a synchronous shell command in %s using %s. Returns combined stdout/stderr and exit status. Default timeout %d ms, maximum %d ms. Output is bounded, keeping both ends. No persistent shell or background jobs; descendants in the process group are stopped when the call ends. Runs with host permissions, without a sandbox.", s.config.Dir, s.config.Program, s.config.Timeout.Milliseconds(), s.config.MaxTimeout.Milliseconds())
+	if s.rg {
+		// Codex gives the same advice; the model otherwise reaches for grep and find.
+		text += " ripgrep is installed: to search file contents use rg PATTERN [PATH] (add -n for line numbers, -F for literal text), and to list files use rg --files [PATH] or rg --files -g 'GLOB'. Prefer rg over grep and find: it is faster and skips files ignored by .gitignore."
+	}
+	return text
+}
+
+// onPath reports whether an executable named name is on the PATH in env, the
+// environment commands run with.
+func onPath(env []string, name string) bool {
+	for _, kv := range env {
+		path, ok := strings.CutPrefix(kv, "PATH=")
+		if !ok {
+			continue
+		}
+		for _, dir := range filepath.SplitList(path) {
+			if dir == "" {
+				continue
+			}
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 func (s *Shell) handle(ctx context.Context, _ Call, args shellArgs) (Result, error) {
 	if strings.TrimSpace(args.Command) == "" {

@@ -95,6 +95,9 @@ func TestAdversarialStoppedAuditorIsModelFailure(t *testing.T) {
 				adversarialAudit(f),
 			}},
 			{Content: "I could not assign the stopped auditor."},
+			// The root's reply check holds back the first reply once while the
+			// submission still needs an audit; the root reports the blocker again.
+			{Content: "I could not assign the stopped auditor; the submission still needs an audit."},
 		}
 	}}
 	result := runAdversarial(t, p)

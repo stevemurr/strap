@@ -42,6 +42,17 @@ type Message struct {
 	// State is harness-computed context attached when an agent wakes: its
 	// plans, owned work and assignments with current ids and revisions.
 	State *work.ActorState `json:"state,omitempty"`
+	// Workspace lists the working directory on an agent's first wake, so it
+	// names real paths instead of guessing a layout.
+	Workspace *Workspace `json:"workspace,omitempty"`
+}
+
+// Workspace is the start of a directory listing: relative paths, shallowest
+// first, directories ending in "/".
+type Workspace struct {
+	Dir     string   `json:"dir"`
+	Entries []string `json:"entries"`
+	More    int      `json:"more_not_shown,omitempty"`
 }
 
 type DeliveryStatus string
@@ -108,6 +119,11 @@ func (m Message) Clone() Message {
 			state.Assigned[i].Steps = slices.Clone(state.Assigned[i].Steps)
 		}
 		m.State = &state
+	}
+	if m.Workspace != nil {
+		ws := *m.Workspace
+		ws.Entries = slices.Clone(ws.Entries)
+		m.Workspace = &ws
 	}
 	return m
 }

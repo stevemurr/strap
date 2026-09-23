@@ -21,6 +21,12 @@ func NewExecutionEvidenceRef() string {
 // ExecutionResult retains the entire captured result in host evidence and bounds
 // the serialized model receipt. Oversized captures are read through evidence pages.
 func ExecutionResult(r Result, b *ExecutionBinding, cause error) (Result, error) {
+	return ExecutionResultWithin(r, b, cause, ExecutionResponseBytes)
+}
+
+// ExecutionResultWithin is ExecutionResult with a caller-chosen receipt bound;
+// zero adds none, for tools whose results are already bounded.
+func ExecutionResultWithin(r Result, b *ExecutionBinding, cause error, limit int) (Result, error) {
 	r.Execution = b
 	r.Captured = r.Content.Clone()
 	var raw json.RawMessage
@@ -42,7 +48,7 @@ func ExecutionResult(r Result, b *ExecutionBinding, cause error) (Result, error)
 	if err != nil {
 		return r, err
 	}
-	if len(encoded) > ExecutionResponseBytes {
+	if limit > 0 && len(encoded) > limit {
 		receipt.Result = nil
 		receipt.ReadEvidence = true
 		if len(receipt.Error) > 1024 {

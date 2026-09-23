@@ -63,7 +63,8 @@ type Config struct {
 	ReasoningLimit        int                         `json:"reasoning_limit"` // Reasoning bytes per model call; zero is unlimited.
 	Model                 ModelConfig                 `json:"model"`
 	LocalTools            bool                        `json:"local_tools"`
-	Web                   *tool.WebConfig             `json:"web"` // Nil disables browser/search tools.
+	FileEdits             tool.EditMode               `json:"file_edits,omitempty"` // Empty is tool.EditText.
+	Web                   *tool.WebConfig             `json:"web"`                  // Nil disables browser/search tools.
 	Root                  AgentConfig                 `json:"root"`
 	Implementor           AgentConfig                 `json:"implementor"`
 	Auditor               AgentConfig                 `json:"auditor"`
@@ -159,11 +160,15 @@ func (e *StartupError) Close(ctx context.Context) error { return e.cleanup.Close
 func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err error) {
 	cfg = cloneConfig(cfg)
 	for _, role := range []*AgentConfig{&cfg.Root, &cfg.Implementor, &cfg.Auditor, &cfg.Researcher} {
-		if !slices.Contains(role.Prompt.Instructions, fileInstruction) {
-			role.Prompt.Instructions = append(role.Prompt.Instructions, fileInstruction)
+		files, language := fileInstruction, languageInstruction
+		if role == &cfg.Root {
+			files, language = rootFileInstruction, rootLanguageInstruction
 		}
-		if cfg.LSP != nil && !slices.Contains(role.Prompt.Instructions, languageInstruction) {
-			role.Prompt.Instructions = append(role.Prompt.Instructions, languageInstruction)
+		if !slices.Contains(role.Prompt.Instructions, files) {
+			role.Prompt.Instructions = append(role.Prompt.Instructions, files)
+		}
+		if cfg.LSP != nil && !slices.Contains(role.Prompt.Instructions, language) {
+			role.Prompt.Instructions = append(role.Prompt.Instructions, language)
 		}
 	}
 	execution, cancelExecution := context.WithCancel(context.WithoutCancel(ctx))
@@ -212,8 +217,8 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		if err != nil {
 			return nil, err
 		}
-		cfg.Researcher.Prompt.Instructions = append(cfg.Researcher.Prompt.Instructions, "For a multi-source investigation, use deep_research with your active work_id and explicit success criteria. Read its report and source evidence with get_research_report. Forward selected verified findings using report_work_progress before submit_research; report claim IDs are not ledger finding IDs. State partial outcomes and remaining gaps.")
-		cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Researchers have a deep_research tool for bounded multi-source web investigations. Assign a researcher a clear question and acceptance criteria. Read retained runs through get_research_report. You remain available while research executes; send_message does not steer an in-flight investigation.")
+		cfg.Researcher.Prompt.Instructions = append(cfg.Researcher.Prompt.Instructions, "For a multi-source investigation, use deep_research with your active work_id and explicit success criteria. Read its claims and source evidence with get_research_run. Record each claim you deliver with report_work_progress, then cite the finding IDs it returns in submit_research. State partial outcomes and remaining gaps.")
+		cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Researchers have a deep_research tool for bounded multi-source web investigations. Assign a researcher a clear question and acceptance criteria. Its results reach you as a delivered brief. You remain available while research executes; send_message does not steer an in-flight investigation.")
 	}
 	s.config.DeepResearch = cfg.DeepResearch
 	s.config.Root = cfg.Root
@@ -340,7 +345,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	var webRuntime *tool.Web
 	var local []tool.Tool
 	if cfg.LocalTools {
-		local, err = localToolsWithChanges(cfg.Dir, changed, afterRun)
+		local, err = localToolsWithChanges(cfg.Dir, cfg.FileEdits, changed, afterRun)
 		if err != nil {
 			return nil, err
 		}
@@ -383,6 +388,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		return err
 	}
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
+	// Auditors and the root read and inspect; only implementors change files.
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
 	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
 	var researchShell tool.Tool
@@ -434,7 +440,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 			rootTools[i] = tool.WaitForInputWhen(s.rootMayWait)
 		}
 	}
-	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), Tools: slices.Concat(local, rootTools, []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
+	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), ReplyCheck: s.rootReplyCheck, Tools: slices.Concat(withoutWrites, rootTools, []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {
 			return tool.Result{}, e
@@ -580,12 +586,12 @@ func (s *Session) rootMayWait(ctx context.Context, c tool.Call) error {
 	return errors.New("wait_for_input rejected: you own no active delegated work, so no worker result can arrive. If the task is finished, send the final reply as a text-only response now; if work remains, assign it first")
 }
 
-func localToolsWithChanges(dir string, changed func(string), afterRun func()) ([]tool.Tool, error) {
+func localToolsWithChanges(dir string, edits tool.EditMode, changed func(string), afterRun func()) ([]tool.Tool, error) {
 	shell, err := tool.NewShell(tool.ShellConfig{Dir: dir, AfterRun: afterRun})
 	if err != nil {
 		return nil, err
 	}
-	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir, OnChange: changed})
+	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir, OnChange: changed, Edits: edits})
 	if err != nil {
 		return nil, err
 	}

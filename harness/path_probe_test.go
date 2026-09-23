@@ -13,6 +13,8 @@ import (
 	"github.com/stevemurr/strap/tool"
 )
 
+var discoveryTools = map[string]bool{"glob": true, "grep_search": true, "list_directory": true}
+
 func TestPathComparisonChangesOnlyDescriptions(t *testing.T) {
 	raw, err := os.ReadFile("testdata/path-tools-baseline.json")
 	if err != nil {
@@ -22,7 +24,7 @@ func TestPathComparisonChangesOnlyDescriptions(t *testing.T) {
 	if err := json.Unmarshal(raw, &original); err != nil {
 		t.Fatal(err)
 	}
-	ts, err := localToolsWithChanges(t.TempDir(), nil, nil)
+	ts, err := localToolsWithChanges(t.TempDir(), "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +43,9 @@ func TestPathComparisonChangesOnlyDescriptions(t *testing.T) {
 	for _, item := range ts {
 		current := item.Definition()
 		previous, ok := old[current.Name]
+		if !ok && discoveryTools[current.Name] {
+			continue // added after this comparison was recorded
+		}
 		if !ok {
 			t.Fatalf("baseline lacks %s", current.Name)
 		}

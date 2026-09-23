@@ -10,6 +10,8 @@ import (
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
+	"path/filepath"
+	"sync/atomic"
 )
 
 func (s *Session) ReportWorkProgress(ctx context.Context, actor identity.ActorID, r work.ReportWorkProgressRequest) (work.ReportWorkProgressResult, error) {
@@ -64,8 +66,10 @@ func (s *Session) ListWorkProgressFindings(ctx context.Context, actor identity.A
 
 // wakeContext gives an agent its current plans, owned work and assignments
 // at the start of each exchange, read from the same accepted-log view that
-// admission uses. Agents with nothing owned or assigned receive nothing.
+// admission uses, and on its first exchange a listing of the working
+// directory. Agents with nothing to add receive nothing.
 func (s *Session) wakeContext(actor identity.ActorID) agent.WakeContext {
+	var listed atomic.Bool
 	return func(ctx context.Context, _ []message.Message) (*message.Message, error) {
 		head, err := s.progressReads.Reader.Head(ctx)
 		if err != nil {
@@ -79,10 +83,24 @@ func (s *Session) wakeContext(actor identity.ActorID) agent.WakeContext {
 		if err != nil {
 			return nil, err
 		}
-		if len(state.Plans)+len(state.Owned)+len(state.Assigned) == 0 {
+		var workspace *message.Workspace
+		if s.config.LocalTools && !listed.Swap(true) {
+			if dir, err := filepath.Abs(s.config.Dir); err == nil {
+				if real, err := filepath.EvalSymlinks(dir); err == nil {
+					dir = real
+				}
+				workspace = workspaceListing(dir)
+			}
+		}
+		empty := len(state.Plans)+len(state.Owned)+len(state.Assigned) == 0
+		if empty && workspace == nil {
 			return nil, nil
 		}
-		return &message.Message{From: actor, To: actor, Kind: message.Observation, State: &state}, nil
+		m := &message.Message{From: actor, To: actor, Kind: message.Observation, Workspace: workspace}
+		if !empty {
+			m.State = &state
+		}
+		return m, nil
 	}
 }
 

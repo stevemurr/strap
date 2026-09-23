@@ -98,16 +98,13 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	if s.publish == nil {
 		s.events = inbox.New[conversation.Event]()
 	}
-	if s.researchRead != nil {
-		s.progressReads = append(s.progressReads, s.researchRead)
-	}
-	s.implementor.Tools = append(s.implementor.Tools, s.commonTools()...)
+	s.implementor.Tools = append(s.withWorkExecution(s.implementor.Tools), s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, s.progressTool())
 	s.implementor.Tools = append(s.implementor.Tools, tool.SubmitWork(func(ctx context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
 		v, e := s.SubmitWork(ctx, c.Actor, r)
 		return result(v, e)
 	}))
-	s.auditor.Tools = append(s.auditor.Tools, s.commonTools()...)
+	s.auditor.Tools = append(s.withWorkExecution(s.auditor.Tools), s.commonTools()...)
 	s.auditor.Tools = append(s.auditor.Tools, s.progressTool())
 	s.auditor.Tools = append(s.auditor.Tools, tool.SubmitAudit(func(ctx context.Context, c tool.Call, r work.AuditRequest) (tool.Result, error) {
 		v, e := s.SubmitAudit(ctx, c.Actor, r)
@@ -116,6 +113,11 @@ func New(ctx context.Context, c *conversation.Controller, implementor, auditor a
 	if s.researcher.Provider != nil {
 		if s.deepResearch != nil {
 			s.researcher.Tools = append(s.researcher.Tools, s.deepResearchTool())
+		}
+		// Runs are the researcher's working evidence; everyone else reads the
+		// delivered brief and its ledger findings.
+		if s.researchRead != nil {
+			s.researcher.Tools = append(s.researcher.Tools, s.researchRead)
 		}
 		if s.researchShell != nil {
 			s.researcher.Tools = append(s.researcher.Tools, s.researchDiagnosticTool())

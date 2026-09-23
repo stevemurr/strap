@@ -76,6 +76,23 @@ func (q *Inbox[T]) Drain() []T {
 	return items
 }
 
+// Take removes and returns the queued values that match, in order, leaving the
+// rest queued for later Receive calls.
+func (q *Inbox[T]) Take(match func(T) bool) []T {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var taken, kept []T
+	for _, v := range q.items {
+		if match(v) {
+			taken = append(taken, v)
+		} else {
+			kept = append(kept, v)
+		}
+	}
+	q.items = kept
+	return taken
+}
+
 func (q *Inbox[T]) Close() {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -76,3 +76,23 @@ func TestSendAndCloseRacePreservesEveryAcceptedValue(t *testing.T) {
 		}
 	}
 }
+
+func TestTakeLeavesUnmatchedValuesQueuedInOrder(t *testing.T) {
+	q := inbox.New[int]()
+	for _, v := range []int{1, 2, 3, 4} {
+		if err := q.Send(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := q.Take(func(v int) bool { return v%2 == 0 }); len(got) != 2 || got[0] != 2 || got[1] != 4 {
+		t.Fatal(got)
+	}
+	for _, want := range []int{1, 3} {
+		if got, err := q.Receive(context.Background()); err != nil || got != want {
+			t.Fatal(got, err)
+		}
+	}
+	if got := q.Take(func(int) bool { return true }); len(got) != 0 {
+		t.Fatal(got)
+	}
+}

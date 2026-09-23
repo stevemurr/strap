@@ -1,5 +1,5 @@
-// Package modelflags registers the model, catalog, language-server and
-// reasoning flags shared by every command that starts a harness session, and
+// Package modelflags registers the model, catalog, language-server, reasoning
+// and file-edit flags shared by every command that starts a harness session, and
 // resolves them in the order the CLI documents: discover the catalog and
 // profile, load it, then let every explicit flag override the profile.
 package modelflags
@@ -11,6 +11,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/lspconfig"
 	"github.com/stevemurr/strap/internal/modelcatalog"
+	"github.com/stevemurr/strap/tool"
 )
 
 // Options holds the registered flags for one command until Parse has run.
@@ -46,6 +47,14 @@ func Register(fs *flag.FlagSet, cfg *harness.Config, modelTimeout string) *Optio
 		})
 	}
 	fs.IntVar(&cfg.ReasoningLimit, "reasoning-limit", cfg.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
+	fs.Func("file-edits", "How edit_file names what it changes: text (unique old text, default), anchors (line labels from read_file; experimental) or merge (old text applied exactly, then tolerantly with a three-way merge; experimental)", func(v string) error {
+		mode := tool.EditMode(v)
+		if err := mode.Validate(); err != nil {
+			return err
+		}
+		cfg.FileEdits = mode
+		return nil
+	})
 	return o
 }
 
