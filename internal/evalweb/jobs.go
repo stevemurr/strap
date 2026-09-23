@@ -294,9 +294,7 @@ func (j *job) run(ctx context.Context, s *Server, tasks []eval.Task) {
 		}
 		j.emitLocked(JobEvent{Kind: "job", Text: j.status})
 		j.mu.Unlock()
-		s.mu.Lock()
-		s.indexed = time.Time{}
-		s.mu.Unlock()
+		s.invalidate()
 	}()
 	j.emit(JobEvent{Kind: "job", Text: "Preparing eval containers"})
 	inputs, prepareErr := r.prepareContainers(ctx, filepath.Join(s.root, j.dir), tasks, j.emit)
@@ -422,7 +420,7 @@ func (s *Server) startJob(ids []string, options ...newEval) (*job, error) {
 	if err := writeMetadata(filepath.Join(s.root, name), metadata, "eval-run.json"); err != nil {
 		return nil, err
 	}
-	s.indexed = time.Time{}
+	s.generation++
 	ctx, cancel := context.WithCancel(context.Background())
 	j := &job{id: fmt.Sprintf("%d", now.UnixNano()), name: display, dir: name, runner: configured, metadata: metadata, cancel: cancel, status: "running", started: now, byID: map[string]*TaskState{}, agents: map[string]map[message.ActorID]bool{}, changed: make(chan struct{})}
 	for _, t := range tasks {
@@ -459,6 +457,7 @@ type runnerInfo struct {
 	Error         string                          `json:"error,omitempty"`
 	Configuration harness.ModelConfig             `json:"configuration"`
 	Roles         map[string]*harness.ModelConfig `json:"roles"`
+	Flags         HarnessFlags                    `json:"flags"`
 }
 
 func (s *Server) handleRunner(w http.ResponseWriter, r *http.Request) {
@@ -477,6 +476,7 @@ func (s *Server) handleRunner(w http.ResponseWriter, r *http.Request) {
 	info.Tasks = tasks
 	info.Configuration = s.runner.Config.Model
 	info.Roles = s.runner.metadata("", time.Time{}).Roles
+	info.Flags = s.runner.flags()
 	writeJSON(w, info)
 }
 

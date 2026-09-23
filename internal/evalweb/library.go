@@ -1,6 +1,7 @@
 package evalweb
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/tool"
 )
 
 // Run metadata is independent of the storage directory and survives server restarts.
@@ -23,7 +25,13 @@ type RunMetadata struct {
 	Profile   string                          `json:"profile,omitempty"`
 	Model     harness.ModelConfig             `json:"model"`
 	Roles     map[string]*harness.ModelConfig `json:"roles,omitempty"`
+	Flags     *HarnessFlags                   `json:"flags,omitempty"` // nil for runs recorded before flags existed
 	Status    string                          `json:"status"`
+}
+
+// HarnessFlags are the harness settings a launch can change besides the model.
+type HarnessFlags struct {
+	FileEdits tool.EditMode `json:"file_edits"`
 }
 type libraryEntry struct {
 	Name     string `json:"name,omitempty"`
@@ -34,6 +42,7 @@ type newEval struct {
 	Name         string               `json:"name,omitempty"`
 	Model        *harness.ModelConfig `json:"model,omitempty"`
 	ApplyToRoles bool                 `json:"apply_to_roles,omitempty"`
+	Flags        *HarnessFlags        `json:"flags,omitempty"` // nil keeps the server's flags
 }
 
 func (r *Runner) configured(request newEval) (*Runner, error) {
@@ -67,13 +76,24 @@ func (r *Runner) configured(request newEval) (*Runner, error) {
 			copy.Config.Researcher.Model = nil
 		}
 	}
+	if request.Flags != nil {
+		if err := request.Flags.FileEdits.Validate(); err != nil {
+			return nil, err
+		}
+		copy.Config.FileEdits = request.Flags.FileEdits
+	}
 	if len(request.Name) > 160 {
 		return nil, errors.New("eval name must be at most 160 characters")
 	}
 	return &copy, nil
 }
+func (r *Runner) flags() HarnessFlags {
+	return HarnessFlags{FileEdits: cmp.Or(r.Config.FileEdits, tool.EditText)}
+}
+
 func (r *Runner) metadata(name string, now time.Time) RunMetadata {
-	m := RunMetadata{Name: name, StartedAt: now, Commit: r.Commit, Profile: r.Profile, Model: r.Config.Model, Status: "running",
+	flags := r.flags()
+	m := RunMetadata{Name: name, StartedAt: now, Commit: r.Commit, Profile: r.Profile, Model: r.Config.Model, Flags: &flags, Status: "running",
 		Roles: map[string]*harness.ModelConfig{"root": r.Config.Root.Model, "implementor": r.Config.Implementor.Model, "auditor": r.Config.Auditor.Model, "researcher": r.Config.Researcher.Model}}
 	source := r.BuildContext
 	if source == "" {
@@ -154,6 +174,7 @@ func enrichRun(root string, r *RunSummary) {
 		r.Profile = meta.Profile
 		r.Configuration = &meta.Model
 		r.RoleModels = meta.Roles
+		r.Flags = meta.Flags
 		r.Model = meta.Model.Model
 		r.Backend = meta.Model.Backend
 		r.Status = meta.Status
@@ -208,7 +229,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
-	runs, err := s.index(true)
+	runs, err := s.index(false)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -255,9 +276,10 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		s.mu.Lock()
+		// Removing a run's workspaces can take a while; other requests go on.
 		err = os.RemoveAll(dir)
-		s.indexed = time.Time{}
+		s.mu.Lock()
+		s.generation++
 		s.reports = map[string]cachedReport{}
 		s.mu.Unlock()
 		if err != nil {
@@ -279,7 +301,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		entry.Archived = request.Archived
 	}
 	err = writeMetadata(dir, entry, ".eval-library.json")
-	s.indexed = time.Time{}
+	s.generation++
 	s.reports = map[string]cachedReport{}
 	s.mu.Unlock()
 	if err != nil {

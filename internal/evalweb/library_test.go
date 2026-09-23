@@ -12,6 +12,7 @@ import (
 
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/internal/evalwire"
+	"github.com/stevemurr/strap/tool"
 )
 
 func TestEvalConfigurationIsValidatedAndIsolated(t *testing.T) {
@@ -322,4 +323,63 @@ func TestLibraryDeleteRejectsRunningEvaluation(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestLaunchFlagsReachContainerAndRunList(t *testing.T) {
+	r, _ := fakeContainer(t, "")
+	r.Config.FileEdits = tool.EditAnchors
+	kept, err := r.configured(newEval{})
+	if err != nil || kept.Config.FileEdits != tool.EditAnchors {
+		t.Fatalf("absent flags must keep the server's: %v, %v", kept, err)
+	}
+	if _, err := r.configured(newEval{Flags: &HarnessFlags{FileEdits: "fuzzy"}}); err == nil {
+		t.Fatal("accepted unknown file edit mode")
+	}
+	r.Config.FileEdits = ""
+	srv, err := New(t.TempDir(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/runner", nil))
+	if !strings.Contains(rec.Body.String(), `"flags":{"file_edits":"text"}`) {
+		t.Fatalf("runner flags: %s", rec.Body)
+	}
+	j, err := srv.startJob([]string{"easy-01-budget-pair"}, newEval{Flags: &HarnessFlags{FileEdits: tool.EditAnchors}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for j.snapshot().Status == "running" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if j.snapshot().Status == "running" {
+		j.cancel()
+		t.Fatal("job did not complete")
+	}
+	b, err := os.ReadFile(filepath.Join(srv.root, j.dir, "config", "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := evalwire.ParseConfig(b)
+	if err != nil || config.Harness.FileEdits != tool.EditAnchors {
+		t.Fatalf("container snapshot: %q, %v", config.Harness.FileEdits, err)
+	}
+	if srv.runner.Config.FileEdits != "" {
+		t.Fatal("launch flags leaked into the server's defaults")
+	}
+	fresh, _ := New(srv.root, nil)
+	runs, err := fresh.index(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runs {
+		if run.Path == j.dir {
+			if run.Flags == nil || run.Flags.FileEdits != tool.EditAnchors {
+				t.Fatalf("run list flags: %+v", run.Flags)
+			}
+			return
+		}
+	}
+	t.Fatal("run missing after restart")
 }

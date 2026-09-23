@@ -8,9 +8,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
@@ -121,12 +123,35 @@ func Analyze(ctx context.Context, dir string) (Report, error) {
 		}
 		return a.TaskID < b.TaskID
 	})
-	for _, id := range order {
-		m := analyzeTask(ctx, dir, latest[id])
-		rep.Tasks = append(rep.Tasks, m)
-	}
+	rep.Tasks = analyzeTasks(ctx, dir, order, latest)
 	rep.Tiers = Summarize(rep.Tasks)
 	return rep, nil
+}
+
+// analyzeTasks scans the traces concurrently, one per CPU. Traces are
+// independent files and dominate the cost of a report; the order is kept.
+func analyzeTasks(ctx context.Context, dir string, order []string, latest map[string]Result) []TaskMetrics {
+	if len(order) == 0 {
+		return nil
+	}
+	tasks := make([]TaskMetrics, len(order))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(order)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				tasks[i] = analyzeTask(ctx, dir, latest[order[i]])
+			}
+		}()
+	}
+	for i := range order {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	return tasks
 }
 
 // analyzeTask reads the trace beside result.json under the run directory, so

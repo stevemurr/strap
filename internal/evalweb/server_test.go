@@ -1,6 +1,7 @@
 package evalweb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fixture writes a minimal ladder run and a nested interaction run so the
@@ -150,6 +152,102 @@ func TestRunDetailAnalysesTracesAndServesTasks(t *testing.T) {
 	var inter interactionDetail
 	if rec := get(t, srv, "/api/run?path=interaction-x", &inter); rec.Code != 200 || len(inter.Report.Results) != 1 {
 		t.Fatal(rec.Body.String())
+	}
+}
+
+// eventually polls cond until it holds or a few seconds pass.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+func hasRun(runs []RunSummary, path string) bool {
+	for _, r := range runs {
+		if r.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func TestStaleRunListIsServedWhileItRescans(t *testing.T) {
+	root := fixture(t)
+	srv, _ := New(root, nil)
+	if _, err := srv.index(false); err != nil {
+		t.Fatal(err)
+	}
+	added := "later_qwen_20260922-100000"
+	if err := os.MkdirAll(filepath.Join(root, added), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, added, "results.jsonl"), []byte(`{"task_id":"easy-01","tier":"easy","outcome":"passed","passed":true}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	srv.indexed = srv.indexed.Add(-indexTTL)
+	srv.mu.Unlock()
+	// A stale list answers at once; the walk that finds the new run happens
+	// behind the request rather than in front of it.
+	runs, _ := srv.index(false)
+	if hasRun(runs, added) {
+		t.Fatal("a stale list should be served without waiting for the rescan")
+	}
+	eventually(t, "the background rescan", func() bool { runs, _ := srv.index(false); return hasRun(runs, added) })
+
+	// A change the server made itself is never served stale.
+	removed := filepath.Join(root, added)
+	if err := os.RemoveAll(removed); err != nil {
+		t.Fatal(err)
+	}
+	srv.invalidate()
+	if runs, _ := srv.index(false); hasRun(runs, added) {
+		t.Fatal("an invalidated list should wait for a rescan")
+	}
+}
+
+func TestAbandonedRequestStillCachesItsAnalysis(t *testing.T) {
+	srv, _ := New(fixture(t), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// The page navigating away mid-analysis must not waste the work.
+	if _, err := srv.ladder(ctx, "cmp/b_qwen_20260921-100000"); err == nil {
+		t.Fatal("a cancelled request should return without waiting")
+	}
+	dir := filepath.Join(srv.root, "cmp", "b_qwen_20260921-100000")
+	eventually(t, "the detached analysis", func() bool {
+		srv.mu.Lock()
+		defer srv.mu.Unlock()
+		_, ok := srv.reports[dir]
+		return ok
+	})
+	first, err := srv.ladder(context.Background(), "cmp/b_qwen_20260921-100000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := srv.ladder(context.Background(), "cmp/b_qwen_20260921-100000")
+	if first != second || first.Summary.Failed != 1 {
+		t.Fatalf("repeat requests should share the cached analysis: %p %p", first, second)
+	}
+}
+
+func TestIndexWarmsTheNewestRuns(t *testing.T) {
+	srv, _ := New(fixture(t), nil)
+	if _, err := srv.index(false); err != nil {
+		t.Fatal(err)
+	}
+	// The batch's members warm with it; its members are not listed twice.
+	for _, rel := range []string{"a_qwen_20260920-100000", "cmp/b_qwen_20260921-100000", "batch/easy-01/results", "batch/hard-01/results"} {
+		dir := filepath.Join(srv.root, filepath.FromSlash(rel))
+		eventually(t, "warming "+rel, func() bool {
+			srv.mu.Lock()
+			defer srv.mu.Unlock()
+			_, ok := srv.reports[dir]
+			return ok
+		})
 	}
 }
 

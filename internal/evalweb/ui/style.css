@@ -203,8 +203,6 @@ select { padding: 3px 6px; border: 1px solid var(--rule-strong); border-radius: 
 }
 
 /* Launch and live jobs */
-a.running { display: block; padding: 6px 8px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent-soft); color: var(--ink); font-size: 12.5px; }
-a.running b { font-family: var(--mono); font-weight: 500; }
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 0; }
 @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.4s ease-in-out infinite; } @keyframes pulse { 50% { opacity: .25; } } }
 .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
@@ -281,7 +279,7 @@ body { font-size: 13px; line-height: 1.5; }
 .head h2 { font-size:22px; letter-spacing:-.025em; }
 h3 { color:var(--ink); font-size:14px; font-weight:600; }
 b,strong { font-weight:600; }
-.group .name,.group .score,.run .name,.run .score,a.running b,td.num,th.num,.phase,.outcome,.chip { font-family:var(--sans); }
+.group .name,.group .score,.run .name,.run .score,td.num,th.num,.phase,.outcome,.chip { font-family:var(--sans); }
 td.num,th.num { font-size:12px; }
 .phase { font-size:12px; }
 .facts { gap:6px 16px; font-size:12px; }
@@ -443,8 +441,7 @@ button:disabled { opacity:.45; cursor:default; }
 .sidebar-link,.side-footer .toolbar-button { display:flex; align-items:center; gap:10px; }
 .sidebar-link svg,.side-footer svg { flex-shrink:0; }
 .side-head { padding-bottom:16px; }
-.running-list { flex:1; min-height:0; overflow:auto; margin:0 12px; padding:16px 0; border-top:1px solid var(--rule); }
-.side-footer { border-top:1px solid var(--rule); margin:0 12px; padding:12px 0; gap:4px; }
+.side-footer { border-top:1px solid var(--rule); margin:auto 12px 0; padding:12px 0; gap:4px; }
 .side-footer .toolbar-button { width:100%; padding:7px 12px; height:34px; font-size:13px; text-align:left; }
 .side-footer a:hover { text-decoration:none; }
 .toolbar { gap:14px; }
@@ -591,21 +588,23 @@ button:disabled { opacity:.45; cursor:default; }
 }
 
 /* Selected-problem metrics stay visible independently of the activity filter. */
-.problem-stats { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; }
+.activity-column { display:flex; flex-direction:column; gap:14px; min-width:0; min-height:0; }
+.activity-column > .activity-feed { flex:1; }
+.problem-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; flex-shrink:0; }
 .stat-card { display:flex; flex-direction:column; gap:4px; padding:12px 16px; background:var(--surface); border:1px solid var(--rule); border-radius:9px; min-width:0; }
 .stat-label { color:var(--muted); font-size:11px; font-weight:500; }
 .stat-value { font-size:22px; font-weight:600; letter-spacing:-.025em; line-height:1.3; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
 .stat-hint { color:var(--muted); font-size:10px; }
 .stat-card.has-errors .stat-value { color:var(--failed); }
 .agent-context { display:block; color:var(--muted); font-size:10px; padding:3px 6px 0; overflow-wrap:anywhere; }
-@media(max-width:1100px) { .problem-stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; } }
-@media(max-width:500px) { .stat-card { padding:10px; } .stat-value { font-size:19px; } .stat-hint { display:none; } }
+@media(max-width:1100px) { .problem-stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; } }
+@media(max-width:500px) { .stat-card { padding:10px; } .stat-value { font-size:19px; } }
 
 /* Centered problem picker, independent of the agent rail width. */
 .job-toolbar { grid-template-columns:32px minmax(0,1fr) minmax(260px,480px) minmax(0,1fr); gap:16px; min-height:68px; padding-right:72px; }
 .job-toolbar #toolbar-title { max-width:210px; border-right:0; }
 .job-toolbar .problem-dropdown { position:relative; width:100%; justify-self:center; }
-.job-toolbar .problem-summary { padding:7px 10px; }
+.job-toolbar .problem-summary { padding:7px 10px; border:1px solid var(--rule); border-radius:9px; }
 .job-toolbar .problem-popover { left:0; width:100%; top:calc(100% + 10px); transform-origin:top center; }
 .problem-chevron { transition:transform 170ms ease; }
 .problem-summary[aria-expanded="true"] .problem-chevron { transform:rotate(180deg); }
@@ -663,3 +662,36 @@ button:disabled { opacity:.45; cursor:default; }
  .activity-feed .line .x { grid-column:1/-1; }
 }
 @media(prefers-reduced-motion:reduce) { .problem-chevron { transition:none; } }
+
+/* Breadcrumbs name every view. Ancestors shrink first, so the current page
+   keeps as much of its name as the toolbar allows. */
+.crumbs { display:flex; align-items:center; min-width:0; margin:0; padding:0; list-style:none; }
+.crumbs li { display:flex; align-items:center; min-width:0; }
+.crumbs li:not(:last-child) { flex-shrink:3; max-width:45%; }
+.crumbs li + li::before { content:'›'; flex-shrink:0; margin:0 8px; color:var(--muted); font-weight:400; }
+.crumbs a,.crumbs span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.crumbs a { color:var(--muted); font-weight:500; }
+.crumbs a:hover { color:var(--accent); text-decoration:none; }
+.crumbs [aria-current] { color:var(--ink); }
+.job-toolbar #toolbar-title { display:block; }
+.job-toolbar .crumbs { flex-direction:column; align-items:flex-start; gap:2px; }
+.job-toolbar .crumbs li { max-width:100%; }
+.job-toolbar .crumbs li + li::before { display:none; }
+.job-toolbar .crumbs li:not(:last-child) a { font-size:11px; }
+.job-toolbar .crumbs li:not(:last-child) a::before { content:'‹ '; }
+
+/* A navigation waiting on the server shows a bar and dims the page it is
+   leaving, both after a short delay so that fast ones show nothing at all. */
+.workspace { position:relative; }
+.workspace::before { content:''; position:absolute; z-index:5; top:0; left:0; width:0; height:2px; background:var(--accent); opacity:0; pointer-events:none; }
+.is-loading .workspace::before { animation:nav-progress 6s cubic-bezier(.1,.7,.2,1) .15s forwards; }
+@keyframes nav-progress { from { width:0; opacity:1; } 8% { width:35%; } to { width:90%; opacity:1; } }
+.main[aria-busy="true"] > * { opacity:.55; transition:opacity .2s ease .15s; }
+.deferred { animation:deferred-in .2s ease .15s both; }
+@keyframes deferred-in { from { opacity:0; } to { opacity:1; } }
+@media(prefers-reduced-motion:reduce) {
+ .is-loading .workspace::before { animation:nav-progress-still 0s .15s forwards; }
+ @keyframes nav-progress-still { to { width:40%; opacity:1; } }
+ .deferred { animation-duration:0s; }
+ .main[aria-busy="true"] > * { transition-duration:0s; }
+}

@@ -38,6 +38,7 @@ type RunSummary struct {
 	Branch        string                          `json:"branch,omitempty"`
 	Configuration *harness.ModelConfig            `json:"configuration,omitempty"`
 	RoleModels    map[string]*harness.ModelConfig `json:"role_models,omitempty"`
+	Flags         *HarnessFlags                   `json:"flags,omitempty"`
 	Archived      bool                            `json:"archived"`
 	ArchiveReason string                          `json:"archive_reason,omitempty"`
 	Status        string                          `json:"status,omitempty"`
@@ -220,6 +221,16 @@ func summarize(dir, rel string) RunSummary {
 		s.StartedAt = earliest
 	}
 	return s
+}
+
+// isInteraction reports whether dir holds an interaction run, from the mode
+// its run.json records, without reading any results.
+func isInteraction(dir string) bool {
+	var run struct {
+		Mode string `json:"mode"`
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
+	return err == nil && json.Unmarshal(data, &run) == nil && run.Mode != ""
 }
 
 func summarizeInteraction(dir string, s *RunSummary) {

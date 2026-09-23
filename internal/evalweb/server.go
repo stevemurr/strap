@@ -28,16 +28,33 @@ type Server struct {
 	mux    *http.ServeMux
 	runner *Runner
 
-	mu      sync.Mutex
-	runs    []RunSummary
-	indexed time.Time
-	reports map[string]cachedReport
-	jobs    []*job
+	// mu guards everything below. It is held only for bookkeeping, never
+	// across a scan or an analysis, so one slow read does not stall the rest.
+	mu         sync.Mutex
+	runs       []RunSummary
+	indexed    time.Time // when the scan that produced runs started
+	generation int       // bumped by invalidate
+	scanned    int       // generation the current runs reflect
+	refreshing bool
+	warming    bool
+	reports    map[string]cachedReport
+	analyses   map[string]*analysis
+	jobs       []*job
+
+	scanning sync.Mutex // serializes discovery
 }
 
 type cachedReport struct {
 	stamp  string
 	report *ladderDetail
+}
+
+// analysis is one in-flight eval.Analyze that concurrent requests share.
+type analysis struct {
+	stamp  string
+	done   chan struct{}
+	detail *ladderDetail
+	err    error
 }
 
 // ladderDetail is the analysed run plus the raw results the analysis drops:
@@ -53,9 +70,14 @@ type interactionDetail struct {
 	Report  interaction.Report `json:"report"`
 }
 
-// indexTTL bounds how stale the run list may be between rescans. A running
-// eval appends results continuously, so the list refreshes on its own.
+// indexTTL bounds how stale the run list may be before a request triggers a
+// background rescan. A running eval appends results continuously, so the list
+// refreshes on its own without making any request wait for the walk.
 const indexTTL = 15 * time.Second
+
+// warmRuns is how many of the newest runs are analysed ahead of the first
+// request for them: about one page of the library.
+const warmRuns = 10
 
 // New serves the results under root. A nil runner disables launching runs
 // from the page.
@@ -71,7 +93,7 @@ func New(root string, runner *Runner) (*Server, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("%s is not a directory", root)
 	}
-	s := &Server{root: abs, mux: http.NewServeMux(), runner: runner, reports: map[string]cachedReport{}}
+	s := &Server{root: abs, mux: http.NewServeMux(), runner: runner, reports: map[string]cachedReport{}, analyses: map[string]*analysis{}}
 	static, _ := fs.Sub(ui, "ui")
 	s.mux.Handle("GET /", http.FileServerFS(static))
 	s.mux.HandleFunc("GET /api/runs", s.handleRuns)
@@ -93,32 +115,136 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 // Root reports the absolute results directory.
 func (s *Server) Root() string { return s.root }
 
+// index returns the run list with live jobs overlaid. A list past its TTL is
+// served as is while one rescan runs in the background; the first list, a
+// forced one and one invalidated by a change this server made wait for a
+// rescan. Discovery never holds s.mu.
 func (s *Server) index(force bool) ([]RunSummary, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !force && s.runs != nil && time.Since(s.indexed) < indexTTL {
-		return s.runs, nil
+	runs, stale, dirty := s.runs, time.Since(s.indexed) >= indexTTL, s.scanned != s.generation
+	if runs != nil && !force && !dirty && stale && !s.refreshing {
+		s.refreshing = true
+		go func() {
+			_, _ = s.rescan(time.Now())
+			s.mu.Lock()
+			s.refreshing = false
+			s.mu.Unlock()
+		}()
 	}
+	s.mu.Unlock()
+	if runs == nil || force || dirty {
+		var err error
+		if runs, err = s.rescan(time.Now()); err != nil {
+			return nil, err
+		}
+	}
+	return s.overlayJobs(runs), nil
+}
+
+// rescan walks the results tree unless a scan that started after requested
+// already finished, which lets simultaneous callers share one walk.
+func (s *Server) rescan(requested time.Time) ([]RunSummary, error) {
+	s.scanning.Lock()
+	defer s.scanning.Unlock()
+	s.mu.Lock()
+	if s.runs != nil && s.indexed.After(requested) && s.scanned == s.generation {
+		runs := s.runs
+		s.mu.Unlock()
+		return runs, nil
+	}
+	generation, started := s.generation, time.Now()
+	s.mu.Unlock()
 	runs, err := discover(s.root)
 	if err != nil {
 		return nil, err
 	}
-	for _, j := range s.jobs {
+	s.mu.Lock()
+	s.runs, s.indexed, s.scanned = runs, started, generation
+	s.mu.Unlock()
+	s.warm(runs)
+	return runs, nil
+}
+
+// invalidate makes the next index call wait for a fresh scan. Callers that
+// already hold s.mu bump s.generation directly.
+func (s *Server) invalidate() {
+	s.mu.Lock()
+	s.generation++
+	s.mu.Unlock()
+}
+
+// overlayJobs marks the runs a live job is writing. It copies the list, since
+// the cached one is shared between requests.
+func (s *Server) overlayJobs(runs []RunSummary) []RunSummary {
+	s.mu.Lock()
+	jobs := append([]*job(nil), s.jobs...)
+	s.mu.Unlock()
+	out := runs
+	copied := false
+	for _, j := range jobs {
 		snap := j.snapshot()
 		if snap.Status != "running" {
 			continue
 		}
-		for i := range runs {
-			if runs[i].Path == snap.Dir || runs[i].Group == snap.Dir {
-				runs[i].Archived = false
-				runs[i].ArchiveReason = ""
-				runs[i].Status = "running"
-				runs[i].JobID = snap.ID
+		if !copied {
+			out, copied = append([]RunSummary(nil), runs...), true
+		}
+		for i := range out {
+			if out[i].Path == snap.Dir || out[i].Group == snap.Dir {
+				out[i].Archived = false
+				out[i].ArchiveReason = ""
+				out[i].Status = "running"
+				out[i].JobID = snap.ID
 			}
 		}
 	}
-	s.runs, s.indexed = runs, time.Now()
-	return runs, nil
+	return out
+}
+
+// warm analyses the newest ladder runs in the background, one at a time, so
+// opening a recent run does not wait for its traces to be read. Runs already
+// cached cost a stat each.
+func (s *Server) warm(runs []RunSummary) {
+	s.mu.Lock()
+	if s.warming {
+		s.mu.Unlock()
+		return
+	}
+	s.warming = true
+	s.mu.Unlock()
+	var paths []string
+	for _, r := range runs {
+		if len(paths) == warmRuns {
+			break
+		}
+		if r.Kind == Ladder && r.Tasks > 0 && !r.Archived && (r.Batch || !batchGroup(runs, r.Group)) {
+			paths = append(paths, r.Path)
+		}
+	}
+	go func() {
+		defer func() {
+			s.mu.Lock()
+			s.warming = false
+			s.mu.Unlock()
+		}()
+		for _, p := range paths {
+			_, _ = s.ladder(context.Background(), p)
+		}
+	}()
+}
+
+// batchGroup reports whether group is a batch in runs, whose members the
+// library shows only through the batch itself.
+func batchGroup(runs []RunSummary, group string) bool {
+	if group == "" {
+		return false
+	}
+	for _, r := range runs {
+		if r.Batch && r.Path == group {
+			return true
+		}
+	}
+	return false
 }
 
 // locate maps a request path onto a run directory beneath the root, and
@@ -139,14 +265,6 @@ func (s *Server) locate(rel string) (dir string, batch bool, err error) {
 		return dir, true, nil
 	}
 	return "", false, fmt.Errorf("no run at %s", rel)
-}
-
-func (s *Server) resolve(rel string) (string, error) {
-	dir, batch, err := s.locate(rel)
-	if err == nil && batch {
-		return "", fmt.Errorf("%s is a batch, not a single run", rel)
-	}
-	return dir, err
 }
 
 func (s *Server) summary(rel string) (RunSummary, error) {
@@ -178,28 +296,55 @@ func (s *Server) ladder(ctx context.Context, rel string) (*ladderDetail, error) 
 	}
 	stamp := fmt.Sprintf("%d/%d", info.Size(), info.ModTime().UnixNano())
 	s.mu.Lock()
-	cached, ok := s.reports[dir]
-	s.mu.Unlock()
-	if ok && cached.stamp == stamp {
+	if cached, ok := s.reports[dir]; ok && cached.stamp == stamp {
+		s.mu.Unlock()
 		return cached.report, nil
 	}
+	// Requests for the same run share one analysis. It runs detached from the
+	// request that started it, so navigating away still fills the cache.
+	a := s.analyses[dir]
+	if a == nil || a.stamp != stamp {
+		a = &analysis{stamp: stamp, done: make(chan struct{})}
+		s.analyses[dir] = a
+		go s.analyze(context.WithoutCancel(ctx), dir, rel, a)
+	}
+	s.mu.Unlock()
+	select {
+	case <-a.done:
+		return a.detail, a.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *Server) analyze(ctx context.Context, dir, rel string, a *analysis) {
+	defer close(a.done)
+	defer func() {
+		s.mu.Lock()
+		if s.analyses[dir] == a {
+			delete(s.analyses, dir)
+		}
+		if a.err == nil {
+			s.reports[dir] = cachedReport{stamp: a.stamp, report: a.detail}
+		}
+		s.mu.Unlock()
+	}()
 	report, err := eval.Analyze(ctx, dir)
 	if err != nil {
-		return nil, err
+		a.err = err
+		return
 	}
 	results, err := latestResults(dir)
 	if err != nil {
-		return nil, err
+		a.err = err
+		return
 	}
 	detail := &ladderDetail{Summary: summarize(dir, filepath.ToSlash(filepath.Clean(rel))), Report: report, Results: map[string]eval.Result{}}
 	enrichRun(s.root, &detail.Summary)
 	for _, r := range results {
 		detail.Results[r.TaskID] = r
 	}
-	s.mu.Lock()
-	s.reports[dir] = cachedReport{stamp: stamp, report: detail}
-	s.mu.Unlock()
-	return detail, nil
+	a.detail = detail
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
@@ -213,13 +358,17 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
-	summary, err := s.summary(rel)
+	dir, batch, err := s.locate(rel)
 	if err != nil {
 		fail(w, http.StatusNotFound, err)
 		return
 	}
-	if summary.Kind == Interaction {
-		dir, _ := s.resolve(rel)
+	if !batch && isInteraction(dir) {
+		summary, err := s.summary(rel)
+		if err != nil {
+			fail(w, http.StatusNotFound, err)
+			return
+		}
 		report, err := interaction.ReadReport(dir)
 		if err != nil {
 			fail(w, http.StatusUnprocessableEntity, err)
@@ -250,12 +399,12 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []*ladderDetail
 	for _, rel := range paths {
-		summary, err := s.summary(rel)
+		dir, batch, err := s.locate(rel)
 		if err != nil {
 			fail(w, http.StatusNotFound, err)
 			return
 		}
-		if summary.Kind != Ladder {
+		if !batch && isInteraction(dir) {
 			fail(w, http.StatusBadRequest, fmt.Errorf("%s is an interaction run; compare ladder runs", rel))
 			return
 		}

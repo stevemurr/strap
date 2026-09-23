@@ -12,7 +12,7 @@ const runs = [
  {path:'old-folder-2',display_name:'Greedy comparison',kind:'ladder',started_at:'2026-09-20T18:00:00Z',commit:'def5678',branch:'main',model:'Qwen3.6',configuration:{...model,generation:{temperature:0,enable_thinking:false}},tasks:2,passed:2,archived:false},
  {path:'incomplete',display_name:'Interrupted attempt',kind:'ladder',started_at:'2026-09-19T18:00:00Z',tasks:0,passed:0,archived:true,archive_reason:'No readable final results'},
 ];
-const tasks = [{id:'easy-01',title:'Budget pair',tier:'easy',phase:'running',model_calls:12,tool_calls:8,tool_errors:2,input_tokens:42000,output_tokens:1800,started_at:'2026-09-21T18:00:00Z',context:{root:{revision:4,tokens:8192},worker:{revision:2,tokens:4096}}},{id:'easy-02',title:'Window count',tier:'easy',phase:'queued'}];
+const tasks = [{id:'easy-01',title:'Budget pair',tier:'easy',phase:'running',model_calls:12,tool_calls:8,tool_errors:2,input_tokens:42000,output_tokens:1800,started_at:'2026-09-21T18:01:00Z',context:{root:{revision:4,tokens:8192},worker:{revision:2,tokens:4096}}},{id:'easy-02',title:'Window count',tier:'easy',phase:'queued'}];
 const snap={id:'job1',name:'UI baseline',dir:'eval-123',status:'running',started_at:'2026-09-21T18:00:00Z',metadata:{model},tasks:[...tasks,...Array.from({length:18},(_,i)=>({id:`queued-${i}`,title:`Additional problem ${i+1}`,phase:'queued'}))]};
 const events=[
  {seq:1,task:'easy-01',kind:'agent',agent:'root',text:'started'},
@@ -50,6 +50,7 @@ const server=http.createServer((req,res)=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ await page.clock.setFixedTime(new Date('2026-09-21T18:03:00Z'));
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -98,10 +99,14 @@ const server=http.createServer((req,res)=>{
   await page.getByLabel('Thinking',{exact:true}).selectOption('false');
   await page.getByLabel('Temperature',{exact:true}).fill('0');
   await page.getByLabel('Top K',{exact:true}).fill('0');
+  await page.getByRole('heading',{name:'Flags',exact:true}).waitFor();
+  assert.equal(await page.getByLabel('File edits',{exact:true}).inputValue(),'text');
+  await page.getByLabel('File edits',{exact:true}).selectOption('anchors');
+  assert.match(await page.getByLabel('File edits',{exact:true}).locator('xpath=..').textContent(),/edit_file changes lines by label/);
   await page.getByLabel('Budget pair').check();
   await page.screenshot({path:'/tmp/strap-new-eval.png',fullPage:true,animations:'disabled'});
   await page.getByRole('button',{name:'Run 1 task',exact:true}).click();
-  await page.getByRole('heading',{name:'UI baseline',exact:true}).waitFor();
+  await page.locator('.job-toolbar [aria-current]').filter({hasText:'UI baseline'}).waitFor();
   assert.equal(await page.locator('.sidebar-link svg').count(),1);
   assert.equal(await page.locator('.side-footer').textContent().then(t=>t.includes('Settings')&&t.includes('Rescan')),true);
   assert.equal(submitted.model.generation.enable_thinking,false);
@@ -109,6 +114,7 @@ const server=http.createServer((req,res)=>{
   assert.equal(submitted.model.generation.temperature,0);
   assert.equal(submitted.model.generation.top_k,0);
   assert.equal(submitted.name,'No-thinking baseline');
+  assert.equal(submitted.flags.file_edits,'anchors');
   await page.locator('.activity-feed strong').filter({hasText:'Plan'}).waitFor();
   assert.equal(await page.locator('.activity-feed pre code').textContent(),'fmt.Println("hello")\n');
   assert.equal(await page.locator('.activity-feed img').count(),0);
@@ -118,13 +124,23 @@ const server=http.createServer((req,res)=>{
   assert.equal(await page.locator('.agent-tree > ul > li[data-agent="root"] > ul > li').count(),2);
   assert.equal(await page.locator('.agent-tree li[data-agent="worker"] li').count(),0);
   assert.equal(await page.locator('.activity-feed > .line').last().textContent().then(s=>s.includes('Root resumes after delegation')),true);
-  assert.equal(await page.locator('.toolbar').getByRole('heading',{name:'UI baseline',exact:true}).count(),1);
+  assert.equal(await page.locator('.job-toolbar [aria-current]').filter({hasText:'UI baseline'}).count(),1);
   assert.equal(await page.locator('.eval-controls').getByRole('button',{name:'Cancel eval',exact:true}).count(),1);
   assert.equal(await page.getByLabel('Follow progress').count(),0);
   assert.equal(await page.getByRole('heading',{name:'Activity',exact:true}).count(),0);
   assert.equal(await page.locator('.agent-column > :first-child.eval-controls').count(),1);
-  assert.equal(await page.locator('[data-metric="Model calls"] .stat-value').textContent(),'12');
+  assert.equal(await page.locator('[data-metric="Calls"] .stat-value').textContent(),'12 / 8');
   assert.equal(await page.locator('[data-metric="Tool errors"] .stat-value').textContent(),'2');
+  assert.equal(await page.locator('.problem-stats > .stat-card').count(),4);
+  assert.equal(await page.locator('[data-metric="Elapsed"] .stat-value').textContent(),'2m / 3m');
+  assert.equal(await page.locator('[data-metric="Tokens"] .stat-value').textContent(),'42,000 / 1,800');
+  assert.equal(await page.evaluate(()=>{
+    const stats=document.querySelector('.problem-stats').getBoundingClientRect();
+    const rail=document.querySelector('.agent-column').getBoundingClientRect();
+    const log=document.querySelector('.activity-feed').getBoundingClientRect();
+    return Math.abs(stats.top-rail.top)<1 && Math.abs(stats.left-log.left)<1 && stats.bottom<log.top;
+  }),true);
+
   assert.equal(await page.locator('[data-context-agent="worker"]').textContent(),'4,096 context tokens');
   assert.equal(await page.getByRole('progressbar',{name:'Overall progress',exact:true}).count(),1);
   assert.equal(await page.locator('.job-toolbar').evaluate(toolbar=>{
@@ -202,8 +218,11 @@ const server=http.createServer((req,res)=>{
   await page.getByRole('button').filter({hasText:'Window count'}).click();
   await page.waitForFunction(()=>!document.querySelector('.problem-dropdown').open);
   assert.equal(await page.locator('.problem-summary .problem-title').textContent(),'Window count');
-  assert.equal(await page.locator('[data-metric="Model calls"] .stat-value').textContent(),'0');
-  assert.equal(await page.locator('[data-metric="Elapsed"] .stat-value').textContent(),'—');
+  assert.equal(await page.locator('[data-metric="Calls"] .stat-value').textContent(),'0 / 0');
+  assert.match(await page.locator('[data-metric="Elapsed"] .stat-value').textContent(),/^— \/ .+/);
+  const finished={...snap,status:'finished',finished_at:'2026-09-21T18:02:00Z',tasks:snap.tasks.map(t=>t.id==='easy-02'?{...t,phase:'finished',started_at:'2026-09-21T18:01:00Z',finished_at:'2026-09-21T18:01:30Z'}:t)};
+  for(const response of streams)response.write(`event: state\ndata: ${JSON.stringify(finished)}\n\n`);
+  await page.waitForFunction(()=>document.querySelector('[data-metric="Elapsed"] .stat-value').textContent==='30s / 2m');
   await page.getByText('Only second problem',{exact:true}).waitFor();
   assert.equal(await page.locator('.activity-feed strong').count(),0);
   await page.setViewportSize({width:390,height:844});
@@ -219,7 +238,7 @@ const server=http.createServer((req,res)=>{
    await page.getByLabel('Preserve thinking',{exact:true}).selectOption(value);
    await page.getByLabel('Budget pair').check();
    await page.getByRole('button',{name:'Run 1 task',exact:true}).click();
-   await page.getByRole('heading',{name:'UI baseline',exact:true}).waitFor();
+   await page.locator('.job-toolbar [aria-current]').filter({hasText:'UI baseline'}).waitFor();
    assert.equal(submitted.model.generation.preserve_thinking,value===''?undefined:true);
   }
   assert.deepEqual(errors,[]);
