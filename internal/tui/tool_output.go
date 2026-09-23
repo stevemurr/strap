@@ -70,5 +70,9 @@ func (d *toolDisplay) nativeOutput(raw string) {
 		if fields["replacements"] != nil && json.Unmarshal([]byte(raw), &result) == nil {
 			d.result = fmt.Sprintf("%d replacement(s)", result.Replacements)
 		}
+		var lines tool.EditLinesResult
+		if fields["view"] != nil && json.Unmarshal([]byte(raw), &lines) == nil {
+			d.result = boundedToolText(lines.View, 8192)
+		}
 	}
 }

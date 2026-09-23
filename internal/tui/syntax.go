@@ -16,7 +16,7 @@ var (
 	keywordStyle  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#8551B4", Dark: "#C49BF0"})
 	heredocStart  = regexp.MustCompile(`<<(-?)[ \t]*(?:'([A-Za-z_][A-Za-z_0-9]*)'|"([A-Za-z_][A-Za-z_0-9]*)"|([A-Za-z_][A-Za-z_0-9]*))`)
 	redirectPath  = regexp.MustCompile(`(?:^|[^>])>>?[ \t]*(?:'([^']+)'|"([^"]+)"|([^\s<>;&|]+))`)
-	numberedLine  = regexp.MustCompile(`^([0-9]+)\t`)
+	numberedLine  = regexp.MustCompile(`^([0-9]+)(?:\t|:[a-z]+│)`)
 )
 
 // Style each physical line separately. Lipgloss pads a multiline string to its

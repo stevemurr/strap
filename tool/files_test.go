@@ -367,3 +367,30 @@ func TestFilesAtomicReplacement(t *testing.T) {
 		callJSON(t, kit["write_file"], map[string]any{"path": "file", "content": content}, nil)
 	}
 }
+
+// write_file creates missing parent directories, as Qwen Code's does, but only
+// for content it will actually write.
+func TestWriteFileCreatesMissingParents(t *testing.T) {
+	for _, mode := range []EditMode{EditText, EditMerge, EditAnchors} {
+		dir := t.TempDir()
+		_, kit := fileTools(t, FilesConfig{Dir: dir, Edits: mode})
+		callJSON(t, kit["write_file"], map[string]any{"path": "cmd/testmain/main.go", "content": "package main\n"}, nil)
+		if data, err := os.ReadFile(filepath.Join(dir, "cmd/testmain/main.go")); err != nil || string(data) != "package main\n" {
+			t.Fatalf("%s: %q, %v", mode, data, err)
+		}
+		raw, _ := MarshalInput(map[string]any{"path": "rejected/deep/x.txt", "content": "nul\x00byte"})
+		if _, err := kit["write_file"].Call(context.Background(), Call{Arguments: raw}); err == nil {
+			t.Fatalf("%s: invalid content accepted", mode)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "rejected")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: a rejected write left directories behind: %v", mode, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "plain"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ = MarshalInput(map[string]any{"path": "plain/child.txt", "content": "x"})
+		if _, err := kit["write_file"].Call(context.Background(), Call{Arguments: raw}); err == nil {
+			t.Fatalf("%s: wrote beneath a regular file", mode)
+		}
+	}
+}

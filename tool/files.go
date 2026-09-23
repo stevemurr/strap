@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +24,32 @@ type FilesConfig struct {
 	// Defaults: files up to 1 MiB and read output up to 64 KiB.
 	MaxFileBytes int
 	OutputLimit  int
+	// Edits selects how edit_file addresses the text it changes. Empty is EditText.
+	Edits EditMode
+}
+
+// EditMode selects the edit_file contract.
+type EditMode string
+
+const (
+	// EditText replaces one exact, unique occurrence of old text.
+	EditText EditMode = "text"
+	// EditAnchors changes lines named by the labels read_file shows, so the
+	// model never retypes existing text to say where an edit goes. Experimental.
+	EditAnchors EditMode = "anchors"
+	// EditMerge keeps the EditText contract but applies a quote that is almost
+	// right: whitespace-tolerant matching, then a three-way merge that keeps the
+	// real text of lines the model misremembered and refuses conflicts. Reads,
+	// edit results and errors are plain text. Experimental.
+	EditMerge EditMode = "merge"
+)
+
+func (m EditMode) Validate() error {
+	switch m {
+	case "", EditText, EditAnchors, EditMerge:
+		return nil
+	}
+	return fmt.Errorf("unknown file edit mode %q (want text, anchors or merge)", string(m))
 }
 
 // Files serializes its own operations across agents, including read-modify-write
@@ -34,6 +61,7 @@ type Files struct {
 	config FilesConfig
 	gate   chan struct{}
 	tools  []Tool
+	labels map[string]*lineLabels // EditAnchors only, by resolved path; guarded by gate
 }
 
 func NewFiles(config FilesConfig) (*Files, error) {
@@ -47,8 +75,21 @@ func NewFiles(config FilesConfig) (*Files, error) {
 	if config.MaxFileBytes < 1 || config.OutputLimit < 1 {
 		return nil, errors.New("file limits must be positive")
 	}
+	if err := config.Edits.Validate(); err != nil {
+		return nil, err
+	}
+	config.Edits = cmp.Or(config.Edits, EditText)
 	f := &Files{config: config, gate: make(chan struct{}, 1)}
-	f.tools = f.buildTools()
+	switch config.Edits {
+	case EditAnchors:
+		f.labels = map[string]*lineLabels{}
+		f.tools = f.anchoredTools()
+	case EditMerge:
+		f.tools = f.mergeTools()
+	default:
+		f.tools = f.buildTools()
+	}
+	f.tools = append(f.tools, f.discoveryTools()...)
 	return f, nil
 }
 
@@ -71,7 +112,7 @@ type editArgs struct {
 
 type ReadFileResult struct {
 	Path       string `json:"path"`
-	Content    string `json:"content"` // 1-based line numbers followed by a tab
+	Content    string `json:"content"` // 1-based line numbers followed by a tab, or NUMBER:LABEL│ under EditAnchors
 	TotalLines int    `json:"total_lines"`
 	More       bool   `json:"more"`
 	Truncated  bool   `json:"truncated"` // the byte cap cut the requested window
@@ -97,7 +138,7 @@ func (f *Files) buildTools() []Tool {
 			fmt.Sprintf("Read a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Returns numbered lines, starting at offset (1-based, default 1), up to limit (default 200, maximum 2000). Files are limited to %d bytes and output to %d bytes. Symlinks resolve to their targets.", f.config.Dir, f.config.MaxFileBytes, f.config.OutputLimit),
 			f.read, Nullable("offset", "start at the beginning"), Nullable("limit", "use the default read limit"), MinLength("path", 1), Minimum("offset", 1), Minimum("limit", 1), Maximum("limit", 2000)),
 		builtin("write_file",
-			fmt.Sprintf("Create or replace a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Content is limited to %d bytes. Content is literal text, including newlines; do not add Markdown fences or shell heredocs. Parent directories must exist. Symlinks resolve to their targets. Replacements are atomic and retain file permissions.", f.config.Dir, f.config.MaxFileBytes),
+			fmt.Sprintf("Create or replace a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Content is limited to %d bytes. Content is literal text, including newlines; do not add Markdown fences or shell heredocs. Missing parent directories are created. Symlinks resolve to their targets. Replacements are atomic and retain file permissions.", f.config.Dir, f.config.MaxFileBytes),
 			f.write, MinLength("path", 1)),
 		builtin("edit_file",
 			fmt.Sprintf("Replace exactly one occurrence of old with new in a UTF-8 text file. Accepts absolute paths; relative paths resolve from %s. Old must be nonempty and unique; include surrounding text if ambiguous. Symlinks resolve to their targets. The resulting file is limited to %d bytes.", f.config.Dir, f.config.MaxFileBytes),
@@ -120,6 +161,15 @@ func (f *Files) lock(ctx context.Context) error {
 
 func (f *Files) unlock() { <-f.gate }
 
+// missing replaces an OS not-found error for a read with one that names the
+// path and the tool that finds files.
+func missing(err error, requested string) error {
+	if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return fmt.Errorf("no such file: %s; find it with glob, for example pattern %q", requested, filepath.Base(requested))
+}
+
 func (f *Files) read(ctx context.Context, _ Call, args readArgs) (Result, error) {
 	offset, limit := 1, 200
 	if args.Offset != nil {
@@ -134,22 +184,24 @@ func (f *Files) read(ctx context.Context, _ Call, args readArgs) (Result, error)
 	defer f.unlock()
 	path, err := f.resolve(args.Path)
 	if err != nil {
-		return Result{}, err
+		return Result{}, missing(err, args.Path)
 	}
 	text, err := f.readText(ctx, path)
 	if err != nil {
-		return Result{}, err
+		return Result{}, missing(err, args.Path)
 	}
-	lines := strings.Split(text, "\n")
-	if lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	lines, _ := splitLines(text)
+	prefix := func(i int) string { return fmt.Sprintf("%d\t", i+1) }
+	if f.labels != nil {
+		tags := f.labelsFor(path, text).tags
+		prefix = func(i int) string { return labelPrefix(i, tags[i]) }
 	}
 	start := min(offset-1, len(lines))
 	end := start + min(limit, len(lines)-start)
 	var output strings.Builder
 	truncated := false
 	for i := start; i < end; i++ {
-		line := fmt.Sprintf("%d\t%s\n", i+1, lines[i])
+		line := prefix(i) + lines[i] + "\n"
 		remaining := f.config.OutputLimit - output.Len()
 		if len(line) > remaining {
 			piece := line[:remaining]
@@ -176,7 +228,7 @@ func (f *Files) write(ctx context.Context, _ Call, args writeArgs) (Result, erro
 			f.config.OnChange(changed)
 		}
 	}()
-	path, err := f.resolve(args.Path)
+	path, err := f.resolveForWrite(args.Path, args.Content)
 	if err != nil {
 		return Result{}, err
 	}
@@ -250,6 +302,29 @@ func directory(dir string) (string, error) {
 		return "", errors.New("working directory must be a directory")
 	}
 	return path, nil
+}
+
+// resolveForWrite resolves a path to write, first creating missing parent
+// directories as Qwen Code's write_file does: models trained on it write new
+// paths directly, and refusing cost a call and left scratch programs behind.
+// The content is checked before anything is created, so a rejected write
+// leaves no empty directories.
+func (f *Files) resolveForWrite(requested, content string) (string, error) {
+	path, err := f.resolve(requested)
+	if !errors.Is(err, fs.ErrNotExist) {
+		return path, err
+	}
+	if err := f.validateText(content); err != nil {
+		return "", err
+	}
+	abs := requested
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(f.config.Dir, abs)
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return "", err
+	}
+	return f.resolve(requested)
 }
 
 func (f *Files) resolve(path string) (string, error) {

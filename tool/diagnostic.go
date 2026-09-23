@@ -14,6 +14,12 @@ type EditDiagnostic struct {
 	SHA256        string `json:"sha256"`
 	Old           string `json:"old"`
 	New           string `json:"new"`
+	// Line-label edits (EditAnchors) name lines instead of sending Old.
+	Op    string `json:"op,omitempty"`
+	Start string `json:"start,omitempty"`
+	End   string `json:"end,omitempty"`
+	// Stage names the EditMerge step that refused the edit.
+	Stage string `json:"stage,omitempty"`
 }
 
 func (d Diagnostic) Clone() Diagnostic {
