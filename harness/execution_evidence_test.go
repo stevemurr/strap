@@ -249,3 +249,56 @@ func TestImplementorShellIssuesCitableExecutionEvidence(t *testing.T) {
 		t.Fatal("composed evidence accepted:", err)
 	}
 }
+
+// A failing audit cites the auditor's runs, and the implementor it goes back
+// to could read the audit but was refused the runs it cited (medium-20,
+// eval-1790176980218248000). Recording the audit is what opens them.
+func TestAuditReadersCanReadTheRunsTheAuditCites(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p := &workerShellScript{receipt: make(chan string, 2)}
+	s, err := harness.New(ctx, testConfig(t, true), harness.Dependencies{Provider: textResponse("ready"), Implementor: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: p}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Dispose(context.Background())
+	implementor := createWorker(t, s, roster.Implementor)
+	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor, Task: "Build it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := s.SubmitWork(ctx, implementor, work.SubmitRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Summary: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w, err = s.GetWork(ctx, s.Root(), w.ID); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		EvidenceRef string `json:"evidence_ref"`
+	}
+	if raw := await(t, p.receipt, "auditor shell receipt"); json.Unmarshal([]byte(raw), &receipt) != nil || receipt.EvidenceRef == "" {
+		t.Fatal(raw)
+	}
+	q := inspection.ProgressQuery{Mode: "evidence", EvidenceRef: receipt.EvidenceRef}
+	if _, err = s.ReadWorkProgress(ctx, implementor, q); !errors.Is(err, work.ErrForbidden) {
+		t.Fatal("implementor read an unrecorded audit's run:", err)
+	}
+	if _, err = s.SubmitAudit(ctx, audit.Assignee, work.AuditRequest{WorkTarget: work.WorkTarget{ID: audit.ID, ExpectedRevision: audit.Revision}, SubmissionID: sub.ID, Verdict: work.Fail, Summary: "broken", Findings: []work.Finding{{Description: "build output wrong", RequiredChange: "fix it", Verification: "Reference: " + receipt.EvidenceRef}}}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ReadWorkProgress(ctx, implementor, q)
+	if err != nil {
+		t.Fatal("implementor refused the run its audit cites:", err)
+	}
+	if page.WorkID != audit.ID || page.AssignedAtRevision != audit.AssignedAtRevision || len(page.Items) != 1 || !strings.Contains(string(page.Items[0]), "build-ok") {
+		t.Fatalf("evidence page: %+v", page)
+	}
+	if _, err = s.ReadWorkProgress(ctx, createWorker(t, s, roster.Implementor), q); !errors.Is(err, work.ErrForbidden) {
+		t.Fatal("outsider read the auditor's run:", err)
+	}
+}

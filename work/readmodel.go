@@ -56,6 +56,9 @@ func (v *ReadModel) GetSubmission(actor identity.ActorID, id SubmissionID) (Subm
 func (v *ReadModel) GetAudit(actor identity.ActorID, id AuditID) (Audit, error) {
 	return v.store.GetAudit(actor, id)
 }
+func (v *ReadModel) CanReadExecution(actor identity.ActorID, id ID) error {
+	return v.store.CanReadExecution(actor, id)
+}
 func (v *ReadModel) InspectWork(actor identity.ActorID, id ID) (Inspection, error) {
 	return v.store.InspectWork(actor, id)
 }

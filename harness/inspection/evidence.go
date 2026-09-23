@@ -24,7 +24,11 @@ func (v *View) GetExecutionEvidence(ctx context.Context, actor identity.ActorID,
 	if t.Execution == nil || t.FinishRecord == nil {
 		return ExecutionEvidence{}, work.ErrNotFound
 	}
-	if _, err := v.InspectWork(ctx, actor, work.ID(t.Execution.WorkID)); err != nil {
+	model, _, err := v.workModel(ctx)
+	if err != nil {
+		return ExecutionEvidence{}, err
+	}
+	if err := model.CanReadExecution(actor, work.ID(t.Execution.WorkID)); err != nil {
 		return ExecutionEvidence{}, err
 	}
 	e, err := v.ResolveRecord(ctx, eventlog.Record{Session: v.id, Sequence: t.FinishRecord.Sequence})
@@ -41,10 +45,10 @@ func (v *View) GetExecutionEvidence(ctx context.Context, actor identity.ActorID,
 	}
 	return ExecutionEvidence{Record: *t.FinishRecord, Execution: execution}, nil
 }
-func ReadExecutionEvidence(ctx context.Context, v *View, actor identity.ActorID, ref string) (work.ID, json.RawMessage, error) {
+func ReadExecutionEvidence(ctx context.Context, v *View, actor identity.ActorID, ref string) (work.ExecutionEvidence, json.RawMessage, error) {
 	e, err := v.GetExecutionEvidence(ctx, actor, ref)
 	if err != nil {
-		return "", nil, err
+		return work.ExecutionEvidence{}, nil, err
 	}
 	// Encode through the canonical codec: Go error interfaces are not JSON errors.
 	raw, err := json.Marshal(struct {
@@ -57,7 +61,8 @@ func ReadExecutionEvidence(ctx context.Context, v *View, actor identity.ActorID,
 		FinishedAt any              `json:"finished_at"`
 		Error      string           `json:"error,omitempty"`
 	}{e.Record, e.Execution.Activity.InvocationID, e.Execution.Agent, e.Execution.Activity.Call.Arguments, e.Execution.Activity.Result, e.Execution.Activity.StartedAt, e.Execution.Activity.FinishedAt, errorText(e.Execution.Activity.Err)})
-	return work.ID(e.Execution.Activity.Result.Execution.WorkID), raw, err
+	b := e.Execution.Activity.Result.Execution
+	return work.ExecutionEvidence{WorkID: work.ID(b.WorkID), AssignedAtRevision: work.Revision(b.AssignedAtRevision), Actor: b.Actor}, raw, err
 }
 func errorText(err error) string {
 	if err != nil {

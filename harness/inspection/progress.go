@@ -72,7 +72,11 @@ type ProgressReader struct {
 	Through   eventlog.Cursor // Optional trusted archive prefix; never supplied by model selectors.
 	key       [32]byte
 	Authorize func(context.Context, identity.ActorID, work.ID) error
-	Evidence  func(context.Context, *View, identity.ActorID, string) (work.ID, json.RawMessage, error)
+	// AuthorizeEvidence is the live check for runs bound to a work item, which
+	// audit readers may see without seeing the audit work itself. Without it
+	// evidence reads fall back to Authorize.
+	AuthorizeEvidence func(context.Context, identity.ActorID, work.ID) error
+	Evidence          func(context.Context, *View, identity.ActorID, string) (work.ExecutionEvidence, json.RawMessage, error)
 }
 
 func NewProgressReader(r *Reader) (*ProgressReader, error) {
@@ -250,12 +254,23 @@ func (p *ProgressReader) records(ctx context.Context, c *progressCursor) ([]json
 		if p.Evidence == nil {
 			return nil, 0, work.ErrNotFound
 		}
-		id, x, e := p.Evidence(ctx, v, c.Actor, c.Record)
+		b, x, e := p.Evidence(ctx, v, c.Actor, c.Record)
 		if e != nil {
 			return nil, 0, e
 		}
-		c.WorkID = id
-		items = []json.RawMessage{x}
+		c.WorkID = b.WorkID
+		authorize := p.AuthorizeEvidence
+		if authorize == nil {
+			authorize = p.Authorize
+		}
+		if authorize != nil {
+			if err := authorize(ctx, c.Actor, c.WorkID); err != nil {
+				return nil, 0, err
+			}
+		}
+		// The run's binding carries its assignment revision; the reader may
+		// be unable to inspect the work it is bound to.
+		return []json.RawMessage{x}, b.AssignedAtRevision, nil
 	default:
 		return nil, 0, work.ErrInvalid
 	}

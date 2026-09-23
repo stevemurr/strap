@@ -21,3 +21,29 @@ func (s *Store) NewExecutionRef() string {
 	defer s.mu.Unlock()
 	return s.mint("execution:")
 }
+
+// CanReadExecution reports whether actor may read the runs bound to work id.
+// Seeing the work is enough. A run bound to audit work is also readable by
+// whoever may read an audit that work recorded: a failing audit's verification
+// cites the auditor's runs, and the implementor handed that audit for repair
+// could read the audit but not the evidence it cited (medium-20,
+// eval-1790176980218248000).
+func (s *Store) CanReadExecution(actor identity.ActorID, id ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w, ok := s.works[id]
+	if !ok {
+		return s.missingWork(actor, id)
+	}
+	if w.visibleTo(actor) {
+		return nil
+	}
+	if w.Kind == AuditWork {
+		for _, a := range s.audits {
+			if a.WorkID == id && s.canReadAudit(actor, a) {
+				return nil
+			}
+		}
+	}
+	return ErrForbidden
+}

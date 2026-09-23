@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/stevemurr/strap/identity"
 )
 
 func TestReportChecksRecordedEvidenceAndPreservesInheritedBinding(t *testing.T) {
@@ -78,5 +80,37 @@ func TestUnknownReferencesNameTheirSubject(t *testing.T) {
 		Findings: []ProgressFindingDraft{{Claim: "retracted", Basis: Retracted, Supersedes: "finding-absent"}}})
 	if err == nil || !strings.Contains(err.Error(), "finding-absent") {
 		t.Fatalf("supersedes rejection: %v", err)
+	}
+}
+
+// A failing audit cites the auditor's runs in its verification. Whoever may
+// read that audit may read those runs; nobody else gains the audit work.
+func TestAuditReadersMayReadTheAuditorsRuns(t *testing.T) {
+	s, p, w := fixture(t)
+	w = ready(t, s, w)
+	sub, err := s.SubmitWork(w.Assignee, SubmitRequest{WorkTarget: target(w), Summary: "done", Evidence: []string{"test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aw := review(t, s, w.ID, sub.ID)
+	if err := s.CanReadExecution(w.Assignee, aw.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("implementor read runs of an audit still in progress: %v", err)
+	}
+	if _, err := s.SubmitAudit(aw.Assignee, AuditRequest{WorkTarget: target(aw), SubmissionID: sub.ID, Verdict: Fail, Summary: "fix", Findings: []Finding{{StepIDs: []StepID{p.Steps[0].ID}, Description: "bug", RequiredChange: "fix it", Verification: "execution:run0001"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, reader := range []string{string(w.Assignee), string(aw.Assignee), "root"} {
+		if err := s.CanReadExecution(identity.ActorID(reader), aw.ID); err != nil {
+			t.Fatalf("%s: %v", reader, err)
+		}
+	}
+	if err := s.CanReadExecution("outsider", aw.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("outsider: %v", err)
+	}
+	if err := s.CanReadExecution(w.Assignee, w.ID); err != nil {
+		t.Fatalf("seeing the work still grants its runs: %v", err)
+	}
+	if err := s.CanReadExecution(aw.Assignee, w.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("the rule widened reads of implementation runs: %v", err)
 	}
 }

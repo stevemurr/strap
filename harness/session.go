@@ -387,6 +387,13 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		_, err := s.GetWork(ctx, actor, id)
 		return err
 	}
+	s.progressReads.AuthorizeEvidence = func(ctx context.Context, actor identity.ActorID, id work.ID) error {
+		view, err := s.workView(ctx)
+		if err != nil {
+			return err
+		}
+		return view.CanReadExecution(actor, id)
+	}
 	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
 	// Auditors and the root read and inspect; only implementors change files.
 	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })

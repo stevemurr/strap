@@ -509,13 +509,19 @@ func (s *Store) GetAudit(actor identity.ActorID, id AuditID) (Audit, error) {
 	if !ok {
 		return Audit{}, ErrNotFound
 	}
+	if !s.canReadAudit(actor, a) {
+		return Audit{}, ErrForbidden
+	}
+	return a.Clone(), nil
+}
+func (s *Store) canReadAudit(actor identity.ActorID, a Audit) bool {
 	if s.canReadSubmissionIndependently(actor, s.submissions[a.SubmissionID]) {
-		return a.Clone(), nil
+		return true
 	}
 	for _, child := range s.works {
 		if child.RequestedByAuditID == a.ID && s.repairSource(child, actor, a.SubmissionID) {
-			return a.Clone(), nil
+			return true
 		}
 	}
-	return Audit{}, ErrForbidden
+	return false
 }
