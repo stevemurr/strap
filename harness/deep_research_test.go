@@ -21,6 +21,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/httpapi"
 	"github.com/stevemurr/strap/harness/inspection"
+	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/research"
 	"github.com/stevemurr/strap/roster"
@@ -64,26 +65,26 @@ func (p *deepModel) Submit(ctx context.Context, q provider.Request, _ provider.O
 		if obs.Source.ID == "" {
 			return emit(map[string]any{"action": "read", "url": obs.Hits[0].URL})
 		}
-		return emit(map[string]any{"action": "finish", "status": "complete", "findings": []any{map[string]any{"claim": "The sample measured 12 milliseconds.", "basis": "observed", "limitation": "", "evidence": []any{map[string]any{"source_id": obs.Source.ID, "quote": "The sample measured 12 milliseconds."}}}}})
+		return emit(map[string]any{"action": "finish", "status": "complete", "claims": []any{map[string]any{"claim": "The sample measured 12 milliseconds.", "basis": "observed", "limitation": "", "evidence": []any{map[string]any{"source_id": obs.Source.ID, "quote": "The sample measured 12 milliseconds."}}}}})
 	case strings.Contains(system, "Stage: reconcile\n"):
 		return emit(map[string]any{"questions": []any{}})
 	case strings.Contains(system, "Stage: synthesize\n"):
-		var fs []research.Finding
-		_ = json.Unmarshal(input["findings"], &fs)
-		return emit(map[string]any{"finding_ids": []string{fs[0].ID}, "summary_ids": []string{fs[0].ID}})
+		var fs []research.Claim
+		_ = json.Unmarshal(input["claims"], &fs)
+		return emit(map[string]any{"claim_ids": []string{fs[0].ID}, "summary_ids": []string{fs[0].ID}})
 	case strings.Contains(system, "Stage: verify\n"):
 		if p.verifying != nil {
 			p.once.Do(func() { close(p.verifying) })
 			<-ctx.Done()
 			return provider.Response{}, ctx.Err()
 		}
-		var fs []research.Finding
+		var fs []research.Claim
 		_ = json.Unmarshal(input["claims"], &fs)
-		return emit(map[string]any{"verdicts": []any{map[string]any{"finding_id": fs[0].ID, "verdict": "supported", "reason": "Exact measurement in retained source"}}})
+		return emit(map[string]any{"verdicts": []any{map[string]any{"claim_id": fs[0].ID, "verdict": "supported", "reason": "Exact measurement in retained source"}}})
 	case strings.Contains(system, "Stage: coverage\n"):
-		var fs []research.Finding
-		_ = json.Unmarshal(input["accepted_findings"], &fs)
-		return emit(map[string]any{"coverage": []any{map[string]any{"index": 0, "requirement": "Report the measurement", "status": "met", "finding_ids": []string{fs[0].ID}, "reason": "Measurement is cited"}}})
+		var fs []research.Claim
+		_ = json.Unmarshal(input["accepted_claims"], &fs)
+		return emit(map[string]any{"coverage": []any{map[string]any{"index": 0, "requirement": "Report the measurement", "status": "met", "claim_ids": []string{fs[0].ID}, "reason": "Measurement is cited"}}})
 	}
 	return provider.Response{}, fmt.Errorf("unexpected model stage")
 }
@@ -117,7 +118,7 @@ func (p *deepWorker) Submit(_ context.Context, q provider.Request, _ provider.Ob
 		}
 		return operation("deep_research", research.Request{WorkID: id, Question: "What did the sample measure?", SuccessCriteria: []string{"Report the measurement"}})
 	}
-	if result := lastResult(q); strings.Contains(result, "research-") {
+	if result := lastResult(q); strings.Contains(result, `"run_id":"run-`) {
 		select {
 		case p.receipt <- result:
 		default:
@@ -171,16 +172,20 @@ func TestDeepResearchDefaultsAndRetrievalAvailability(t *testing.T) {
 			if s.Config().DeepResearch.Enabled != tt.want || effective.DeepResearch.Enabled != tt.want {
 				t.Fatal("effective configuration does not reflect available retrieval")
 			}
-			registered := false
+			registered, reader := false, false
 			for _, def := range effective.Researcher.Tools {
 				registered = registered || def.Name == "deep_research"
+				reader = reader || def.Name == "get_research_run"
 			}
-			if registered != tt.want {
-				t.Fatalf("research tool registered = %v, want %v", registered, tt.want)
+			if registered != tt.want || reader != tt.want {
+				t.Fatalf("research tools registered = %v/%v, want %v", registered, reader, tt.want)
 			}
-			for _, def := range effective.Root.Tools {
-				if def.Name == "deep_research" {
-					t.Fatal("root received blocking research tool")
+			// Other roles read the delivered brief, never the researcher's runs.
+			for role, tools := range map[string][]provider.ToolDefinition{"root": effective.Root.Tools, "implementor": effective.Implementor.Tools, "auditor": effective.Auditor.Tools} {
+				for _, def := range tools {
+					if def.Name == "deep_research" || def.Name == "get_research_run" {
+						t.Fatalf("%s received %s", role, def.Name)
+					}
 				}
 			}
 		})
@@ -244,25 +249,25 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	}
 	receipt := await(t, worker.receipt, "deep research receipt")
 	var digest struct {
-		ID     string `json:"report_id"`
+		ID     string `json:"run_id"`
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(receipt), &digest); err != nil || digest.Status != "complete" {
 		t.Fatal(receipt, err)
 	}
 	var report research.Report
-	if err := json.Unmarshal(readDeep(t, s, research.ReadQuery{Mode: "report", ReportID: digest.ID, MaxBytes: 2048}), &report); err != nil {
+	if err := json.Unmarshal(readDeep(t, s, research.ReadQuery{Mode: "run", RunID: digest.ID, MaxBytes: 2048}), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Binding.WorkID != string(w.ID) || len(report.Findings) != 1 || report.Spend.ModelCalls != 7 {
+	if report.Binding.WorkID != string(w.ID) || len(report.Claims) != 1 || report.Spend.ModelCalls != 7 {
 		t.Fatalf("bad retained report: %+v", report)
 	}
-	first, err := s.ReadResearchReport(ctx, researcher, research.ReadQuery{Mode: "source", ReportID: digest.ID, SourceID: report.Sources[0].ID, MaxBytes: 2048})
+	first, err := s.ReadResearchReport(ctx, researcher, research.ReadQuery{Mode: "source", RunID: digest.ID, SourceID: report.Sources[0].ID, MaxBytes: 2048})
 	if err != nil || first.NextCursor == "" {
 		t.Fatal(first, err)
 	}
 	var source research.Source
-	if err := json.Unmarshal(readDeep(t, s, research.ReadQuery{Mode: "source", ReportID: digest.ID, SourceID: report.Sources[0].ID, MaxBytes: 2048}), &source); err != nil {
+	if err := json.Unmarshal(readDeep(t, s, research.ReadQuery{Mode: "source", RunID: digest.ID, SourceID: report.Sources[0].ID, MaxBytes: 2048}), &source); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(source.Text, "12 milliseconds") {
@@ -285,7 +290,7 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	}
 	for _, route := range []string{"research-view", "trace/research-view"} {
 		base := "/sessions/" + s.ID() + "/" + route + "?actor=" + url.QueryEscape(string(s.Root()))
-		w := call("GET", base+"&mode=source&report_id="+digest.ID+"&source_id="+source.ID+"&max_bytes=2048")
+		w := call("GET", base+"&mode=source&run_id="+digest.ID+"&source_id="+source.ID+"&max_bytes=2048")
 		var page inspection.ResearchPage
 		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || page.NextCursor == "" {
 			t.Fatal(w.Code, w.Body.String(), err)
@@ -296,7 +301,7 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 		if w := call("GET", base+"&mode=continue&cursor="+url.QueryEscape(page.NextCursor+"tampered")); w.Code != 400 {
 			t.Fatal("tampered cursor accepted", w.Code)
 		}
-		if w := call("GET", base+"&mode=report&report_id="+digest.ID+"&unknown=value"); w.Code != 400 {
+		if w := call("GET", base+"&mode=run&run_id="+digest.ID+"&unknown=value"); w.Code != 400 {
 			t.Fatal("unknown selector accepted", w.Code)
 		}
 	}
@@ -310,8 +315,12 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	if err = s.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if page, err := s.ReadResearchReport(ctx, s.Root(), research.ReadQuery{Mode: "report", ReportID: digest.ID}); err != nil || !strings.Contains(string(page.Data), "12 milliseconds") {
+	if page, err := s.ReadResearchReport(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: digest.ID}); err != nil || !strings.Contains(string(page.Data), "12 milliseconds") {
 		t.Fatal("report lost after execution close", page, err)
+	}
+	// A ledger ID in run_id names its own reader instead of a bare not-found.
+	if _, err := s.ReadResearchReport(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: "brief-1"}); !errors.Is(err, projection.ErrNotFound) || !strings.Contains(err.Error(), "read it with get_research_brief") {
+		t.Fatal(err)
 	}
 	calls := model.calls.Load()
 	archive, err := inspection.OpenJSONL(ctx, cfg.Events.JSONLPath)
@@ -323,7 +332,7 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := reader.Read(ctx, s.Root(), research.ReadQuery{Mode: "report", ReportID: digest.ID})
+	page, err := reader.Read(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: digest.ID})
 	if err != nil || !strings.Contains(string(page.Data), "12 milliseconds") {
 		t.Fatal(page, err)
 	}
@@ -368,7 +377,7 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err = partialReader.Read(ctx, s.Root(), research.ReadQuery{Mode: "report", ReportID: digest.ID})
+	page, err = partialReader.Read(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: digest.ID})
 	if err != nil || !strings.Contains(string(page.Data), `"status":"incomplete"`) {
 		t.Fatal(string(page.Data), err)
 	}
@@ -432,21 +441,21 @@ func TestDeepResearchCancelReassignAndInterrupt(t *testing.T) {
 			read := func(q research.ReadQuery) (inspection.ResearchPage, error) { return reader.Read(ctx, s.Root(), q) }
 			data := readDeepPages(t, read, research.ReadQuery{Mode: "runs", WorkID: string(w.ID)})
 			var runs []struct {
-				ID     string `json:"report_id"`
+				ID     string `json:"run_id"`
 				Status string `json:"status"`
 			}
 			if err = json.Unmarshal(data, &runs); err != nil || len(runs) != 1 {
 				t.Fatal(string(data), err)
 			}
 			var report research.Report
-			if err = json.Unmarshal(readDeepPages(t, read, research.ReadQuery{Mode: "report", ReportID: runs[0].ID}), &report); err != nil {
+			if err = json.Unmarshal(readDeepPages(t, read, research.ReadQuery{Mode: "run", RunID: runs[0].ID}), &report); err != nil {
 				t.Fatal(err)
 			}
 			expected := "cancelled"
 			if mode == "reassign" {
 				expected = "reassigned"
 			}
-			if report.Status != "partial" || report.StopReason != expected || len(report.Sources) != 1 || len(report.Findings) != 0 || report.Binding.Actor != string(researcher) {
+			if report.Status != "partial" || report.StopReason != expected || len(report.Sources) != 1 || len(report.Claims) != 0 || report.Binding.Actor != string(researcher) {
 				t.Fatalf("bad cancellation result: %+v", report)
 			}
 		})

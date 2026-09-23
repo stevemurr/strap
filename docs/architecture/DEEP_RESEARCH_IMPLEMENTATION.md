@@ -43,35 +43,40 @@ operations, with no arbitrary tool dispatch, shell, files, inbox or delegation.
 Malformed stage JSON receives at most one repair; transport failures do not
 retry automatically. Failed scouts do not discard evidence from other scouts.
 
-The host assigns source and finding IDs. A citation must contain a unique exact
+The host assigns source and claim IDs. A citation must contain a unique exact
 quote from retained text, with a SHA-256 snapshot hash and UTF-8 byte offsets.
 Verification receives claims and original excerpts with surrounding text, not
-scout reasoning. Unsupported claims are removed from the final findings; inferred
+scout reasoning. Unsupported claims are removed from the final claims; inferred
 conclusions require supported premises and an explicit limitation. Summary and
 recommendation text is assembled from verified claim IDs, with no unverified
 rewrite afterward. A second call to the same model is still fallible.
 
 `tool.Result.Content` is a digest capped at 12 KiB. `Captured` and the final
 research event retain the full bounded report; source bodies are separate log
-records. Checkpoints can include unverified findings and must not be treated as
-final conclusions. Partial reports keep verified findings when available and
+records. Checkpoints can include unverified claims and must not be treated as
+final conclusions. Partial reports keep verified claims when available and
 state unmet criteria, rejected claims, missing usage and stopping reasons.
 
-The researcher forwards selected evidence through `report_work_progress`, then
-uses its ledger-issued finding IDs with `submit_research`. The engine does not
-deliver work or write ledger findings automatically. Research finding IDs are
-local to a report and cannot substitute for ledger receipts.
+The researcher records each claim it delivers through `report_work_progress`,
+then cites the ledger finding IDs that call returns in `submit_research`. The
+engine does not deliver work or write ledger findings automatically.
+
+Model-facing names keep each ID kind distinct: a deep research run is `run-…`
+(`run_id`) and holds claims (`claim_id`); the work ledger issues progress
+reports (`report-…`), findings (`finding-…`) and briefs (`brief-…`). Only the
+researcher holds `get_research_run`; every other role reads the delivered brief.
+A not-found read given another kind's ID names that kind's reader.
 
 ## Readers and recovery
 
-`get_research_report`, `Session.ReadResearchReport`, and HTTP
+`get_research_run`, `Session.ReadResearchReport`, and HTTP
 `/sessions/{id}/research-view` share these selectors:
 
 | Mode | Required selector |
 | --- | --- |
 | `runs` | `work_id` |
-| `report`, `sources` | `report_id` |
-| `source` | `report_id`, `source_id` |
+| `run`, `sources` | `run_id` |
+| `source` | `run_id`, `source_id` |
 | `continue` | only `cursor` |
 
 Initial pages accept `max_bytes` from 2–32 KiB (default 16 KiB). Large JSON values
@@ -86,7 +91,8 @@ Readers remain available after execution closes, until session disposal.
 JSONL archives preserve the feature across process exit; inspection never
 restarts scouts. A log without a terminal research event displays `incomplete`
 and the last accepted checkpoint. Accepted-log schema 6 adds these events, while
-the reader continues to accept schemas 2–5.
+the reader continues to accept schemas 2–5. Research records carry run schema 2; schema 1 runs from earlier builds
+fail validation and are not readable.
 
 ## Resource limits
 

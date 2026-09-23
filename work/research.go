@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/stevemurr/strap/identity"
@@ -144,8 +143,8 @@ func (s *Store) GetResearchBrief(actor identity.ActorID, id ResearchBriefID) (Re
 	defer s.mu.Unlock()
 	b, ok := s.researchBriefs[id]
 	if !ok {
-		if strings.HasPrefix(string(id), "report-") {
-			return ResearchBrief{}, fmt.Errorf("%w: %s is a progress report id, not a brief id; %s", ErrNotFound, id, s.knownBriefs(actor))
+		if hint, ok := Misrouted(string(id), "brief-"); ok {
+			return ResearchBrief{}, fmt.Errorf("%w: %s; %s", ErrNotFound, hint, s.knownBriefs(actor))
 		}
 		return ResearchBrief{}, fmt.Errorf("%w: research brief %s; %s", ErrNotFound, id, s.knownBriefs(actor))
 	}

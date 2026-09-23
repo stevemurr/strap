@@ -88,7 +88,7 @@ type run struct {
 	sourceMu            sync.Mutex
 	sources             map[string]Source
 	urls                map[string]*fetchFlight
-	findings            map[string]Finding
+	claims              map[string]Claim
 	limitations         []string
 	recordMu            sync.Mutex
 	sequence, completed uint64
@@ -127,7 +127,7 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 	var nonce [16]byte
 	rand.Read(nonce[:])
 	policy, _ := newPolicy(req.AllowDomains, req.BlockDomains)
-	r := &run{engine: e, request: clone(req), binding: b, deps: deps, limits: limits, policy: policy, ctx: runctx, cancel: cancel, id: "research-" + hex.EncodeToString(nonce[:]), started: started, deadline: deadline, sources: map[string]Source{}, urls: map[string]*fetchFlight{}, findings: map[string]Finding{}}
+	r := &run{engine: e, request: clone(req), binding: b, deps: deps, limits: limits, policy: policy, ctx: runctx, cancel: cancel, id: "run-" + hex.EncodeToString(nonce[:]), started: started, deadline: deadline, sources: map[string]Source{}, urls: map[string]*fetchFlight{}, claims: map[string]Claim{}}
 	initial := boundReport(r.snapshot(), e.config.MaxReportBytes)
 	initial.Status = "running"
 	if err := r.emit(Event{Kind: "started", Stage: "plan", Report: &initial}, false); err != nil {
@@ -138,7 +138,7 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 	runErr := r.investigate(acquire)
 	stopAcquire()
 	report := r.snapshot()
-	if runctx.Err() == nil && len(report.Findings) > 0 {
+	if runctx.Err() == nil && len(report.Claims) > 0 {
 		var err error
 		report, err = r.finish(runctx, report)
 		if err != nil {
@@ -148,16 +148,16 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 	if runctx.Err() != nil {
 		runErr = errors.Join(runErr, context.Cause(runctx))
 	}
-	// Only independently checked findings belong in a terminal report's findings.
-	var accepted []Finding
-	for _, f := range report.Findings {
+	// Only independently checked claims belong in a terminal report's claims.
+	var accepted []Claim
+	for _, f := range report.Claims {
 		if supported(f) {
 			accepted = append(accepted, f)
 		} else {
 			report.Rejected = append(report.Rejected, f)
 		}
 	}
-	report.Findings = accepted
+	report.Claims = accepted
 	report.FinishedAt = time.Now().UTC()
 	report.Spend = r.accounting()
 	report.Spend.Elapsed = report.FinishedAt.Sub(started)
@@ -180,7 +180,7 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 		report.Limitations = append(report.Limitations, clip(runErr.Error(), 2048))
 	}
 	if len(accepted) > 0 && strings.TrimSpace(report.Summary) == "" {
-		summaries := map[string]Finding{}
+		summaries := map[string]Claim{}
 		ids := []string{}
 		for _, f := range accepted {
 			summaries[f.ID] = f
@@ -189,7 +189,7 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 		report.Summary = joinClaims(ids, summaries)
 	}
 	if len(accepted) == 0 {
-		report.Summary = "No verified conclusion was established. Retained sources and unresolved findings are available for inspection."
+		report.Summary = "No verified conclusion was established. Retained sources and unresolved claims are available for inspection."
 		report.Recommendation = ""
 	}
 	report = boundReport(report, e.config.MaxReportBytes)
@@ -248,11 +248,11 @@ func (r *run) snapshot() Report {
 		s.Text = ""
 		p.Sources = append(p.Sources, s)
 	}
-	for _, f := range r.findings {
-		p.Findings = append(p.Findings, clone(f))
+	for _, f := range r.claims {
+		p.Claims = append(p.Claims, clone(f))
 	}
 	sort.Slice(p.Sources, func(i, j int) bool { return p.Sources[i].ID < p.Sources[j].ID })
-	sort.Slice(p.Findings, func(i, j int) bool { return p.Findings[i].ID < p.Findings[j].ID })
+	sort.Slice(p.Claims, func(i, j int) bool { return p.Claims[i].ID < p.Claims[j].ID })
 	for i, s := range append(append([]string{}, r.request.SuccessCriteria...), r.request.MustCover...) {
 		p.Coverage = append(p.Coverage, Coverage{Index: i, Requirement: s, Status: "unmet", Reason: "Not yet verified"})
 	}
@@ -316,12 +316,12 @@ func boundReport(p Report, limit int) Report {
 	p.Disagreements = nil
 	p.OpenQuestions = nil
 	p.Rejected = nil
-	p.Findings = nil
+	p.Claims = nil
 	p.Limitations = []string{"Full report omitted at the report byte limit; source records remain available."}
 	for i := range p.Coverage {
 		p.Coverage[i].Status = "unmet"
-		p.Coverage[i].FindingIDs = nil
-		p.Coverage[i].Reason = "Findings omitted at report limit"
+		p.Coverage[i].ClaimIDs = nil
+		p.Coverage[i].Reason = "Claims omitted at report limit"
 	}
 	for {
 		raw, _ = json.Marshal(p)
@@ -342,7 +342,7 @@ func boundReport(p Report, limit int) Report {
 // Digest is model-facing and intentionally excludes source bodies and rejected claims.
 func Digest(p Report) json.RawMessage {
 	v := struct {
-		ID         string     `json:"report_id"`
+		ID         string     `json:"run_id"`
 		Status     string     `json:"status"`
 		StopReason string     `json:"stop_reason"`
 		Summary    string     `json:"summary"`
@@ -350,7 +350,7 @@ func Digest(p Report) json.RawMessage {
 		Coverage   []Coverage `json:"coverage"`
 		Spend      Spend      `json:"spend"`
 		Truncated  bool       `json:"truncated"`
-	}{p.ID, p.Status, p.StopReason, clip(p.Summary, 4096), "Use get_research_report with mode report or sources and this report_id. Findings are drafts; obtain ledger finding IDs from report_work_progress before submit_research.", p.Coverage, p.Spend, false}
+	}{p.ID, p.Status, p.StopReason, clip(p.Summary, 4096), "Read claims and sources with get_research_run using this run_id. To deliver a claim, record it with report_work_progress; submit_research cites the finding IDs that call returns.", p.Coverage, p.Spend, false}
 	for {
 		raw, _ := json.Marshal(v)
 		if len(raw) <= 12<<10 {
@@ -368,13 +368,13 @@ func Digest(p Report) json.RawMessage {
 func requirementInput(r *run) map[string]any {
 	return map[string]any{"question": r.request.Question, "context": r.request.Context, "success_criteria": r.request.SuccessCriteria, "must_cover": r.request.MustCover}
 }
-func supported(f Finding) bool {
+func supported(f Claim) bool {
 	return f.Basis == "observed" && f.Verdict == "supported" || f.Basis == "inferred" && f.Verdict == "premises_supported"
 }
-func joinClaims(ids []string, findings map[string]Finding) string {
+func joinClaims(ids []string, claims map[string]Claim) string {
 	var lines []string
 	for _, id := range ids {
-		if f, ok := findings[id]; ok && supported(f) {
+		if f, ok := claims[id]; ok && supported(f) {
 			s := f.Claim
 			if f.Basis == "inferred" {
 				s = "Inference: " + s + " (" + f.Limitation + ")"

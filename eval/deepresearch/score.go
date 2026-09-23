@@ -11,7 +11,7 @@ import (
 )
 
 // Labels must come from a human or independent judge, never Report's verdicts.
-// Claim keys are finding IDs; coverage keys are the original requirement indexes.
+// Claim keys are claim IDs; coverage keys are the original requirement indexes.
 type Labels struct {
 	Claims   map[string]bool `json:"claims"`
 	Coverage map[int]bool    `json:"coverage"`
@@ -44,7 +44,7 @@ func Evaluate(report research.Report, sources []research.Source, requirements in
 		byID[src.ID] = src
 	}
 	faithful, grounded := 0, 0
-	for _, f := range report.Findings {
+	for _, f := range report.Claims {
 		allValid := len(f.Evidence) > 0
 		for _, c := range f.Evidence {
 			s.CitationValidity.Denominator++
@@ -75,10 +75,10 @@ func Evaluate(report research.Report, sources []research.Source, requirements in
 			}
 		}
 	}
-	s.ClaimLabels.Denominator = len(report.Findings)
-	if s.ClaimLabels.Numerator == len(report.Findings) {
-		s.Faithfulness = &Ratio{faithful, max(1, len(report.Findings))}
-		s.Groundedness = &Ratio{grounded, max(1, len(report.Findings))}
+	s.ClaimLabels.Denominator = len(report.Claims)
+	if s.ClaimLabels.Numerator == len(report.Claims) {
+		s.Faithfulness = &Ratio{faithful, max(1, len(report.Claims))}
+		s.Groundedness = &Ratio{grounded, max(1, len(report.Claims))}
 	}
 	covered, labeled := 0, 0
 	for i := 0; i < requirements; i++ {

@@ -341,7 +341,10 @@ func (s *Store) GetWorkProgressReport(actor identity.ActorID, id ProgressReportI
 	defer s.mu.Unlock()
 	r, ok := s.progressReports[id]
 	if !ok {
-		return WorkProgressReport{}, ErrNotFound
+		if hint, ok := Misrouted(string(id), "report-"); ok {
+			return WorkProgressReport{}, fmt.Errorf("%w: %s", ErrNotFound, hint)
+		}
+		return WorkProgressReport{}, fmt.Errorf("%w: progress report %s; report IDs come from report_work_progress receipts and work progress notices", ErrNotFound, id)
 	}
 	w := s.works[r.WorkID]
 	if !w.visibleTo(actor) {
@@ -354,7 +357,10 @@ func (s *Store) GetProgressFinding(actor identity.ActorID, id ProgressFindingID)
 	defer s.mu.Unlock()
 	f, ok := s.progressFindings[id]
 	if !ok {
-		return ProgressFinding{}, ErrNotFound
+		if hint, ok := Misrouted(string(id), "finding-"); ok {
+			return ProgressFinding{}, fmt.Errorf("%w: %s", ErrNotFound, hint)
+		}
+		return ProgressFinding{}, fmt.Errorf("%w: finding %s; finding IDs are listed in research briefs and by get_work_progress mode findings", ErrNotFound, id)
 	}
 	w := s.works[f.WorkID]
 	if !w.visibleTo(actor) {

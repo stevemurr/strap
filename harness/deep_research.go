@@ -68,7 +68,7 @@ func (s *Session) ReadResearchReport(ctx context.Context, actor identity.ActorID
 	return (&inspection.ResearchReader{ProgressReader: &continuation}).Read(ctx, actor, q)
 }
 func (s *Session) researchReadTool() tool.Tool {
-	return tool.GetDeepResearchReport(func(ctx context.Context, c tool.Call, q research.ReadQuery) (tool.Result, error) {
+	return tool.GetResearchRun(func(ctx context.Context, c tool.Call, q research.ReadQuery) (tool.Result, error) {
 		p, err := s.ReadResearchReport(ctx, c.Actor, q)
 		if err != nil {
 			return tool.Result{}, err

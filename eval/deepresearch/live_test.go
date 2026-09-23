@@ -21,13 +21,13 @@ import (
 type draftRecorder struct {
 	provider.Provider
 	mu     sync.Mutex
-	claims []research.Finding
+	claims []research.Claim
 }
 
 func (p *draftRecorder) Submit(ctx context.Context, q provider.Request, o provider.Observer) (provider.Response, error) {
 	if len(q.Messages) > 1 && strings.Contains(q.Messages[0].Content.Text(), "Stage: verify\n") {
 		var input struct {
-			Claims []research.Finding `json:"claims"`
+			Claims []research.Claim `json:"claims"`
 		}
 		if json.Unmarshal([]byte(q.Messages[1].Content.Text()), &input) == nil {
 			p.mu.Lock()
@@ -111,7 +111,7 @@ func TestLiveFrozenCorpus(t *testing.T) {
 						return nil
 					}})
 					draft := report
-					draft.Findings = model.claims
+					draft.Claims = model.claims
 					artifact := map[string]any{"fixture": fixture, "model": cfg.Model, "generation": cfg.Generation, "scouts": scouts, "repetition": repetition, "config": limits, "report": report, "events": events, "score": Evaluate(report, sources, len(fixture.Criteria), Labels{}), "pre_verification_findings": model.claims, "pre_verification_score": Evaluate(draft, sources, len(fixture.Criteria), Labels{})}
 					if runErr != nil {
 						artifact["error"] = runErr.Error()

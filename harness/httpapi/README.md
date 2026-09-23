@@ -52,7 +52,7 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 | `GET /plans/{plan}?actor=...` | Plan snapshot |
 | `GET /submissions/{submission}?actor=...` | Submission snapshot |
 | `GET /audits/{audit}?actor=...` | Audit snapshot |
-| `GET /research-view?actor=...&mode=runs&work_id=...` | Deep research runs; `mode=report` or `sources` requires `report_id`; `mode=source` also requires `source_id` |
+| `GET /research-view?actor=...&mode=runs&work_id=...` | Deep research runs; `mode=run` or `sources` requires `run_id`; `mode=source` also requires `source_id` |
 | `GET /events?after=N&limit=N&max_bytes=N` | Finite retained page, accepted head, exclusive cursor and seal outcome |
 | `GET /outputs/{agent}/{call}` | Output metadata, applied cursor and source health |
 | `GET /outputs/{agent}/{call}/text?channel=content|reasoning&through=N&offset=N&max_bytes=N` | UTF-8 text page at a fixed session prefix; `through` is required |
@@ -110,7 +110,8 @@ Schema 3 retains `output_started`, `output_delta`, `output_finished`,
 Output inspection and finish records include `reasoning_bytes`; existing
 `text_bytes` / `bytes` fields still count answer content. Text reads default to
 `content` and accept `channel=reasoning`; an unknown channel returns 400.
-Reasoning is retained for inspection and never added to model conversation history. Full payload framing, correlation, cancellation, archive compatibility,
+Successful assistant history includes reasoning separately from answer content;
+failed/canceled reasoning remains inspection-only. Full payload framing, correlation, cancellation, archive compatibility,
 and Go subscription examples are specified in [the recovery contract](../RECOVERY.md).
 
 Run `go test -race ./harness/httpapi` for the direct/HTTP audit-repair parity,

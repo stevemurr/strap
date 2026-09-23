@@ -44,7 +44,10 @@ type ResearchPage struct {
 func (v *View) ResearchRun(ctx context.Context, actor identity.ActorID, id string) (projection.ResearchView, error) {
 	run, err := v.projection.Research(id)
 	if err != nil {
-		return run, err
+		if hint, ok := work.Misrouted(id, "run-"); ok {
+			return run, fmt.Errorf("%w: %s", err, hint)
+		}
+		return run, fmt.Errorf("%w: research run %s; list your runs with mode runs and your work_id", err, id)
 	}
 	if _, err = v.InspectWork(ctx, actor, work.ID(run.Binding.WorkID)); err != nil {
 		return projection.ResearchView{}, err
@@ -127,7 +130,7 @@ func (v *View) ResearchSource(ctx context.Context, actor identity.ActorID, id, s
 func (p *ResearchReader) Read(ctx context.Context, actor identity.ActorID, q research.ReadQuery) (ResearchPage, error) {
 	var c progressCursor
 	if q.Mode == "continue" {
-		if q.Cursor == "" || q.WorkID != "" || q.ReportID != "" || q.SourceID != "" || q.MaxBytes != 0 {
+		if q.Cursor == "" || q.WorkID != "" || q.RunID != "" || q.SourceID != "" || q.MaxBytes != 0 {
 			return ResearchPage{}, work.ErrInvalid
 		}
 		var err error
@@ -150,11 +153,11 @@ func (p *ResearchReader) Read(ctx context.Context, actor identity.ActorID, q res
 			return ResearchPage{}, work.ErrInvalid
 		}
 		if q.Mode == "runs" {
-			if q.WorkID == "" || q.ReportID != "" || q.SourceID != "" {
+			if q.WorkID == "" || q.RunID != "" || q.SourceID != "" {
 				return ResearchPage{}, work.ErrInvalid
 			}
-		} else if q.Mode == "report" || q.Mode == "sources" || q.Mode == "source" {
-			if q.WorkID != "" || q.ReportID == "" || q.Mode == "source" && q.SourceID == "" || q.Mode != "source" && q.SourceID != "" {
+		} else if q.Mode == "run" || q.Mode == "sources" || q.Mode == "source" {
+			if q.WorkID != "" || q.RunID == "" || q.Mode == "source" && q.SourceID == "" || q.Mode != "source" && q.SourceID != "" {
 				return ResearchPage{}, work.ErrInvalid
 			}
 		} else {
@@ -168,7 +171,7 @@ func (p *ResearchReader) Read(ctx context.Context, actor identity.ActorID, q res
 		if p.Through != (eventlog.Cursor{}) {
 			through = p.Through
 		}
-		c = progressCursor{Session: through.Session, Prefix: through.Sequence, Actor: actor, Mode: "research/" + q.Mode, WorkID: work.ID(q.WorkID), Record: q.ReportID, Budget: budget}
+		c = progressCursor{Session: through.Session, Prefix: through.Sequence, Actor: actor, Mode: "research/" + q.Mode, WorkID: work.ID(q.WorkID), Record: q.RunID, Budget: budget}
 		if q.Mode == "source" {
 			c.Record += "/" + q.SourceID
 		}
@@ -195,7 +198,7 @@ func (p *ResearchReader) Read(ctx context.Context, actor identity.ActorID, q res
 	switch mode {
 	case "runs":
 		value, err = view.ResearchRuns(ctx, actor, c.WorkID)
-	case "report":
+	case "run":
 		value, err = view.ResearchReport(ctx, actor, id)
 	case "source":
 		value, err = view.ResearchSource(ctx, actor, id, source)
@@ -266,13 +269,13 @@ func (p *ResearchReader) Read(ctx context.Context, actor identity.ActorID, q res
 }
 
 func ResearchQueryFromValues(v url.Values) (research.ReadQuery, error) {
-	q := research.ReadQuery{Mode: v.Get("mode"), WorkID: v.Get("work_id"), ReportID: v.Get("report_id"), SourceID: v.Get("source_id"), Cursor: v.Get("cursor")}
+	q := research.ReadQuery{Mode: v.Get("mode"), WorkID: v.Get("work_id"), RunID: v.Get("run_id"), SourceID: v.Get("source_id"), Cursor: v.Get("cursor")}
 	for k, x := range v {
 		if len(x) != 1 || x[0] == "" {
 			return q, work.ErrInvalid
 		}
 		switch k {
-		case "actor", "mode", "work_id", "report_id", "source_id", "cursor", "max_bytes":
+		case "actor", "mode", "work_id", "run_id", "source_id", "cursor", "max_bytes":
 		default:
 			return q, work.ErrInvalid
 		}

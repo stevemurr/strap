@@ -42,7 +42,7 @@ func (s *Store) GetWorkProgress(actor identity.ActorID, id ID) (WorkProgress, er
 	defer s.mu.Unlock()
 	w, ok := s.works[id]
 	if !ok {
-		return WorkProgress{}, ErrNotFound
+		return WorkProgress{}, s.missingWork(actor, id)
 	}
 	if !w.visibleTo(actor) {
 		return WorkProgress{}, ErrForbidden
@@ -89,7 +89,7 @@ func (s *Store) ProgressReports(actor identity.ActorID, id ID) ([]WorkProgressRe
 	defer s.mu.Unlock()
 	w, ok := s.works[id]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, s.missingWork(actor, id)
 	}
 	if !w.visibleTo(actor) {
 		return nil, ErrForbidden

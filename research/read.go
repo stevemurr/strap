@@ -5,7 +5,7 @@ package research
 type ReadQuery struct {
 	Mode     string `json:"mode"`
 	WorkID   string `json:"work_id,omitempty"`
-	ReportID string `json:"report_id,omitempty"`
+	RunID    string `json:"run_id,omitempty"`
 	SourceID string `json:"source_id,omitempty"`
 	Cursor   string `json:"cursor,omitempty"`
 	MaxBytes int    `json:"max_bytes,omitempty"`

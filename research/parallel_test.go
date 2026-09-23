@@ -43,7 +43,7 @@ func TestParallelScoutFailureKeepsEvidenceAndDeduplicatesRedirects(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	report, err := e.Run(ctx, testBinding(), testRequest(), Dependencies{Web: web, Record: func(_ context.Context, e Event) error { events = append(events, e); return nil }})
-	if err != nil || report.Status != "partial" || len(report.Findings) != 1 || len(report.Sources) != 1 || web.fetches.Load() != 2 || report.Spend.FetchSuccesses != 2 {
+	if err != nil || report.Status != "partial" || len(report.Claims) != 1 || len(report.Sources) != 1 || web.fetches.Load() != 2 || report.Spend.FetchSuccesses != 2 {
 		t.Fatalf("%+v %v", report, err)
 	}
 	sources := 0

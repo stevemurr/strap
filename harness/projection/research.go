@@ -13,10 +13,11 @@ import (
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/research"
 	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/work"
 )
 
 type ResearchView struct {
-	ID            string                     `json:"report_id"`
+	ID            string                     `json:"run_id"`
 	Binding       research.Binding           `json:"binding"`
 	Sequence      uint64                     `json:"sequence"`
 	StartedAt     time.Time                  `json:"started_at"`
@@ -55,7 +56,7 @@ func (p *Projector) applyResearch(rec eventlog.Record, framed bool) (func(), err
 		return nil, errors.New("research record binding mismatch")
 	}
 	key := fmt.Sprintf("%s/%d", e.Binding.WorkID, e.Binding.Assignment)
-	if p.bindings[key] != identity.ActorID(e.Binding.Actor) || p.registrations[identity.ActorID(e.Binding.Actor)].Role != roster.Researcher {
+	if p.bindings[key] != identity.ActorID(e.Binding.Actor) || p.workViews[work.ID(e.Binding.WorkID)].Kind != work.Research || p.registrations[identity.ActorID(e.Binding.Actor)].Role != roster.Researcher {
 		return nil, errors.New("research without accepted assignment")
 	}
 	v, exists := p.researchRuns[e.RunID]

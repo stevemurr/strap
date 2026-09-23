@@ -16,7 +16,7 @@ func TestScoringSeparatesCitationValidityFromSupport(t *testing.T) {
 	if len(source.Text) != 16 {
 		t.Fatal("unexpected fixture length")
 	}
-	p := research.Report{ID: "report", Findings: []research.Finding{{ID: "claim-1", Claim: "Measured: 99 ms.", Verdict: "supported", Evidence: []research.Citation{ref}}}}
+	p := research.Report{ID: "report", Claims: []research.Claim{{ID: "claim-1", Claim: "Measured: 99 ms.", Verdict: "supported", Evidence: []research.Citation{ref}}}}
 	ungraded := Evaluate(p, []research.Source{source}, 1, Labels{})
 	if ungraded.Faithfulness != nil || ungraded.Groundedness != nil || ungraded.Coverage != nil || ungraded.CitationValidity.Numerator != 1 {
 		t.Fatal(ungraded)
@@ -25,12 +25,12 @@ func TestScoringSeparatesCitationValidityFromSupport(t *testing.T) {
 	if graded.CitationValidity.Numerator != 1 || graded.Faithfulness.Numerator != 0 || graded.Groundedness.Numerator != 0 || graded.Coverage.Numerator != 0 {
 		t.Fatal(graded)
 	}
-	p.Findings[0].Evidence[0].SourceID = "invented"
+	p.Claims[0].Evidence[0].SourceID = "invented"
 	missing := Evaluate(p, []research.Source{source}, 1, Labels{Claims: map[string]bool{"claim-1": true}})
 	if missing.CitationValidity.Numerator != 0 || missing.Groundedness.Numerator != 0 {
 		t.Fatal(missing)
 	}
-	p.Findings = nil
+	p.Claims = nil
 	empty := Evaluate(p, nil, 1, Labels{})
 	if empty.Groundedness.Numerator != 0 || empty.Groundedness.Denominator != 1 || empty.Coverage != nil {
 		t.Fatal(empty)

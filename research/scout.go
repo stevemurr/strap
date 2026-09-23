@@ -51,7 +51,7 @@ func (r *run) investigate(ctx context.Context) error {
 	}
 	var runErrors []error
 	for round := 0; round <= r.limits.Rounds; round++ {
-		before := len(r.snapshot().Findings)
+		before := len(r.snapshot().Claims)
 		if err := r.runScouts(ctx, p.Questions); err != nil {
 			runErrors = append(runErrors, err)
 		}
@@ -64,12 +64,12 @@ func (r *run) investigate(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return errors.Join(append(runErrors, ctx.Err())...)
 		}
-		if round == r.limits.Rounds || len(snap.Findings) == before {
+		if round == r.limits.Rounds || len(snap.Claims) == before {
 			break
 		}
 		input := requirementInput(r)
 		input["limit"] = r.limits.Subquestions
-		input["findings"] = snap.Findings
+		input["claims"] = snap.Claims
 		input["limitations"] = snap.Limitations
 		p, err = stage[plan](ctx, r, "reconcile", planShape+" Propose follow-up only for important unanswered criteria or unresolved conflicting sources. Do not repeat completed searches.", input, false, func(p plan) error { return validatePlan(p, r.limits.Subquestions) })
 		if err != nil {
@@ -132,12 +132,12 @@ type scoutAction struct {
 	Action      string      `json:"action"`
 	Query       string      `json:"query"`
 	URL         string      `json:"url"`
-	Findings    []candidate `json:"findings"`
+	Claims      []candidate `json:"claims"`
 	Status      string      `json:"status"`
 	Limitations []string    `json:"limitations"`
 }
 
-const scoutShape = `{"action":"search|read|finish","query":"search terms or empty","url":"a URL from the supplied hits/links or empty","findings":[{"claim":"one atomic claim","basis":"observed|inferred","evidence":[{"source_id":"provided source_id","quote":"short exact unique excerpt"}],"limitation":"required for inference"}],"status":"complete|partial|failed or empty while continuing","limitations":[]} Extract evidence from the last observation before choosing the next action. Never use search snippets as evidence. Finish when the subquestion is answered or no useful next step remains. Quotations must be 1..1000 UTF-8 bytes and unique within the source. At most 16 findings per action, 8 references per finding. Inferred recommendations must state assumptions and limitations.`
+const scoutShape = `{"action":"search|read|finish","query":"search terms or empty","url":"a URL from the supplied hits/links or empty","claims":[{"claim":"one atomic claim","basis":"observed|inferred","evidence":[{"source_id":"provided source_id","quote":"short exact unique excerpt"}],"limitation":"required for inference"}],"status":"complete|partial|failed or empty while continuing","limitations":[]} Extract evidence from the last observation before choosing the next action. Never use search snippets as evidence. Finish when the subquestion is answered or no useful next step remains. Quotations must be 1..1000 UTF-8 bytes and unique within the source. At most 16 claims per action, 8 references per claim. Inferred recommendations must state assumptions and limitations.`
 
 func (r *run) scout(ctx context.Context, id int, q question) error {
 	allowed := map[string]bool{}
@@ -151,26 +151,26 @@ func (r *run) scout(ctx context.Context, id int, q question) error {
 		allowed[h.URL] = true
 	}
 	var observation any = map[string]any{"hits": hits}
-	var localFindings []Finding
+	var localClaims []Claim
 	for step := 0; step < r.limits.ModelCalls; step++ {
 		input := requirementInput(r)
 		input["subquestion"] = q.Question
 		input["observation"] = observation
-		input["findings"] = localFindings
+		input["claims"] = localClaims
 		// Dependency conclusions are compact; source text is supplied only on reads.
-		input["known_findings"] = r.snapshot().Findings
+		input["known_claims"] = r.snapshot().Claims
 		action, err := stage[scoutAction](ctx, r, "scout", scoutShape, input, false, func(a scoutAction) error {
 			if a.Action != "search" && a.Action != "read" && a.Action != "finish" {
 				return errors.New("unknown scout action")
 			}
-			if len(a.Findings) > 16 || len(a.Limitations) > 8 {
+			if len(a.Claims) > 16 || len(a.Limitations) > 8 {
 				return errors.New("scout result exceeds item limits")
 			}
 			if a.Action == "finish" && a.Status != "complete" && a.Status != "partial" && a.Status != "failed" {
 				return errors.New("finish requires explicit status")
 			}
-			for _, f := range a.Findings {
-				if _, err := r.finding(f); err != nil {
+			for _, f := range a.Claims {
+				if _, err := r.claim(f); err != nil {
 					return err
 				}
 			}
@@ -182,19 +182,19 @@ func (r *run) scout(ctx context.Context, id int, q question) error {
 		for _, s := range action.Limitations {
 			r.note(s)
 		}
-		for _, c := range action.Findings {
-			f, err := r.finding(c)
+		for _, c := range action.Claims {
+			f, err := r.claim(c)
 			if err != nil {
 				return err
 			}
 			r.mu.Lock()
-			_, exists := r.findings[f.ID]
-			if !exists && len(r.findings) < 128 {
-				r.findings[f.ID] = f
+			_, exists := r.claims[f.ID]
+			if !exists && len(r.claims) < 128 {
+				r.claims[f.ID] = f
 			}
 			r.mu.Unlock()
-			if !exists && len(localFindings) < 32 {
-				localFindings = append(localFindings, f)
+			if !exists && len(localClaims) < 32 {
+				localClaims = append(localClaims, f)
 			}
 		}
 		if err := r.emit(Event{Kind: "progress", Stage: "scout: step completed", Scout: id + 1}, true); err != nil {
@@ -361,17 +361,17 @@ func (r *run) fetchNew(ctx context.Context, url string) (Source, error) {
 	r.mu.Unlock()
 	return s, nil
 }
-func (r *run) finding(c candidate) (Finding, error) {
+func (r *run) claim(c candidate) (Claim, error) {
 	if strings.TrimSpace(c.Claim) == "" || len(c.Claim) > 2048 || (c.Basis != "observed" && c.Basis != "inferred") || len(c.Evidence) == 0 || len(c.Evidence) > 8 || len(c.Limitation) > 2048 || c.Basis == "inferred" && strings.TrimSpace(c.Limitation) == "" {
-		return Finding{}, errors.New("claim requires bounded text, basis, evidence, and inference limitation")
+		return Claim{}, errors.New("claim requires bounded text, basis, evidence, and inference limitation")
 	}
-	f := Finding{Claim: c.Claim, Basis: c.Basis, Limitation: c.Limitation, Verdict: "unverified"}
+	f := Claim{Claim: c.Claim, Basis: c.Basis, Limitation: c.Limitation, Verdict: "unverified"}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range c.Evidence {
 		s, ok := r.sources[e.SourceID]
 		if !ok || len(e.Quote) == 0 || len(e.Quote) > 1000 || strings.Count(s.Text, e.Quote) != 1 {
-			return Finding{}, errors.New("citation must name a retained source and a unique exact excerpt")
+			return Claim{}, errors.New("citation must name a retained source and a unique exact excerpt")
 		}
 		start := strings.Index(s.Text, e.Quote)
 		f.Evidence = append(f.Evidence, Citation{SourceID: s.ID, Quote: e.Quote, Start: start, End: start + len(e.Quote), URI: s.FinalURL, Revision: "sha256:" + s.SHA256, Locator: fmt.Sprintf("%s/%s#bytes=%d-%d", r.id, s.ID, start, start+len(e.Quote))})

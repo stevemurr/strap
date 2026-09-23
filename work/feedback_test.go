@@ -44,7 +44,23 @@ func TestRejectionsCarryIdsRevisionsAndNextStep(t *testing.T) {
 	expect(err, ErrReserved, "step "+string(p.Steps[0].ID)+" is reserved by "+string(w.ID), "scope only available steps")
 
 	_, err = s.GetResearchBrief("root", "report-5")
-	expect(err, ErrNotFound, "report-5 is a progress report id, not a brief id", "no brief has been delivered to you")
+	expect(err, ErrNotFound, "report-5 is a progress report; read it with get_work_progress mode report", "no brief has been delivered to you")
+
+	// A real ID in the wrong slot names the reader for its kind.
+	_, err = s.GetWorkProgress("root", "brief-3")
+	expect(err, ErrNotFound, "brief-3 is a delivered research brief; read it with get_research_brief")
+	_, err = s.GetWorkProgress("root", "work-absent")
+	expect(err, ErrNotFound, "work work-absent", "live work visible to you")
+	_, err = s.ProgressReports("root", "finding-2")
+	expect(err, ErrNotFound, "finding-2 is a ledger finding; read it with get_work_progress mode finding")
+	_, err = s.GetWorkProgressReport("root", "brief-3")
+	expect(err, ErrNotFound, "read it with get_research_brief")
+	_, err = s.GetWorkProgressReport("root", "report-404")
+	expect(err, ErrNotFound, "progress report report-404", "report_work_progress receipts")
+	_, err = s.GetProgressFinding("root", "run-7")
+	expect(err, ErrNotFound, "run-7 is a researcher's deep research run", "get_research_run")
+	_, err = s.GetProgressFinding("root", "finding-404")
+	expect(err, ErrNotFound, "finding finding-404", "get_work_progress mode findings")
 	_, err = s.GetResearchBrief("root", "brief-9")
 	expect(err, ErrNotFound, "research brief brief-9")
 

@@ -13,8 +13,8 @@ import (
 	"unicode/utf8"
 )
 
-const Version = 1
-const PromptVersion = "deep-research-v1"
+const Version = 2
+const PromptVersion = "deep-research-v2"
 
 var (
 	ErrBusy       = errors.New("a deep research run is already active")
@@ -90,8 +90,8 @@ type Citation struct {
 	Locator  string `json:"locator"`
 }
 
-type Finding struct {
-	ID         string     `json:"finding_id"`
+type Claim struct {
+	ID         string     `json:"claim_id"`
 	Claim      string     `json:"claim"`
 	Basis      string     `json:"basis"`
 	Evidence   []Citation `json:"evidence"`
@@ -104,7 +104,7 @@ type Coverage struct {
 	Index       int      `json:"index"`
 	Requirement string   `json:"requirement"`
 	Status      string   `json:"status"`
-	FindingIDs  []string `json:"finding_ids"`
+	ClaimIDs    []string `json:"claim_ids"`
 	Reason      string   `json:"reason"`
 }
 
@@ -124,7 +124,7 @@ type Spend struct {
 }
 
 type Report struct {
-	ID             string     `json:"report_id"`
+	ID             string     `json:"run_id"`
 	Version        int        `json:"schema_version"`
 	PromptVersion  string     `json:"prompt_version"`
 	Binding        Binding    `json:"binding"`
@@ -134,8 +134,8 @@ type Report struct {
 	Status         string     `json:"status"`
 	StopReason     string     `json:"stop_reason"`
 	Summary        string     `json:"summary"`
-	Findings       []Finding  `json:"findings"`
-	Rejected       []Finding  `json:"rejected,omitempty"`
+	Claims         []Claim    `json:"claims"`
+	Rejected       []Claim    `json:"rejected_claims,omitempty"`
 	Disagreements  [][]string `json:"disagreements,omitempty"`
 	OpenQuestions  []string   `json:"open_questions,omitempty"`
 	Limitations    []string   `json:"limitations,omitempty"`
