@@ -26,8 +26,8 @@ func (f pageFunc) Read(ctx context.Context, url string) (agentbrowser.Page, erro
 type searchFunc func(context.Context, string) (webkit.Page, error)
 
 func (f searchFunc) fetch(ctx context.Context, url string) (webkit.Page, error) { return f(ctx, url) }
-func (f searchFunc) Search(ctx context.Context, query string, limit int) ([]SearchHit, error) {
-	return (&wkrenderSearch{worker: fetcherFunc(f.fetch)}).Search(ctx, query, limit)
+func (f searchFunc) Search(ctx context.Context, query string, limit int, pages string) ([]SearchHit, error) {
+	return (&wkrenderSearch{worker: fetcherFunc(f.fetch)}).Search(ctx, query, limit, pages)
 }
 func (searchFunc) Close(context.Context) error { return nil }
 
@@ -40,6 +40,8 @@ func (fetcherFunc) Close(context.Context) error { return nil }
 
 func testWeb(t *testing.T, config WebConfig) *Web {
 	t.Helper()
+	// A key in the developer's environment would send test pages to the API.
+	t.Setenv("TAVILY_API_KEY", "")
 	config.WKRenderPath, config.AgentBrowserPath = "/missing/wkrender", "/missing/agent-browser"
 	w, err := NewWeb(config)
 	if err != nil {
@@ -245,7 +247,7 @@ func TestWebMissingBackendsAndValidation(t *testing.T) {
 		t.Fatal("construction must be lazy", err)
 	}
 	defer w.Close(context.Background())
-	for i, args := range []string{`{"input":{"query":"test","max_results":null}}`, `{"input":{"url":"https://example.com","cursor":null,"max_chars":null}}`} {
+	for i, args := range []string{`{"input":{"query":"test","max_results":null}}`, `{"input":{"url":"https://example.com","cursor":null,"max_chars":null,"render":null}}`} {
 		if _, err := w.Tools()[i].Call(context.Background(), Call{Arguments: []byte(args)}); err == nil || !strings.Contains(err.Error(), "requires") {
 			t.Fatal(err)
 		}

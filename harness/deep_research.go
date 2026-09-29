@@ -23,7 +23,7 @@ type researchWebAdapter struct {
 }
 
 func (w researchWebAdapter) Search(ctx context.Context, query string) ([]research.Hit, error) {
-	result, err := w.web.SearchWeb(ctx, query, 8)
+	result, err := w.web.SearchWeb(ctx, query, 8, 0)
 	if err != nil {
 		return nil, err
 	}

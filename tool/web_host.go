@@ -10,16 +10,21 @@ import (
 
 // SearchWeb and OpenPage share the model tools' validation, lifetime and slots.
 // Host consumers can retain evidence without adding it to an agent's history.
-func (w *Web) SearchWeb(ctx context.Context, query string, limit int) (WebSearchResult, error) {
+// With chars, SearchWeb returns up to chars of each result's visible page text
+// when the backend has it, marked truncated when the page is longer; zero
+// returns snippets alone. Nothing is retained for a cursor.
+func (w *Web) SearchWeb(ctx context.Context, query string, limit, chars int) (WebSearchResult, error) {
 	if limit < 1 || limit > 10 {
 		return WebSearchResult{}, errors.New("search limit must be 1..10")
 	}
-	r, err := w.search(ctx, Call{}, searchArgs{Query: query, MaxResults: &limit})
-	var out WebSearchResult
-	if err == nil {
-		err = json.Unmarshal([]byte(r.Content.Text()), &out)
+	if chars != 0 && (chars < 200 || chars > 50000) {
+		return WebSearchResult{}, errors.New("page characters must be 0 or 200..50000")
 	}
-	return out, err
+	pages := ""
+	if chars > 0 {
+		pages = "text"
+	}
+	return w.find(ctx, "", searchArgs{Query: query, MaxResults: &limit}, pages, chars)
 }
 
 func (w *Web) OpenPage(ctx context.Context, actor identity.ActorID, url, cursor string, chars int) (OpenURLResult, error) {
@@ -30,7 +35,8 @@ func (w *Web) OpenPage(ctx context.Context, actor identity.ActorID, url, cursor 
 	if cursor != "" {
 		args.Cursor = &cursor
 	}
-	r, err := w.open(ctx, Call{Actor: actor}, args)
+	// Visible text, not markdown: a research claim quotes an exact excerpt.
+	r, err := w.openAs(ctx, actor, args, "text")
 	var out OpenURLResult
 	if err == nil {
 		err = json.Unmarshal([]byte(r.Content.Text()), &out)

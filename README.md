@@ -767,10 +767,20 @@ original assignment. The `deep_researcher` role is offered by default with
 [deep research configuration and evaluation](docs/architecture/DEEP_RESEARCH_IMPLEMENTATION.md).
 
 `web_search` queries the [Tavily](https://tavily.com) search API and returns
-ranked titles, destination URLs and snippets. `open_url` uses **agent-browser**
-to load a page in its own headless Chrome session and read the rendered DOM,
-returning readable text and a separate list of link destinations. Both appear as
-ordinary tool activity and agent commentary in the console.
+ranked titles, destination URLs and snippets, with the start of each result's
+page text as markdown (4,000 characters by default; `search_page_chars` in the
+web configuration, negative for snippets alone). A longer page carries a cursor:
+`open_url` with that cursor reads on from the same text without a browser. The
+page text lets an agent answer from a search without opening its results, which
+costs a model turn each. `open_url` reads a page through the same API's
+extraction when a key is set, which also reads PDFs, and otherwise uses
+**agent-browser** to load it in its own headless Chrome session and read the
+rendered DOM. Either way it returns readable text and a list of link
+destinations. A page on this machine or a private network (including a tailnet)
+is always rendered locally, so its URL is never sent to the API; so is a page the
+API cannot read, and one the agent asks to render because its extracted text
+looks incomplete, such as a discussion that loads with JavaScript. Both tools
+appear as ordinary tool activity and agent commentary in the console.
 
 Set the key in the environment; it is never written to a config file, logged, or
 quoted in an error:

@@ -89,13 +89,13 @@ func TestOpenRejectsInvalidRequestsAndPageMetadata(t *testing.T) {
 			w.browser = pageFunc(func(context.Context, string) (agentbrowser.Page, error) {
 				return agentbrowser.Page{URL: tc.final, ContentType: tc.contentType}, nil
 			})
-			_, err := w.Tools()[1].Call(context.Background(), Call{Arguments: mustJSON(t, map[string]any{"url": tc.url, "cursor": nil, "max_chars": nil})})
+			_, err := w.Tools()[1].Call(context.Background(), Call{Arguments: mustJSON(t, map[string]any{"url": tc.url, "cursor": nil, "max_chars": nil, "render": nil})})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
 		})
 	}
-	for _, raw := range []string{`{"input":{"url":"https://example.com","max_chars":199,"cursor":null}}`, `{"input":{"url":"https://example.com","max_chars":50001,"cursor":null}}`, `{"input":{"url":"https://example.com","cursor":"","max_chars":null}}`, `{"input":{"url":"https://example.com","script":"bad","cursor":null,"max_chars":null}}`} {
+	for _, raw := range []string{`{"input":{"url":"https://example.com","max_chars":199,"cursor":null,"render":null}}`, `{"input":{"url":"https://example.com","max_chars":50001,"cursor":null,"render":null}}`, `{"input":{"url":"https://example.com","cursor":"","max_chars":null,"render":null}}`, `{"input":{"url":"https://example.com","script":"bad","cursor":null,"max_chars":null,"render":null}}`} {
 		w := testWeb(t, WebConfig{})
 		if _, err := w.Tools()[1].Call(context.Background(), Call{Arguments: []byte(raw)}); err == nil {
 			t.Fatal("accepted", raw)
@@ -288,7 +288,7 @@ func TestOpenDefaultAndMaximumChunkSizes(t *testing.T) {
 	w.browser = pageFunc(func(_ context.Context, url string) (agentbrowser.Page, error) {
 		return agentbrowser.Page{URL: url, Content: source}, nil
 	})
-	r, err := w.Tools()[1].Call(context.Background(), Call{Arguments: []byte(`{"input":{"url":"https://example.com","cursor":null,"max_chars":null}}`)})
+	r, err := w.Tools()[1].Call(context.Background(), Call{Arguments: []byte(`{"input":{"url":"https://example.com","cursor":null,"max_chars":null,"render":null}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

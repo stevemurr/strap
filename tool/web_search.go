@@ -9,6 +9,9 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+
+	"github.com/stevemurr/strap/internal/agentbrowser"
+	"github.com/stevemurr/strap/message"
 )
 
 type searchArgs struct {
@@ -20,37 +23,102 @@ type SearchHit struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
+	// Content is the start of the page's text when the backend returned it;
+	// a longer page reads on with open_url and NextCursor.
+	Content    string `json:"content,omitempty"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
+	page       string // the backend's page text; never serialized
 }
 type WebSearchResult struct {
 	Query   string      `json:"query"`
 	Results []SearchHit `json:"results"`
 }
 
-func (w *Web) search(ctx context.Context, _ Call, args searchArgs) (Result, error) {
+// An agent reads markdown, which keeps headings and code; its longer pages read
+// on through open_url's cursor.
+func (w *Web) search(ctx context.Context, call Call, args searchArgs) (Result, error) {
+	pages := ""
+	if w.config.SearchPageChars > 0 {
+		pages = "markdown"
+	}
+	result, err := w.find(ctx, call.Actor, args, pages, w.config.SearchPageChars)
+	if err != nil {
+		return Result{}, err
+	}
+	return JSON(result)
+}
+
+// find runs a search. With pages, a hit whose page text the backend returned
+// carries its first chars characters, and when owner is set a longer page is
+// retained for owner's open_url cursor as if owner had opened it.
+func (w *Web) find(ctx context.Context, owner message.ActorID, args searchArgs, pages string, chars int) (WebSearchResult, error) {
 	query := strings.TrimSpace(args.Query)
 	if query == "" || len(query) > 8192 {
-		return Result{}, errors.New("query must contain 1..8192 bytes of nonblank text")
+		return WebSearchResult{}, errors.New("query must contain 1..8192 bytes of nonblank text")
 	}
 	if w.searchErr != nil {
-		return Result{}, fmt.Errorf("web_search requires a backend: set TAVILY_API_KEY for the search API, or install wkrender: %w", w.searchErr)
+		return WebSearchResult{}, fmt.Errorf("web_search requires a backend: set TAVILY_API_KEY for the search API, or install wkrender: %w", w.searchErr)
 	}
 	ctx, done, err := w.begin(ctx, w.config.SearchTimeout)
 	if err != nil {
-		return Result{}, err
+		return WebSearchResult{}, err
 	}
 	defer done()
 	limit := 8
 	if args.MaxResults != nil {
 		limit = *args.MaxResults
 	}
-	hits, err := w.worker.Search(ctx, query, limit)
+	hits, err := w.worker.Search(ctx, query, limit, pages)
 	if err != nil {
-		return Result{}, fmt.Errorf("web_search: %w", err)
+		return WebSearchResult{}, fmt.Errorf("web_search: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return WebSearchResult{}, err
 	}
-	return JSON(WebSearchResult{Query: query, Results: hits[:min(limit, len(hits))]})
+	hits = hits[:min(limit, len(hits))]
+	for i := range hits {
+		if pages != "" {
+			if err := w.attachPage(owner, &hits[i], pages, chars); err != nil {
+				return WebSearchResult{}, err
+			}
+		}
+		hits[i].page = ""
+	}
+	return WebSearchResult{Query: query, Results: hits}, nil
+}
+
+// attachPage gives a hit the start of its page text. For an owner it retains a
+// longer page the way open_url does, so its cursor reads on without a browser.
+func (w *Web) attachPage(owner message.ActorID, hit *SearchHit, pages string, chars int) error {
+	u, err := webURL(hit.URL)
+	if err != nil || len(hit.URL) > 8192 || strings.TrimSpace(hit.page) == "" {
+		return nil
+	}
+	requested := u.String()
+	contentType := "text/plain"
+	if pages == "markdown" {
+		contentType = "text/markdown"
+	}
+	page := agentbrowser.Page{URL: hit.URL, Title: hit.Title, ContentType: contentType, Links: []WebLink{}}
+	text := []rune(hit.page)
+	if len(text) > w.config.MaxPageChars {
+		text = append([]rune(nil), text[:w.config.MaxPageChars]...)
+		page.Truncated = true
+	}
+	snapshot := &webSnapshot{owner: owner, url: requested, page: page, text: text, created: w.now(), bytes: 4*len(text) + len(requested) + len(page.URL) + len(page.Title) + len(page.ContentType)}
+	id := ""
+	if owner != "" && len(text) > chars {
+		if id, err = w.retain(snapshot); err != nil {
+			return err
+		}
+	}
+	start := snapshot.chunk(id, 0, chars)
+	hit.Content, hit.Truncated = start.Content, start.Truncated || page.Truncated
+	if id != "" {
+		hit.NextCursor = start.NextCursor
+	}
+	return nil
 }
 
 func parseSearchResults(source io.Reader) ([]SearchHit, error) {
