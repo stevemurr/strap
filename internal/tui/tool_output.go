@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/stevemurr/strap/tool"
 )
@@ -60,6 +61,33 @@ func (d *toolDisplay) nativeOutput(raw string) {
 		if result.More || result.Truncated {
 			d.notice = "Partial file view"
 		}
+	case "web_search":
+		var result tool.WebSearchResult
+		if fields["results"] == nil || json.Unmarshal([]byte(raw), &result) != nil {
+			return
+		}
+		var listing []string
+		pages := 0
+		for _, h := range result.Results {
+			hit := searchHit{title: inlineText(h.Title), url: inlineText(h.URL), snippet: inlineText(h.Snippet), page: utf8.RuneCountInString(h.Content), more: h.Truncated}
+			if hit.page > 0 {
+				pages++
+			}
+			d.hits = append(d.hits, hit)
+			listing = append(listing, hit.title+"\n"+hit.url)
+		}
+		d.result = strings.Join(listing, "\n")
+		if pages > 0 {
+			d.notice = fmt.Sprintf("Page text for %d of %d results", pages, len(d.hits))
+		}
+	case "open_url":
+		var result tool.OpenURLResult
+		if fields["content"] == nil || fields["final_url"] == nil || json.Unmarshal([]byte(raw), &result) != nil {
+			return
+		}
+		text := boundedToolText(result.Content, 32768)
+		d.page = &pageView{title: inlineText(result.Title), url: inlineText(result.URL), finalURL: inlineText(result.FinalURL), text: text, chars: utf8.RuneCountInString(result.Content), more: result.Truncated, cut: result.DocumentTruncated, links: len(result.Links), moreLinks: result.LinksTruncated, rendered: result.Rendered}
+		d.result = d.page.title + "\n" + text
 	case "write_file":
 		var result tool.WriteFileResult
 		if fields["bytes_written"] != nil && json.Unmarshal([]byte(raw), &result) == nil {

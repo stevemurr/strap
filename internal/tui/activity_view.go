@@ -20,6 +20,9 @@ type toolDisplay struct {
 	path                                              string
 	kind                                              string // assign_task's kind, which names the work.
 	numbered                                          bool
+	hits                                              []searchHit // web_search's results, listed rather than printed as JSON.
+	page                                              *pageView   // open_url's page, shown rather than printed as JSON.
+	continued                                         bool        // open_url read on from a cursor.
 	finished                                          time.Time
 }
 
@@ -48,6 +51,8 @@ func displayTool(a agent.ToolActivity) *toolDisplay {
 			_ = json.Unmarshal(args["kind"], &d.kind)
 			d.kind = safeText(d.kind)
 		}
+		var cursor string
+		d.continued = d.name == "open_url" && json.Unmarshal(args["cursor"], &cursor) == nil && cursor != ""
 		for _, key := range []string{"path", "url", "command", "query", "pattern", "task", "agent_id"} {
 			var value string
 			if json.Unmarshal(args[key], &value) == nil && strings.TrimSpace(value) != "" {
@@ -156,12 +161,27 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 		verb = "Listed"
 	case "search", "search_files", "web_search", "glob", "grep_search":
 		verb = "Searched"
+		if d.name == "web_search" && d.finished.IsZero() {
+			verb = "Searching"
+		}
+	case "open_url":
+		verb = "Opened"
+		if d.finished.IsZero() {
+			verb = "Opening"
+		}
+		if d.continued {
+			verb = "Read more of"
+			if d.finished.IsZero() {
+				verb = "Reading more of"
+			}
+		}
 	case "assign_task":
 		if d.kind != "" {
 			verb = "Assign " + strings.ReplaceAll(d.kind, "_", " ")
 		}
 	}
 	resultRows := e.toolResultRows(max(1, width-4))
+	detailRows := e.toolLayout.detail
 	commandLines := strings.Split(e.toolLayout.preview, "\n")
 	add(style.Render(mark) + " " + lipgloss.NewStyle().Bold(true).Render(verb) + " " + commandLines[0])
 	for _, line := range commandLines[1:] {
@@ -173,11 +193,15 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 		resultRows = []string{"Progress recorded · report below"}
 	}
 	if open {
-		if d.name != "shell" && d.arguments != "" && d.arguments != "{}" {
+		// A search's header already shows its query, a read page's its URL.
+		if d.name != "shell" && len(d.hits) == 0 && d.page == nil && d.arguments != "" && d.arguments != "{}" {
 			add(dimStyle.Render("  Arguments"))
 			for _, line := range strings.Split(ansi.Hardwrap(e.toolLayout.arguments, max(1, width-4), true), "\n") {
 				add(dimStyle.Render("  │ ") + line)
 			}
+		}
+		if detailRows != nil {
+			resultRows = detailRows
 		}
 		for _, line := range resultRows {
 			add(dimStyle.Render("  │ ") + line)
@@ -198,8 +222,12 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 			add(dimStyle.Render(prefix) + line)
 		}
 	}
-	if len(resultRows) > 2 || open {
-		hint := fmt.Sprintf("… +%d lines (ctrl+t to expand)", len(resultRows)-2)
+	more := e.toolLayout.more
+	if more == "" && len(resultRows) > 2 {
+		more = fmt.Sprintf("+%d lines", len(resultRows)-2)
+	}
+	if more != "" || open {
+		hint := "… " + more + " (ctrl+t to expand)"
 		if open {
 			hint = "collapse output (ctrl+t)"
 		}
