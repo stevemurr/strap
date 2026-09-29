@@ -22,20 +22,31 @@ type researchWebAdapter struct {
 	actor identity.ActorID
 }
 
+// researchPageChars is how much of a page a research run reads, whether a
+// search returned it or the browser rendered it.
+const researchPageChars = 24000
+
+// Search asks for each result's visible page text as well, so the run reads a
+// result without a browser. Visible text rather than markdown: a claim cites
+// an exact excerpt, and markdown runs link targets into the sentences quoted.
 func (w researchWebAdapter) Search(ctx context.Context, query string) ([]research.Hit, error) {
-	result, err := w.web.SearchWeb(ctx, query, 8, 0)
+	result, err := w.web.SearchWeb(ctx, query, 8, researchPageChars)
 	if err != nil {
 		return nil, err
 	}
 	out := []research.Hit{}
 	for _, h := range result.Results {
-		out = append(out, research.Hit{Title: h.Title, URL: h.URL, Snippet: h.Snippet})
+		hit := research.Hit{Title: h.Title, URL: h.URL, Snippet: h.Snippet}
+		if h.Content != "" {
+			hit.Page = &research.Page{URL: h.URL, FinalURL: h.URL, Title: h.Title, ContentType: "text/plain", Text: h.Content, Truncated: h.Truncated}
+		}
+		out = append(out, hit)
 	}
 	return out, nil
 }
 func (w researchWebAdapter) Fetch(ctx context.Context, url string) (research.Page, error) {
 	// Retain the returned selection immediately; browser cursor lifetime is irrelevant.
-	p, err := w.web.OpenPage(ctx, w.actor, url, "", 24000)
+	p, err := w.web.OpenPage(ctx, w.actor, url, "", researchPageChars)
 	if err != nil {
 		return research.Page{}, err
 	}

@@ -112,6 +112,35 @@ func TestEngineRetainsEvidenceAndVerifiesReport(t *testing.T) {
 		t.Fatal("missing finish")
 	}
 }
+
+// searchedWeb returns its hit's page with the search, and fails any Fetch.
+type searchedWeb struct{ fetches *int }
+
+func (searchedWeb) Search(context.Context, string) ([]Hit, error) {
+	url := "https://EXAMPLE.test/research#results"
+	return []Hit{{Title: "Primary evidence", URL: url, Page: &Page{URL: url, FinalURL: url, Title: "Evidence", ContentType: "text/plain", Text: "The measured latency was 12 ms. This result applies to the measured sample."}}}, nil
+}
+func (w searchedWeb) Fetch(context.Context, string) (Page, error) {
+	*w.fetches++
+	return Page{}, errors.New("fetched a page the search returned")
+}
+
+// A page the search returned is read from there, found by its canonical URL,
+// and retained and charged like a fetched one.
+func TestSearchedPageIsReadWithoutFetch(t *testing.T) {
+	e, err := New(Config{}, modelFunc(fixtureModel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetches := 0
+	p, err := e.Run(context.Background(), testBinding(), testRequest(), Dependencies{Web: searchedWeb{&fetches}, Record: func(context.Context, Event) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 0 || p.Status != "complete" || len(p.Claims) != 1 || p.Claims[0].Verdict != "supported" || p.Spend.Fetches != 1 || len(p.Sources) != 1 || p.Sources[0].FinalURL != "https://example.test/research" {
+		t.Fatalf("fetches %d, report %+v", fetches, p)
+	}
+}
 func TestCancellationRetainsSourceAndSettlesWithoutGeneration(t *testing.T) {
 	e, _ := New(Config{}, modelFunc(fixtureModel))
 	ctx, cancel := context.WithCancel(context.Background())

@@ -268,15 +268,20 @@ func (r *run) search(ctx context.Context, query string) ([]Hit, error) {
 	}
 	out := []Hit{}
 	seen := map[string]bool{}
+	pages := map[string]Page{}
 	for _, h := range hits {
 		url, err := canonical(h.URL)
 		if err != nil || !r.policy.permits(url) || seen[url] {
 			continue
 		}
 		seen[url] = true
+		if h.Page != nil {
+			pages[url] = *h.Page
+		}
 		h.URL = url
 		h.Title = clip(h.Title, 500)
 		h.Snippet = clip(h.Snippet, 1500)
+		h.Page = nil
 		out = append(out, h)
 		if len(out) == 10 {
 			break
@@ -284,6 +289,9 @@ func (r *run) search(ctx context.Context, query string) ([]Hit, error) {
 	}
 	r.mu.Lock()
 	r.spend.SearchSuccesses++
+	for url, p := range pages {
+		r.pages[url] = p
+	}
 	r.mu.Unlock()
 	return out, nil
 }
@@ -320,11 +328,18 @@ func (r *run) fetchNew(ctx context.Context, url string) (Source, error) {
 	if err := r.emit(Event{Kind: "progress", Stage: "read: " + clip(url, 300)}, false); err != nil {
 		return Source{}, err
 	}
-	p, err := r.deps.Web.Fetch(ctx, url)
-	if err != nil {
-		return Source{}, err
+	// A page a search already returned is read from there, without a browser.
+	r.mu.Lock()
+	p, searched := r.pages[url]
+	delete(r.pages, url)
+	r.mu.Unlock()
+	if !searched {
+		var err error
+		if p, err = r.deps.Web.Fetch(ctx, url); err != nil {
+			return Source{}, err
+		}
 	}
-	if err = ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return Source{}, err
 	}
 	final, err := canonical(p.FinalURL)

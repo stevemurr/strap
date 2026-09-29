@@ -126,7 +126,11 @@ explicit partial results; cited source records are never evicted to make room.
 
 V1 reads the first returned page selection, retaining at most 24,000 UTF-8 bytes
 per source (also limited by request capacity). It records truncation rather than
-claiming complete-document coverage. Remote PDF, authenticated browsing, and
+claiming complete-document coverage. When the search API returns a result's
+visible page text with the search, a read of that result uses it instead of
+rendering the page in a browser; it still counts as a fetch. Visible text rather
+than markdown, because a claim quotes an exact excerpt and markdown runs link
+targets into sentences. Remote PDF, authenticated browsing, and
 query-guided passage selection are outside this implementation. Domain rules
 filter initial/final source URLs, with block rules winning; they do not restrict
 browser subresource traffic. Retrieved text is untrusted model input.

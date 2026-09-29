@@ -50,6 +50,9 @@ type Hit struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
+	// Page is the hit's page when the search returned its text; the run reads
+	// it in place of a Fetch.
+	Page *Page `json:"-"`
 }
 type Page struct {
 	URL         string `json:"url"`
@@ -61,7 +64,8 @@ type Page struct {
 	Links       []Hit  `json:"links,omitempty"`
 }
 
-// Retrieval implementations must honor cancellation and bound returned data.
+// Retrieval implementations must honor cancellation and bound returned data,
+// including the page text a Search returns with its hits.
 type Retrieval interface {
 	Search(context.Context, string) ([]Hit, error)
 	Fetch(context.Context, string) (Page, error)

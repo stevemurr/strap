@@ -93,6 +93,7 @@ type run struct {
 	sourceMu            sync.Mutex
 	sources             map[string]Source
 	urls                map[string]*fetchFlight
+	pages               map[string]Page // search hits' page text by canonical URL, until read
 	claims              map[string]Claim
 	limitations         []string
 	recordMu            sync.Mutex
@@ -136,7 +137,7 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 		id = e.ids("run-")
 	}
 	policy, _ := newPolicy(req.AllowDomains, req.BlockDomains)
-	r := &run{engine: e, request: clone(req), binding: b, deps: deps, limits: limits, policy: policy, ctx: runctx, cancel: cancel, id: id, started: started, deadline: deadline, sources: map[string]Source{}, urls: map[string]*fetchFlight{}, claims: map[string]Claim{}}
+	r := &run{engine: e, request: clone(req), binding: b, deps: deps, limits: limits, policy: policy, ctx: runctx, cancel: cancel, id: id, started: started, deadline: deadline, sources: map[string]Source{}, urls: map[string]*fetchFlight{}, pages: map[string]Page{}, claims: map[string]Claim{}}
 	initial := boundReport(r.snapshot(), e.config.MaxReportBytes)
 	initial.Status = "running"
 	if err := r.emit(Event{Kind: "started", Stage: "plan", Report: &initial}, false); err != nil {
