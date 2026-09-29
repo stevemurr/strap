@@ -36,7 +36,11 @@ func TestAgentStacksKeepTranscriptAndComposerFullWidth(t *testing.T) {
 		t.Fatal("transcript does not account for stack rows")
 	}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "All activity") || !strings.Contains(view, agentGlyph("agent-2")) {
+	worker := false
+	for _, target := range m.stackLayout().targets {
+		worker = worker || target.choice.id == "agent-2"
+	}
+	if !strings.Contains(view, "All activity") || !worker {
 		t.Fatal(view)
 	}
 	rows := strings.Split(view, "\n")
@@ -64,7 +68,7 @@ func TestAgentStacksRootHasLiveChipAndPreview(t *testing.T) {
 			root = target
 		}
 	}
-	if root.height != 1 || !strings.Contains(ansi.Strip(m.stackTargetView(root, false)), agentGlyph(m.session.Manager())+" manager ●") {
+	if root.height != 1 || !strings.Contains(ansi.Strip(m.stackTargetView(root, false)), "manager ●") {
 		t.Fatal("the manager is missing its live agent chip")
 	}
 	x, y := stackLocation(t, m, rosterChoice{id: m.session.Manager()})

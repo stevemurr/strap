@@ -163,7 +163,7 @@ func (m *model) stackTargetView(t stackTarget, highlight bool) string {
 	if id == m.session.Manager() {
 		name = m.entry
 	}
-	label := agentIcon(id) + " " + style.Render(ansi.Truncate(name, max(1, t.width-5), "…")) + " " + markStyle.Render(mark)
+	label := style.Render(ansi.Truncate(name, max(1, t.width-2), "…")) + " " + markStyle.Render(mark)
 	return fitStreamCell(label, t.width)
 }
 

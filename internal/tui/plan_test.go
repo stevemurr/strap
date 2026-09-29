@@ -135,7 +135,7 @@ func TestPlanDockProjectionAndMultiplePlans(t *testing.T) {
 	}
 	w := work.Work{ID: "impl", Revision: 2, Assignee: "agent-2", State: work.Active, Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{"search"}}}
 	m.Update(received{event: conversation.WorkEvent{Event: work.Event{Work: w, Steps: []work.Step{{ID: "search", Title: p.Steps[2].Title, Status: work.Blocked, Note: "Legacy update"}}}}})
-	if m.currentPlan().plan.Steps[2].Status != work.Blocked || !strings.Contains(dockText(m), agentGlyph("agent-2")) {
+	if m.currentPlan().plan.Steps[2].Status != work.Blocked || !strings.Contains(dockText(m), "● agent-2") {
 		t.Fatal("legacy event or assignee was lost", dockText(m))
 	}
 	w.Revision = 1
@@ -314,7 +314,7 @@ func TestPlanDockCacheTracksThemeAndWorkAssignments(t *testing.T) {
 		t.Fatal("cached dock retained colors")
 	}
 	m.rememberWork(work.Work{ID: "assigned", Assignee: "new-worker", State: work.Active, Scope: &work.Scope{PlanID: p.ID, StepIDs: []work.StepID{"search"}}})
-	if !strings.Contains(dockText(m), agentGlyph("new-worker")) {
+	if !strings.Contains(dockText(m), "● new-worker") {
 		t.Fatal("assignment did not invalidate cached dock")
 	}
 }

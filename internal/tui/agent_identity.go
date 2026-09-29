@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"hash/fnv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,31 +9,9 @@ import (
 	"github.com/stevemurr/strap/message"
 )
 
-// A glider fits in two Braille cells (a 4×4 dot matrix). Phase and rotation
-// distinguish agents without adding a name or a colored box to every command.
-func agentGlyph(id message.ActorID) string {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(id))
-	n := h.Sum32()
-	phases := [][][2]int{
-		{{1, 0}, {2, 1}, {0, 2}, {1, 2}, {2, 2}},
-		{{0, 0}, {2, 0}, {1, 1}, {2, 1}, {1, 2}},
-		{{2, 0}, {0, 1}, {2, 1}, {1, 2}, {2, 2}},
-		{{0, 0}, {1, 1}, {2, 1}, {0, 2}, {1, 2}},
-	}
-	dots := [4][2]uint{{0, 3}, {1, 4}, {2, 5}, {6, 7}}
-	cells := [2]rune{0x2800, 0x2800}
-	for _, p := range phases[n%4] {
-		x, y := p[0], p[1]
-		for i := uint32(0); i < (n/4)%4; i++ {
-			x, y = 2-y, x
-		}
-		cells[x/2] |= 1 << dots[y][x%2]
-	}
-	return string(cells[:])
-}
-
-func agentIcon(id message.ActorID) string { return stackIdentity(id).Render(agentGlyph(id)) }
+// An agent is told apart by its color: the dot that leads each of its rows is
+// painted in it, and hovering the dot names the agent.
+func agentDot(id message.ActorID) string { return stackIdentity(id).Render("●") }
 
 type agentBadgeTarget struct {
 	id          message.ActorID
@@ -56,10 +33,11 @@ func (m *model) badgeMouse(event tea.MouseMsg, originX, originY, width, height i
 	if p := m.badges.peek; p != nil && event.X >= p.x && event.X < p.x+lipgloss.Width(p.text) && event.Y >= p.y && event.Y < p.y+lipgloss.Height(p.text) {
 		return true
 	}
-	if event.Y >= originY && event.Y < originY+m.viewport.Height && (event.Action == tea.MouseActionMotion || (event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft)) {
+	// Hover only: a click on a tool row's dot opens its output.
+	if event.Y >= originY && event.Y < originY+m.viewport.Height && event.Action == tea.MouseActionMotion {
 		for _, t := range m.badges.targets {
 			x, y := originX+t.column, originY+t.row-m.viewport.YOffset
-			if event.X < x || event.X >= x+2 || event.Y != y {
+			if event.X != x || event.Y != y {
 				continue
 			}
 			m.streamUI.hovering = false
@@ -69,7 +47,7 @@ func (m *model) badgeMouse(event tea.MouseMsg, originX, originY, width, height i
 			}
 			inner := w - 4
 			details := inlineText(string(t.id)) + " · " + m.streamRole(t.id)
-			lines := []string{agentIcon(t.id) + " " + m.streamTask(t.id), details, m.rosterStatus(t.id), m.stackLatest(t.id)}
+			lines := []string{agentDot(t.id) + " " + m.streamTask(t.id), details, m.rosterStatus(t.id), m.stackLatest(t.id)}
 			for i, line := range lines {
 				lines[i] = ansi.Truncate(line, inner, "…")
 			}
@@ -117,9 +95,8 @@ func (m *model) renderMessage(e *entry, firstRow int) string {
 		if len(e.actors) > 0 {
 			actor = e.actors[0]
 		}
-		prefix := stackIdentity(actor).Render("•") + " "
+		prefix := agentDot(actor) + " "
 		if len(e.actors) > 0 && e.actors[0] != m.session.Manager() {
-			prefix = agentIcon(e.actors[0]) + " "
 			m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.actors[0], row: firstRow, column: 0})
 		}
 		indent := ansi.StringWidth(prefix)

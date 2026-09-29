@@ -393,7 +393,7 @@ func (m *model) planLines(width, budget int) []planLine {
 				title = lipgloss.NewStyle().Bold(true).Render(title)
 			}
 			meta := style.Render(label)
-			ownerText := agentIcon(owner) + " " + dimStyle.Render(inlineText(string(owner)))
+			ownerText := agentDot(owner) + " " + dimStyle.Render(inlineText(string(owner)))
 			if v.detail != "" {
 				for j, line := range strings.Split(ansi.Hardwrap(ansi.Wrap(title, contentWidth, ""), contentWidth, true), "\n") {
 					prefix := "  "

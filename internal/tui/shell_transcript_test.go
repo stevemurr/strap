@@ -49,7 +49,10 @@ func checkShellTranscript(t *testing.T, m *model, open bool) {
 			t.Fatalf("unexpected %q:\n%s", part, view)
 		}
 	}
-	for _, part := range []string{agentGlyph(m.session.Manager()), "exit 1", "Output truncated by shell"} {
+	if len(m.badges.targets) == 0 || m.badges.targets[0].id != m.session.Manager() {
+		t.Fatalf("shell row not attributed to the manager: %+v", m.badges.targets)
+	}
+	for _, part := range []string{"exit 1", "Output truncated by shell"} {
 		if !strings.Contains(view, part) {
 			t.Fatalf("missing %q:\n%s", part, view)
 		}

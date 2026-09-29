@@ -202,9 +202,9 @@ manager's live stream opens by default. At 40 columns by 18 rows or larger, comp
 agent icons occupy a strip above the full-width conversation and composer.
 The chips form the entire header, followed by a separator and the conversation.
 The header starts at two rows and wraps when the terminal has room to show the team.
-Each agent has a static glider icon, a task label, and a status symbol.
-The icon configuration and accent color stay tied to the agent across chips,
-message dots, and tool calls; previews do not animate. The selected chip and
+Each agent has a task label and a status symbol in its accent color. The color
+stays tied to the agent across chips, message dots, and the dot that leads each
+tool call; hovering a dot names its agent, and previews do not animate. The selected chip and
 working indicator use stronger accents, and the send button lights up for a draft.
 Agents are grouped by attention needed, working, idle, inactive, and completed,
 in discovery order within each group, without separate group headings. The manager

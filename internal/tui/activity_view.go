@@ -130,10 +130,10 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 	open := m.toolExpanded(e)
 	row := firstRow + len(lines)
 	m.folds.targets = append(m.folds.targets, foldTarget{key: key, row: row})
-	m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.tool.agent, row: row, column: 2})
-	mark, style := "•", stackIdentity(e.tool.agent)
+	m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.tool.agent, row: row, column: 0})
+	mark, style := "●", stackIdentity(e.tool.agent)
 	if d.finished.IsZero() {
-		mark = "◦"
+		mark = "○"
 	}
 	if d.failure != "" {
 		mark, style = "!", errorStyle
@@ -163,7 +163,7 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 	}
 	resultRows := e.toolResultRows(max(1, width-4))
 	commandLines := strings.Split(e.toolLayout.preview, "\n")
-	add(style.Render(mark) + " " + agentIcon(e.tool.agent) + " " + lipgloss.NewStyle().Bold(true).Render(verb) + " " + commandLines[0])
+	add(style.Render(mark) + " " + lipgloss.NewStyle().Bold(true).Render(verb) + " " + commandLines[0])
 	for _, line := range commandLines[1:] {
 		for _, row := range strings.Split(ansi.Hardwrap(line, max(1, width-4), true), "\n") {
 			add(dimStyle.Render("  │ ") + row)

@@ -158,7 +158,7 @@ func (m *model) renderProgress(e *entry, firstRow int) string {
 	heading := style.Bold(true).Render(label)
 	if len(e.actors) > 0 {
 		column := 2 + ansi.StringWidth(heading) + 1
-		heading += " " + agentIcon(e.actors[0])
+		heading += " " + agentDot(e.actors[0])
 		m.badges.targets = append(m.badges.targets, agentBadgeTarget{id: e.actors[0], row: firstRow, column: column})
 	}
 	if e.meta != "" {

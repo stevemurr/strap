@@ -171,7 +171,7 @@ func TestActivityDisclosurePreservesTextChronologyAndExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 	view = ansi.Strip(m.viewport.View())
-	a, b, c := strings.Index(view, agentGlyph("root")+" First"), strings.Index(view, "Interleaved reply"), strings.Index(view, agentGlyph("root")+" Third")
+	a, b, c := strings.Index(view, "○ First"), strings.Index(view, "Interleaved reply"), strings.Index(view, "○ Third")
 	if a < 0 || b < a || c < b || len(m.entries) != before {
 		t.Fatal(view)
 	}
