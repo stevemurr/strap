@@ -48,7 +48,7 @@ func TestReadProtocolAndContentFailures(t *testing.T) {
 						}
 						return response(map[string]bool{"result": true}), nil
 					}
-					return response(map[string]any{"result": map[string]any{"url": "https://example.com", "blocked": tc.mode == "blocked"}}), nil
+					return response(map[string]any{"result": map[string]any{"url": "https://example.com", "challenge": tc.mode == "blocked"}}), nil
 				case "read":
 					data := map[string]any{"content": "body", "contentType": "text/html", "finalUrl": "https://example.com", "source": "active-tab-html"}
 					switch tc.mode {

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stevemurr/strap/internal/webprocess"
 )
@@ -52,6 +53,8 @@ type envelope struct {
 }
 
 // These are host-authored DOM reads, never model- or page-supplied scripts.
+// The metadata read reports what a page is made of; blockedPage decides from
+// that whether it is a block page.
 const readyScript = `(async () => {
  const deadline = Date.now() + 2000;
  do {
@@ -69,9 +72,9 @@ const metadataScript = `(() => {
    if (a.href.length > 8192) { skipped = true; continue; }
    if (links.length < 200) links.push({text: (a.innerText || a.textContent || '').trim().slice(0, 500), url: a.href});
  }
- const shortGate = (document.body?.innerText || '').length < 4000 && /^(just a moment|attention required|access denied)[.!…\s]*$/i.test(document.title.trim());
- const blocked = shortGate || !!document.querySelector('#challenge-running, #challenge-stage, form#challenge-form, .anomaly-modal');
- return {url: location.href, title: document.title, links, links_truncated: skipped || seen.size > 200, blocked};
+ const challenge = !!document.querySelector('#cf-wrapper, #cf-error-details, #challenge-running, #challenge-stage, #challenge-error-text, form#challenge-form, [id^="cf-chl-widget"], iframe[src*="challenges.cloudflare.com"], #px-captcha, iframe[src*="captcha-delivery.com"], .anomaly-modal');
+ const captcha = !!document.querySelector('.g-recaptcha, .h-captcha, iframe[src*="/recaptcha/"], iframe[src*="hcaptcha.com"]');
+ return {url: location.href, title: document.title, links, links_truncated: skipped || seen.size > 200, challenge, captcha};
 })()`
 
 func (c *Client) Read(ctx context.Context, url string) (page Page, err error) {
@@ -194,7 +197,8 @@ func (c *Client) Read(ctx context.Context, url string) (page Page, err error) {
 			Title          string `json:"title"`
 			Links          []Link `json:"links"`
 			LinksTruncated bool   `json:"links_truncated"`
-			Blocked        bool   `json:"blocked"`
+			Challenge      bool   `json:"challenge"`
+			Captcha        bool   `json:"captcha"`
 		} `json:"result"`
 	}
 	if err := invoke(ctx, &metadata, "eval", metadataScript); err != nil {
@@ -203,8 +207,48 @@ func (c *Client) Read(ctx context.Context, url string) (page Page, err error) {
 	if metadata.Result.URL != read.FinalURL {
 		return page, errors.New("page navigated during extraction; open the URL again")
 	}
-	if metadata.Result.Blocked {
+	if blockedPage(metadata.Result.Title, *read.Content, metadata.Result.Challenge, metadata.Result.Captcha) {
 		return page, errors.New("site returned an access or browser challenge page instead of readable source content")
 	}
 	return Page{URL: read.FinalURL, Title: metadata.Result.Title, Content: *read.Content, ContentType: read.ContentType, Truncated: read.Truncated, Links: metadata.Result.Links, LinksTruncated: metadata.Result.LinksTruncated}, nil
+}
+
+// shortPage is how much text a page may have for a captcha widget, or a title
+// or text naming a check, to mark it blocked. The block pages seen had 240 to
+// 700 characters; a real article can carry a login captcha or quote the words.
+const shortPage = 4000
+
+// blockTitles name a check or a block in a page's title: Cloudflare's, the
+// captcha gates such as Reddit's, and PerimeterX's and Imperva's. Generic
+// words count only here, never in a page's text.
+var blockTitles = []string{"just a moment", "attention required", "access denied", "you have been blocked", "prove your humanity", "verify you are human", "are you a robot", "performing security verification", "access to this page has been denied", "pardon our interruption"}
+
+// blockTexts are what those pages say, which ordinary pages do not.
+var blockTexts = []string{"sorry, you have been blocked", "prove your humanity", "verify you are human", "performing security verification", "checking if the site connection is secure", "enable javascript and cookies to continue", "complete the challenge below", "unusual traffic from your computer network", "press & hold to confirm you are", "access to this page has been denied", "pardon our interruption"}
+
+// blockedPage reports whether a rendered page is an access check or a block
+// page rather than the page asked for. Challenge markup decides alone; a
+// captcha widget, or a title or text naming a check, only on a short page.
+func blockedPage(title, text string, challenge, captcha bool) bool {
+	if challenge {
+		return true
+	}
+	if utf8.RuneCountInString(text) >= shortPage {
+		return false
+	}
+	if captcha {
+		return true
+	}
+	title, text = strings.ToLower(title), strings.ToLower(text)
+	for _, name := range blockTitles {
+		if strings.Contains(title, name) {
+			return true
+		}
+	}
+	for _, words := range blockTexts {
+		if strings.Contains(text, words) {
+			return true
+		}
+	}
+	return false
 }
