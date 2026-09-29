@@ -34,7 +34,7 @@ type WebConfig struct {
 	SearchTimeout         time.Duration `json:"search_timeout_ns"`     // default 20 seconds, including queue/startup
 	OpenTimeout           time.Duration `json:"open_timeout_ns"`       // default 30 seconds after acquiring a slot, including browser startup
 	OpenQueueTimeout      time.Duration `json:"open_queue_timeout_ns"` // default 30 seconds waiting for a read slot
-	OpenConcurrency       int           `json:"open_concurrency"`      // default 2, maximum 16
+	OpenConcurrency       int           `json:"open_concurrency"`      // default 4, maximum 16; a web researcher's batch of reads runs at once
 	MaxPageChars          int           `json:"max_page_chars"`        // default 1 million Unicode code points retained per page
 	CacheBytes            int           `json:"cache_bytes"`           // default 16 MiB, including retained text and link metadata
 	CacheTTL              time.Duration `json:"cache_ttl_ns"`          // default 10 minutes; snapshots also evicted for space
@@ -99,7 +99,7 @@ func NewWeb(config WebConfig) (*Web, error) {
 	config.SearchTimeout = cmp.Or(config.SearchTimeout, 20*time.Second)
 	config.OpenTimeout = cmp.Or(config.OpenTimeout, 30*time.Second)
 	config.OpenQueueTimeout = cmp.Or(config.OpenQueueTimeout, 30*time.Second)
-	config.OpenConcurrency = cmp.Or(config.OpenConcurrency, 2)
+	config.OpenConcurrency = cmp.Or(config.OpenConcurrency, 4)
 	config.MaxPageChars = cmp.Or(config.MaxPageChars, 1_000_000)
 	config.CacheBytes = cmp.Or(config.CacheBytes, 16<<20)
 	config.CacheTTL = cmp.Or(config.CacheTTL, 10*time.Minute)

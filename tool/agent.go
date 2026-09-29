@@ -15,15 +15,21 @@ type sendMessageArgs struct {
 	Message string          `json:"message"`
 }
 
-// SendMessage routes an instruction through the executing agent's bound sender.
-func SendMessage() Tool {
+// SendMessage routes a message through the executing agent's bound sender.
+// resolve turns a role name such as "manager" into an agent id; the host's
+// topology decides whether the sender may reach that agent.
+func SendMessage(resolve func(message.ActorID) message.ActorID) Tool {
 	return builtin("send_message",
-		"Send an instruction to an existing agent. Returns a queued receipt; delivery status and replies are separate.",
+		"Send a message to an agent you are connected to. to is an agent id, or the role of an agent you can reach, such as \"manager\". You can reach only the agents the session connects you to; any other recipient is refused with the list you can reach. Your final text reply goes to whoever you work for without this tool. Returns a queued receipt; replies arrive as messages.",
 		func(ctx context.Context, call Call, args sendMessageArgs) (Result, error) {
 			if call.Sender == nil {
 				return Result{}, errors.New("send_message requires an agent sender")
 			}
-			receipt, err := call.Sender.Send(ctx, message.Draft{To: args.To, Kind: message.Instruction, Content: args.Message})
+			to := args.To
+			if resolve != nil {
+				to = resolve(to)
+			}
+			receipt, err := call.Sender.Send(ctx, message.Draft{To: to, Kind: message.Instruction, Content: args.Message})
 			if err != nil {
 				return Result{}, err
 			}
@@ -47,21 +53,31 @@ func MessageStatus(lookup func(message.MessageID) (message.Receipt, bool)) Tool 
 		})
 }
 
-var creationParameters = parameters[roster.CreateRequest](
-	Enum("role", "implementor", "auditor", "researcher"),
-	Description("role", "implementor executes tasks and repairs; auditor independently reviews submitted work; researcher investigates a bounded question."),
-)
+const workerRoles = "implementor executes tasks and repairs; reviewer reads files on this machine, in the workspace or any folder the user names such as ~/Downloads, and reports what they contain; web_researcher answers a bounded question from web searches and pages; deep_researcher runs a long multi-source deep research investigation, only when the user explicitly asked for deep research; experimenter measures how the code behaves, such as its performance or a bug's cause, by testing hypotheses in its own copy of the workspace."
 
-// DecodeAgentCreation validates the same wire contract advertised by CreateAgent.
-func DecodeAgentCreation(raw json.RawMessage) (roster.CreateRequest, error) {
-	return creationParameters.Decode(raw)
+// creationParameters offers auditors only when the manager assigns audits
+// itself; otherwise the harness creates a new auditor for every submission.
+func creationParameters(auditors bool) Parameters[roster.CreateRequest] {
+	if auditors {
+		return parameters[roster.CreateRequest](Enum("role", "implementor", "auditor", "reviewer", "web_researcher", "deep_researcher", "experimenter"),
+			Description("role", workerRoles+" auditor independently reviews one submission; every audit needs a new one."))
+	}
+	return parameters[roster.CreateRequest](Enum("role", "implementor", "reviewer", "web_researcher", "deep_researcher", "experimenter"), Description("role", workerRoles))
 }
 
-// CreateAgent creates an idle registered execution agent; assignment is separate.
-func CreateAgent(handle Handler[roster.CreateRequest]) Tool {
-	return Func[roster.CreateRequest]{Spec: Definition[roster.CreateRequest]{
-		Name: "create_agent", Description: "Create an idle agent. Choose implementor for tasks or repairs, auditor for independent review, or researcher for investigation. Returns agent_id and role. Then call assign_implementation, assign_repair, assign_audit, or assign_research with agent_id as assignee. Creation alone does not start a task.", Parameters: creationParameters,
-	}, Invoke: handle}
+// DecodeAgentCreation validates a creation request, including auditors.
+func DecodeAgentCreation(raw json.RawMessage) (roster.CreateRequest, error) {
+	return creationParameters(true).Decode(raw)
+}
+
+// CreateAgent creates an idle registered execution agent; assignment is
+// separate. auditors offers the auditor role, for owners that assign audits.
+func CreateAgent(handle Handler[roster.CreateRequest], auditors bool) Tool {
+	description := "Create an idle agent. Choose implementor for tasks or repairs, reviewer to read and report on files anywhere on this machine, web_researcher for external information, deep_researcher only when the user explicitly asked for deep research, or experimenter to measure how the code behaves. Returns agent_id and role. assign_task with a null assignee creates the agent itself, so create_agent is only for an agent you want idle before its work. The harness creates auditors itself. Creation alone does not start a task."
+	if auditors {
+		description = "Create an idle agent. Choose implementor for tasks or repairs, auditor for an independent review of one submission, reviewer to read and report on files anywhere on this machine, web_researcher for external information, deep_researcher only when the user explicitly asked for deep research, or experimenter to measure how the code behaves. Returns agent_id and role. assign_task with a null assignee creates the agent itself, so create_agent is only for an agent you want idle before its work, or an auditor. Creation alone does not start a task."
+	}
+	return Func[roster.CreateRequest]{Spec: Definition[roster.CreateRequest]{Name: "create_agent", Description: description, Parameters: creationParameters(auditors)}, Invoke: handle}
 }
 
 // Management tools decode IDs and invoke application-supplied operations. Their
@@ -84,7 +100,7 @@ type InspectAgentArgs struct {
 
 func InspectAgent(handle func(context.Context, Call, InspectAgentArgs) (Result, error)) Tool {
 	return builtin("inspect_agent",
-		"Read an agent's current lifecycle state and actual conversation transcript. Defaults to the latest 20 messages, maximum 100. Results are chronological. Use the first returned position as before to read earlier messages. This reads a snapshot without messaging or interrupting the target.",
+		"Read an agent's current lifecycle state and actual conversation transcript. Set before to null to read the latest messages. before is a transcript position, not a count: set it only to the first position an earlier inspect_agent result returned, to read the messages before that one. limit is how many messages to return: null for 20, at most 100. Results are chronological. This reads a snapshot without messaging or interrupting the target.",
 		func(ctx context.Context, call Call, args InspectAgentArgs) (Result, error) {
 			if strings.TrimSpace(string(args.AgentID)) == "" {
 				return Result{}, errors.New("agent_id must not be empty")

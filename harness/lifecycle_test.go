@@ -46,7 +46,7 @@ func TestCloseTimeoutKeepsOwnershipAndDrainsTail(t *testing.T) {
 	p := &blockedProvider{make(chan struct{}), make(chan struct{}), make(chan struct{})}
 	owned := &closer{}
 	s := newLifecycleSession(t, context.Background(), p, harness.OwnedResource{Name: "test", Resource: owned})
-	if _, err := s.Send(s.Root(), "run"); err != nil {
+	if _, err := s.Send(s.Manager(), "run"); err != nil {
 		t.Fatal(err)
 	}
 	<-p.started
@@ -59,13 +59,13 @@ func TestCloseTimeoutKeepsOwnershipAndDrainsTail(t *testing.T) {
 	if s.State() != harness.Closing || owned.calls.Load() != 0 {
 		t.Fatal("premature cleanup", s.State(), owned.calls.Load())
 	}
-	if _, err := s.Send(s.Root(), "late"); !errors.Is(err, harness.ErrClosed) {
+	if _, err := s.Send(s.Manager(), "late"); !errors.Is(err, harness.ErrClosed) {
 		t.Fatal(err)
 	}
-	if _, err := s.AssignWork(context.Background(), s.Root(), work.AssignmentRequest{Kind: work.Implementation, Task: "late"}); !errors.Is(err, harness.ErrClosed) {
+	if _, err := s.AssignWork(context.Background(), s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Task: "late"}); !errors.Is(err, harness.ErrClosed) {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateAgent(context.Background(), s.Root(), roster.CreateRequest{Role: roster.Implementor}); !errors.Is(err, harness.ErrClosed) {
+	if _, err := s.CreateAgent(context.Background(), s.Manager(), roster.CreateRequest{Role: roster.Implementor}); !errors.Is(err, harness.ErrClosed) {
 		t.Fatal(err)
 	}
 	close(p.release)
@@ -84,14 +84,14 @@ func TestCloseTimeoutKeepsOwnershipAndDrainsTail(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if exit, ok := e.(conversation.AgentExited); ok && exit.Agent == s.Root() {
+		if exit, ok := e.(conversation.AgentExited); ok && exit.Agent == s.Manager() {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatal("final agent exit was lost")
 	}
-	if _, err := s.InspectAgent(s.Root(), conversation.InspectOptions{}); err != nil {
+	if _, err := s.InspectAgent(s.Manager(), conversation.InspectOptions{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -132,7 +132,7 @@ func TestParentCancellationClosesSessionWithoutHostWait(t *testing.T) {
 	if err := s.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.Send(other.Root(), "still running"); err != nil {
+	if _, err := other.Send(other.Manager(), "still running"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -154,13 +154,13 @@ func TestShutdownCancelsAndJoinsHostTokenCount(t *testing.T) {
 	p := &blockedCounter{textResponse: "ready", started: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{})}
 	owned := &closer{}
 	s := newLifecycleSession(t, context.Background(), p, harness.OwnedResource{Name: "test", Resource: owned})
-	info, err := s.InspectAgent(s.Root(), conversation.InspectOptions{})
+	info, err := s.InspectAgent(s.Manager(), conversation.InspectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	counted := make(chan error, 1)
 	go func() {
-		_, err := s.CountAgentTokens(context.Background(), s.Root(), info.ContextRevision)
+		_, err := s.CountAgentTokens(context.Background(), s.Manager(), info.ContextRevision)
 		counted <- err
 	}()
 	select {
@@ -193,7 +193,7 @@ func (failingProvider) Submit(context.Context, provider.Request, provider.Observ
 }
 func TestTerminalOutcomeSurvivesStorageDisposal(t *testing.T) {
 	s := newLifecycleSession(t, context.Background(), failingProvider{})
-	if _, err := s.Send(s.Root(), "run"); err != nil {
+	if _, err := s.Send(s.Manager(), "run"); err != nil {
 		t.Fatal(err)
 	}
 	for {

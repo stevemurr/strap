@@ -55,7 +55,7 @@ func TestRejectedArgumentsSurviveFramedJSONLArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	if _, err := s.Send(s.Root(), "hello"); err != nil {
+	if _, err := s.Send(s.Manager(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	for {
@@ -128,7 +128,7 @@ func TestRejectedArgumentsSurviveFramedJSONLArchive(t *testing.T) {
 // A rejected call's retry notice must not poison projection replay: every
 // later read of the session, and the wake context of every agent, depends on
 // it. Before the fix the notice carried the failed output's id, the projector
-// rejected it with "history output mismatch", and the root died on its next
+// rejected it with "history output mismatch", and the agent died on its next
 // workflow call.
 func TestRejectedCallNoticeKeepsProjectionReadable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -145,14 +145,14 @@ func TestRejectedCallNoticeKeepsProjectionReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err := s.Send(s.Root(), "plan it"); err != nil {
+	if _, err := s.Send(s.Manager(), "plan it"); err != nil {
 		t.Fatal(err)
 	}
-	awaitAgentState(t, s, s.Root(), agent.Failed) // Two retries, then the agent gives up.
-	if _, err := s.ListWork(ctx, s.Root(), work.ListQuery{Limit: 10}); err != nil {
+	awaitAgentState(t, s, s.Manager(), agent.Failed) // Two retries, then the agent gives up.
+	if _, err := s.ListWork(ctx, s.Manager(), work.ListQuery{Limit: 10}); err != nil {
 		t.Fatalf("projection unreadable after a rejected call: %v", err)
 	}
-	if _, err := s.InspectAgentContext(ctx, s.Root(), conversation.InspectOptions{}); err != nil {
+	if _, err := s.InspectAgentContext(ctx, s.Manager(), conversation.InspectOptions{}); err != nil {
 		t.Fatalf("agent context unreadable after a rejected call: %v", err)
 	}
 }

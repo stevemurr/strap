@@ -64,6 +64,12 @@ func (t *thread) messagesAt(revision uint64) ([]provider.Message, error) {
 	return provider.CopyMessages(messages), nil
 }
 
+func (t *thread) length() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.revision
+}
+
 func (t *thread) requestMessages() ([]provider.Message, uint64) {
 	t.mu.RLock()
 	// Copy the outer slice under the lock; immutable payloads can be cloned outside.
@@ -106,12 +112,10 @@ func (t *thread) snapshot(q TranscriptQuery) (TranscriptPage, error) {
 		return TranscriptPage{}, fmt.Errorf("%w: transcript limit must be between 1 and %d", ErrInvalidQuery, MaxTranscriptLimit)
 	}
 	t.mu.RLock()
+	// A position past the end reads the latest messages, as the harness's
+	// projected transcripts do.
 	end := len(t.messages)
-	if q.Before != 0 {
-		if q.Before > uint64(end)+1 {
-			t.mu.RUnlock()
-			return TranscriptPage{}, fmt.Errorf("%w: transcript position %d is beyond the thread", ErrInvalidQuery, q.Before)
-		}
+	if q.Before != 0 && q.Before <= uint64(end) {
 		end = int(q.Before - 1)
 	}
 	start := max(0, end-q.Limit)

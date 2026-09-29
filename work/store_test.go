@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/stevemurr/strap/identity"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -53,11 +54,17 @@ func submit(t *testing.T, s *Store, w Work) Submission {
 }
 func review(t *testing.T, s *Store, id ID, sub SubmissionID) Work {
 	t.Helper()
+	return reviewAs(t, s, id, sub, "reviewer")
+}
+
+// reviewAs assigns the audit to auditor; every audit needs a new one.
+func reviewAs(t *testing.T, s *Store, id ID, sub SubmissionID, auditor identity.ActorID) Work {
+	t.Helper()
 	w, e := s.GetWork("root", id)
 	if e != nil {
 		t.Fatal(e)
 	}
-	a, e := s.AssignAudit("root", AssignAuditRequest{WorkTarget: target(w), SubmissionID: sub, Auditor: "reviewer"})
+	a, e := s.AssignAudit("root", AssignAuditRequest{WorkTarget: target(w), SubmissionID: sub, Auditor: auditor})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -127,11 +134,11 @@ func TestAuditRepairAcceptance(t *testing.T) {
 	if replacement.Supersedes != sub.ID || len(replacement.Steps) != 2 {
 		t.Fatal(replacement)
 	}
-	a2 := review(t, s, w.ID, replacement.ID)
-	if _, e = s.SubmitAudit("reviewer", AuditRequest{WorkTarget: target(a2), SubmissionID: sub.ID, Verdict: Pass, Summary: "stale"}); !errors.Is(e, ErrState) {
+	a2 := reviewAs(t, s, w.ID, replacement.ID, "reviewer-2")
+	if _, e = s.SubmitAudit("reviewer-2", AuditRequest{WorkTarget: target(a2), SubmissionID: sub.ID, Verdict: Pass, Summary: "stale"}); !errors.Is(e, ErrState) {
 		t.Fatal(e)
 	}
-	_, e = s.SubmitAudit("reviewer", AuditRequest{WorkTarget: target(a2), SubmissionID: replacement.ID, Verdict: Pass, Summary: "verified"})
+	_, e = s.SubmitAudit("reviewer-2", AuditRequest{WorkTarget: target(a2), SubmissionID: replacement.ID, Verdict: Pass, Summary: "verified"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -189,7 +196,7 @@ func TestPlanScopeAndAtomicity(t *testing.T) {
 		t.Fatal("progress invalidated structural revision", e)
 	}
 }
-func TestReassignmentCancellationAndSnapshots(t *testing.T) {
+func TestCancellationAndSnapshots(t *testing.T) {
 	s, p, w := fixture(t)
 	originalScope := w.Scope.StepIDs[0]
 	w.Scope.StepIDs[0] = "mutated"
@@ -198,28 +205,12 @@ func TestReassignmentCancellationAndSnapshots(t *testing.T) {
 		t.Fatal("snapshot alias")
 	}
 	w = snapshot
-	old := target(w)
-	replacement, e := s.Reassign("root", ReassignRequest{WorkTarget: old, Assignee: "replacement"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if replacement.AssignedAtRevision != replacement.Revision {
-		t.Fatal(replacement)
-	}
-	if _, e = s.reportSnapshot("impl", ReportWorkProgressRequest{WorkID: old.ID, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("old")}}); !errors.Is(e, ErrForbidden) {
-		t.Fatal(e)
-	}
-	// The new assignee reports on its own assignment without having to learn
-	// the revision the reassignment produced.
-	if _, e = s.reportSnapshot("replacement", ReportWorkProgressRequest{WorkID: old.ID, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("old")}}); e != nil {
-		t.Fatal(e)
-	}
-	replacement = ready(t, s, replacement)
-	binding := replacement.AssignedAtRevision
-	if replacement.Revision == binding {
+	var e error
+	w = ready(t, s, w)
+	if w.Revision == w.AssignedAtRevision {
 		t.Fatal("progress did not advance revision")
 	}
-	sub := submit(t, s, replacement)
+	sub := submit(t, s, w)
 	sub.Steps[0].AcceptanceCriteria[0] = "mutation"
 	sub.Evidence[0] = "mutation"
 	stored, _ := s.GetSubmission("root", sub.ID)
@@ -227,9 +218,6 @@ func TestReassignmentCancellationAndSnapshots(t *testing.T) {
 		t.Fatal("submission alias")
 	}
 	a := review(t, s, w.ID, sub.ID)
-	if _, e = s.Reassign("root", ReassignRequest{WorkTarget: target(a), Assignee: "replacement"}); !errors.Is(e, ErrForbidden) {
-		t.Fatal("self-review allowed", e)
-	}
 	a, e = s.Cancel("root", CancelRequest{WorkTarget: target(a), Reason: "different reviewer needed"})
 	if e != nil || a.State != Cancelled {
 		t.Fatal(e)
@@ -238,7 +226,7 @@ func TestReassignmentCancellationAndSnapshots(t *testing.T) {
 	if current.State != NeedsCheck {
 		t.Fatal(current)
 	}
-	a = review(t, s, w.ID, sub.ID)
+	a = reviewAs(t, s, w.ID, sub.ID, "reviewer-2")
 	current, _ = s.GetWork("root", w.ID)
 	if _, e = s.Cancel("root", CancelRequest{WorkTarget: target(current), Reason: "scope changed"}); e != nil {
 		t.Fatal(e)
@@ -307,7 +295,7 @@ func TestStandaloneAuditAndRepairCancellation(t *testing.T) {
 	}
 }
 
-func TestRepairReassignmentKeepsReadAndWriteScope(t *testing.T) {
+func TestRepairKeepsReadAndWriteScope(t *testing.T) {
 	s, p, w := fixture(t)
 	w = ready(t, s, w)
 	sub := submit(t, s, w)
@@ -316,19 +304,17 @@ func TestRepairReassignmentKeepsReadAndWriteScope(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	repair, _ := assignRepairForTest(t, s, outcome)
-	repair, e = s.Reassign("root", ReassignRequest{WorkTarget: target(repair), Assignee: "replacement"})
+	// A separate repairer sees only the steps the failed audit named.
+	original, _ := s.GetWork("root", w.ID)
+	repair, e := s.AssignRepair("root", AssignRepairRequest{WorkTarget: target(original), Assignee: "replacement", AuditID: outcome.ID})
 	if e != nil {
 		t.Fatal(e)
 	}
-	original, _ := s.GetWork("root", w.ID)
-	if original.Assignee != "impl" {
-		t.Fatal("repair silently reassigned original")
-	}
-	if _, e = s.GetWork("replacement", w.ID); !errors.Is(e, ErrForbidden) {
+	repairer := repair.Assignee
+	if _, e = s.GetWork(repairer, w.ID); !errors.Is(e, ErrForbidden) {
 		t.Fatal("repair actor can read parent", e)
 	}
-	plan, e := s.GetPlan("replacement", p.ID)
+	plan, e := s.GetPlan(repairer, p.ID)
 	if e != nil || len(plan.Steps) != 1 {
 		t.Fatal("repair scope broadened", plan, e)
 	}
@@ -337,7 +323,7 @@ func TestRepairReassignmentKeepsReadAndWriteScope(t *testing.T) {
 	if len(view.Steps) != 1 || view.Steps[0].ID != p.Steps[0].ID {
 		t.Fatal("submission result leaked steps", view)
 	}
-	view, e = s.GetSubmission("replacement", view.ID)
+	view, e = s.GetSubmission(repairer, view.ID)
 	if e != nil || len(view.Steps) != 1 {
 		t.Fatal("submission read leaked steps", e)
 	}
@@ -345,13 +331,13 @@ func TestRepairReassignmentKeepsReadAndWriteScope(t *testing.T) {
 	if len(full.Steps) != 2 {
 		t.Fatal("canonical submission narrowed")
 	}
-	a = review(t, s, w.ID, view.ID)
-	next, e := s.SubmitAudit("reviewer", AuditRequest{WorkTarget: target(a), SubmissionID: view.ID, Verdict: Fail, Summary: "still needs repair", Findings: []Finding{{StepIDs: []StepID{p.Steps[0].ID}, Description: "still bad", RequiredChange: "fix", Verification: "test"}}})
+	a = reviewAs(t, s, w.ID, view.ID, "reviewer-2")
+	next, e := s.SubmitAudit("reviewer-2", AuditRequest{WorkTarget: target(a), SubmissionID: view.ID, Verdict: Fail, Summary: "still needs repair", Findings: []Finding{{StepIDs: []StepID{p.Steps[0].ID}, Description: "still bad", RequiredChange: "fix", Verification: "test"}}})
 	if e != nil {
 		t.Fatal(e)
 	}
 	nextRepair, _ := assignRepairForTest(t, s, next)
-	if nextRepair.Assignee != "replacement" {
+	if nextRepair.Assignee != repairer {
 		t.Fatal("repair returned to obsolete implementor", nextRepair)
 	}
 }
@@ -367,4 +353,40 @@ func assignRepairForTest(t *testing.T, s *Store, a Audit) (Work, error) {
 		return Work{}, e
 	}
 	return s.AssignRepair("root", AssignRepairRequest{WorkTarget: target(original), Assignee: func() identity.ActorID { sub, _ := s.GetSubmission("root", a.SubmissionID); return sub.SubmittedBy }(), AuditID: a.ID})
+}
+
+// Every audit gets a new auditor: the auditor of an earlier submission, like
+// any agent that already held work, is refused for the next one.
+func TestEveryAuditNeedsANewAuditor(t *testing.T) {
+	s, _, w := fixture(t)
+	w = ready(t, s, w)
+	sub := submit(t, s, w)
+	a := review(t, s, w.ID, sub.ID)
+	if _, e := s.Cancel("root", CancelRequest{WorkTarget: target(a), Reason: "auditor stopped"}); e != nil {
+		t.Fatal(e)
+	}
+	current, _ := s.GetWork("root", w.ID)
+	_, e := s.AssignAudit("root", AssignAuditRequest{WorkTarget: target(current), SubmissionID: sub.ID, Auditor: "reviewer"})
+	if !errors.Is(e, ErrForbidden) || !strings.Contains(e.Error(), "create a new auditor for every audit") {
+		t.Fatalf("reused auditor: %v", e)
+	}
+	if a2 := reviewAs(t, s, w.ID, sub.ID, "reviewer-2"); a2.Assignee != "reviewer-2" {
+		t.Fatal(a2)
+	}
+}
+
+// An audit of scoped work names its criteria, not the implementor's task,
+// which can say how the manager wanted the work built; unscoped work has no
+// criteria, so its task is the requirement.
+func TestAuditTaskChecksCriteriaNotHowItWasBuilt(t *testing.T) {
+	s, _, w := fixture(t)
+	w = ready(t, s, w)
+	a := review(t, s, w.ID, submit(t, s, w).ID)
+	if strings.Contains(a.Task, w.Task) || !strings.Contains(a.Task, "acceptance criteria") || a.Scope == nil {
+		t.Fatalf("scoped audit task: %q", a.Task)
+	}
+	unscoped := Work{ID: "work-x", Task: "rename the widget"}
+	if got := AuditTask(unscoped, "submission-x"); !strings.Contains(got, "rename the widget") {
+		t.Fatalf("unscoped audit task: %q", got)
+	}
 }

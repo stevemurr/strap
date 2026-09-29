@@ -46,7 +46,7 @@ func TestScriptValidatesAssignmentsAndWorkerCapabilities(t *testing.T) {
 	for _, mode := range []string{"missing root work", "stale review notification", "unknown worker work", "delegating worker", "implementing auditor"} {
 		t.Run(mode, func(t *testing.T) {
 			store := work.New()
-			p := &cycleProvider{root: "root", implementor: "worker", auditor: "reviewer", assigned: true, reviews: map[work.SubmissionID]bool{}, session: &workflow.Session{Store: store}}
+			p := &cycleProvider{manager: "root", implementor: "worker", auditor: "reviewer", assigned: true, reviews: map[work.SubmissionID]bool{}, session: &workflow.Session{Store: store}}
 			w, err := store.AssignWork("root", work.AssignRequest{Assignee: "worker", Task: "task"})
 			if err != nil {
 				t.Fatal(err)
@@ -62,7 +62,7 @@ func TestScriptValidatesAssignmentsAndWorkerCapabilities(t *testing.T) {
 			case "unknown worker work":
 				request.Messages[0].Envelope.Work = &work.Work{ID: "missing"}
 			case "delegating worker":
-				request.Tools = []provider.ToolDefinition{{Name: "assign_implementation"}}
+				request.Tools = []provider.ToolDefinition{{Name: "assign_task"}}
 			case "implementing auditor":
 				sub, err := store.SubmitWork("worker", work.SubmitRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Summary: "ready"})
 				if err != nil {
@@ -98,7 +98,7 @@ func TestDelegationCancellationDuringStartupAndExecution(t *testing.T) {
 		t.Fatal(code)
 	}
 	s := &workflow.Session{Store: work.New()}
-	p := &cycleProvider{done: make(chan work.Work, 1), root: "root"}
+	p := &cycleProvider{done: make(chan work.Work, 1), manager: "root"}
 	if err := reportOutcome(ctx, s, p); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}

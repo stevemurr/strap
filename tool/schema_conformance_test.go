@@ -59,13 +59,17 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 		invalid  []schemaMutation
 	}{
 		{
-			"assign_implementation",
-			`{"input":{"assignee":"worker","task":"implement","context":"background","expected_output":"patch","scope":{"plan_id":"p","step_ids":["s"]}}}`,
-			[]string{"assignee", "task"},
+			"assign_task",
+			`{"input":{"kind":"implementation","assignee":"worker","task":"implement","context":"background","expected_output":"patch","scope":{"plan_id":"p","step_ids":["s"]}}}`,
+			[]string{"kind", "task"},
 			[]schemaMutation{
 				{"mixed submission", "submission_id", `"s"`},
 				{"mixed revision", "expected_revision", `1`},
-				{"legacy discriminator", "kind", `"implementation"`},
+				{"removed research kind", "kind", `"research"`},
+				{"audit kind", "kind", `"audit"`},
+				{"repair kind", "kind", `"repair"`},
+				{"missing assignee", "assignee", ""},
+				{"empty assignee", "assignee", `""`},
 				{"empty task", "task", `""`},
 				{"wrong context", "context", `42`},
 				{"wrong scope", "scope", `42`},
@@ -74,6 +78,18 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 				{"no steps", "scope.step_ids", `[]`},
 				{"empty step", "scope.step_ids", `[""]`},
 				{"null step", "scope.step_ids", `["s",null]`},
+			},
+		},
+		{
+			// A null assignee staffs the work with a new agent of the kind's role.
+			"assign_task",
+			`{"input":{"kind":"review","assignee":null,"task":"investigate","context":"background","expected_output":"findings","scope":null}}`,
+			[]string{"kind", "task"},
+			[]schemaMutation{
+				{"empty scope", "scope", `{"plan_id":"p","step_ids":[]}`},
+				{"mixed work", "work_id", `"w"`},
+				{"wrong optional", "expected_output", `42`},
+				{"unknown kind", "kind", `"reviewing"`},
 			},
 		},
 		{
@@ -101,16 +117,6 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 				{"negative revision", "expected_revision", `-1`},
 			},
 		},
-		{
-			"assign_research",
-			`{"input":{"assignee":"researcher","task":"investigate","context":"background","expected_output":"findings"}}`,
-			[]string{"assignee", "task"},
-			[]schemaMutation{
-				{"mixed scope", "scope", `{"plan_id":"p","step_ids":["s"]}`},
-				{"mixed work", "work_id", `"w"`},
-				{"wrong optional", "expected_output", `42`},
-			},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			op := operations[tc.name]
@@ -119,14 +125,12 @@ func TestAssignmentSchemasAndTypedDecodersConform(t *testing.T) {
 			}
 			var decode func(json.RawMessage) error
 			switch tc.name {
-			case "assign_implementation":
-				decode = exportedParameterDecoder[AssignImplementationArgs](t, op)
+			case "assign_task":
+				decode = exportedParameterDecoder[AssignTaskArgs](t, op)
 			case "assign_audit":
 				decode = exportedParameterDecoder[AssignAuditArgs](t, op)
 			case "assign_repair":
 				decode = exportedParameterDecoder[AssignRepairArgs](t, op)
-			case "assign_research":
-				decode = exportedParameterDecoder[AssignResearchArgs](t, op)
 			}
 			schema := compileExportedSchema(t, op.Definition().Parameters)
 			check := func(t *testing.T, raw json.RawMessage, want bool) {

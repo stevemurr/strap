@@ -1,6 +1,10 @@
 package work
 
-import "github.com/stevemurr/strap/identity"
+import (
+	"fmt"
+
+	"github.com/stevemurr/strap/identity"
+)
 
 // AssignmentRequest is a normalized command. Wire adapters validate field presence
 // before constructing it; all assignments require an existing assignee.
@@ -36,9 +40,9 @@ func (r AssignmentRequest) Validate() error {
 		if blank(r.Task) || r.WorkID != "" || r.ExpectedRevision != 0 || r.SubmissionID != "" || r.AuditID != "" {
 			return invalid("implementation requires task and cannot select a submission or audit")
 		}
-	case Research:
-		if blank(r.Task) || r.Scope != nil || r.WorkID != "" || r.ExpectedRevision != 0 || r.SubmissionID != "" || r.AuditID != "" {
-			return invalid("research requires task and forbids scope, submission and audit selectors")
+	case Review, WebResearch, DeepResearch, Experiment:
+		if blank(r.Task) || r.WorkID != "" || r.ExpectedRevision != 0 || r.SubmissionID != "" || r.AuditID != "" {
+			return invalid(fmt.Sprintf("%s requires task and forbids submission and audit selectors", r.Kind))
 		}
 	case AuditWork, Repair:
 		if blank(string(r.WorkID)) || r.ExpectedRevision == 0 || r.Scope != nil || r.Task != "" || r.Context != "" || r.ExpectedOutput != "" {
@@ -51,7 +55,7 @@ func (r AssignmentRequest) Validate() error {
 			return invalid("repair requires audit_id and forbids submission_id")
 		}
 	default:
-		return invalid("kind must be implementation, audit, repair, or research")
+		return invalid("kind must be implementation, review, web_research, deep_research, experiment, audit, or repair")
 	}
 	return nil
 }

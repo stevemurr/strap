@@ -25,7 +25,7 @@ type schemaLedger struct {
 	Plans       map[work.PlanID]work.Plan
 	Submissions map[work.SubmissionID]work.Submission
 	Audits      map[work.AuditID]work.Audit
-	Briefs      map[work.ResearchBriefID]work.ResearchBrief
+	Briefs      map[work.BriefID]work.Brief
 	Reports     map[work.ProgressReportID]work.WorkProgressReport
 }
 
@@ -33,7 +33,7 @@ func newSchemaLedger() schemaLedger {
 	return schemaLedger{
 		Works: map[work.ID]work.Work{}, Plans: map[work.PlanID]work.Plan{},
 		Submissions: map[work.SubmissionID]work.Submission{}, Audits: map[work.AuditID]work.Audit{},
-		Briefs: map[work.ResearchBriefID]work.ResearchBrief{}, Reports: map[work.ProgressReportID]work.WorkProgressReport{},
+		Briefs: map[work.BriefID]work.Brief{}, Reports: map[work.ProgressReportID]work.WorkProgressReport{},
 	}
 }
 
@@ -54,7 +54,7 @@ func (s schemaLedger) apply(c work.Change) {
 	for _, v := range c.Audits {
 		s.Audits[v.ID] = v.Clone()
 	}
-	for _, v := range c.ResearchBriefs {
+	for _, v := range c.Briefs {
 		s.Briefs[v.ID] = v.Clone()
 	}
 	for _, v := range c.ProgressReports {
@@ -410,7 +410,7 @@ func expectedSchemaTransition(f fixture, before schemaLedger, call provider.Tool
 		if created.ID == "" {
 			return want, false, false
 		}
-		audit := work.Work{ID: created.ID, Kind: work.AuditWork, State: work.Active, Revision: 1, AssignedAtRevision: 1, Owner: f.Root, RequestedBy: f.actor(), Assignee: f.Auditor, ParentID: original.ID, SubjectSubmissionID: f.Submission.ID, Task: "Audit the submitted outcome: " + original.Task, ExpectedOutput: "Submit a pass or fail verdict with evidence. If unable to verify, report a blocker.", Scope: original.Scope}
+		audit := work.Work{ID: created.ID, Kind: work.AuditWork, State: work.Active, Revision: 1, AssignedAtRevision: 1, Owner: f.Coordinator, RequestedBy: f.actor(), Assignee: f.Auditor, ParentID: original.ID, SubjectSubmissionID: f.Submission.ID, Task: work.AuditTask(original, f.Submission.ID), ExpectedOutput: "Submit a pass or fail verdict with evidence. If unable to verify, report a blocker.", Scope: original.Scope}
 		original.State, original.Revision = work.Checking, original.Revision+1
 		expected.Works = []work.Work{original, audit}
 		var got work.Work

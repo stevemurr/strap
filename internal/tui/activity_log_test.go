@@ -62,7 +62,7 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 	cfg.Web = nil
 	cfg.Telemetry.ContextTokens = false
 	cfg.Events.JSONLPath = filepath.Join(dir, "session.jsonl")
-	session, err := harness.New(ctx, cfg, harness.Dependencies{Provider: &responseScript{}})
+	session, err := harness.New(ctx, cfg, harness.Dependencies{Manager: harness.AgentDependencies{Provider: &responseScript{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,8 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 	m := newModel(ctx, cancel, observed, Options{})
 	// All unfolded output fits, ruling out normal viewport scrolling.
 	m.Update(tea.WindowSizeMsg{Width: 124, Height: 60})
-	if _, err := session.Send(session.Root(), "Run three read-only steps, then reply."); err != nil {
+	m.focusCommand([]string{"/focus", string(session.Manager())}) // Watch the agent doing the work.
+	if _, err := session.Send(session.Manager(), "Run three read-only steps, then reply."); err != nil {
 		t.Fatal(err)
 	}
 	observedThirdCall := false
@@ -87,7 +88,7 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 		after := ansi.Strip(m.View())
 		if e, ok := msg.event.(conversation.AgentEvent); ok {
 			if start, ok := e.Event.(agent.OutputStarted); ok && start.Output.Call == 3 {
-				original := m.outputEntry(identity.OutputID{Agent: session.Root(), Call: 1})
+				original := m.outputEntry(identity.OutputID{Agent: session.Manager(), Call: 1})
 				observedThirdCall = true
 				for _, text := range successiveResponses[:2] {
 					if !strings.Contains(before, text) || !strings.Contains(after, text) {
@@ -99,10 +100,10 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 				}
 			}
 		}
-		if e, ok := msg.event.(conversation.MessageEvent); ok && e.Message.Kind == message.Reply && e.Message.To == message.User {
+		if e, ok := msg.event.(conversation.MessageEvent); ok && e.Message.Kind == message.Reply && e.Message.From == session.Manager() {
 			replies++
 			if replies == 1 {
-				if _, err := session.Send(session.Root(), "Reply once more."); err != nil {
+				if _, err := session.Send(session.Manager(), "Reply once more."); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -112,7 +113,7 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 		t.Fatal("fixture did not exercise the next response starting")
 	}
 	for i, want := range successiveResponses {
-		id := identity.OutputID{Agent: session.Root(), Call: uint64(i + 1)}
+		id := identity.OutputID{Agent: session.Manager(), Call: uint64(i + 1)}
 		row := m.outputEntry(id)
 		if row == nil || row.body != want {
 			t.Fatalf("live entry %v: %+v", id, row)
@@ -126,7 +127,7 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 			t.Fatalf("log output %v: %q, %v", id, stored.Text, err)
 		}
 	}
-	agentView, err := session.InspectAgent(session.Root(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
+	agentView, err := session.InspectAgent(session.Manager(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestSuccessiveResponsesRemainVisibleAndRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, want := range successiveResponses {
-		id := identity.OutputID{Agent: session.Root(), Call: uint64(i + 1)}
+		id := identity.OutputID{Agent: session.Manager(), Call: uint64(i + 1)}
 		stored, err := view.ReadOutputText(ctx, inspection.OutputTextQuery{Output: id, MaxBytes: 4096})
 		if err != nil || stored.Text != want {
 			t.Fatalf("reopened archive output %v: %q, %v", id, stored.Text, err)

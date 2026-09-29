@@ -48,13 +48,13 @@ func (s *Session) progressReadTool(brief bool) func(context.Context, tool.Call, 
 		if e != nil {
 			return tool.Result{}, e
 		}
-		return tool.JSON(v)
+		return modelJSON(v)
 	}
 }
 func (s *Session) ReadWorkProgress(ctx context.Context, actor identity.ActorID, q inspection.ProgressQuery) (inspection.ProgressPage, error) {
 	return s.progressReads.ReadFamily(ctx, actor, q, false)
 }
-func (s *Session) ReadResearchBrief(ctx context.Context, actor identity.ActorID, q inspection.ProgressQuery) (inspection.ProgressPage, error) {
+func (s *Session) ReadBrief(ctx context.Context, actor identity.ActorID, q inspection.ProgressQuery) (inspection.ProgressPage, error) {
 	return s.progressReads.ReadFamily(ctx, actor, q, true)
 }
 func (s *Session) ListWorkProgressReports(ctx context.Context, actor identity.ActorID, q work.ReportQuery) (work.ReportPage, error) {
@@ -66,11 +66,20 @@ func (s *Session) ListWorkProgressFindings(ctx context.Context, actor identity.A
 
 // wakeContext gives an agent its current plans, owned work and assignments
 // at the start of each exchange, read from the same accepted-log view that
-// admission uses, and on its first exchange a listing of the working
-// directory. Agents with nothing to add receive nothing.
-func (s *Session) wakeContext(actor identity.ActorID) agent.WakeContext {
+// admission uses, and, if it can read files, on its first exchange a listing
+// of the working directory. Agents with nothing to add receive nothing.
+func (s *Session) wakeContext(actor identity.ActorID, spec agent.Spec) agent.WakeContext {
 	var listed atomic.Bool
-	return func(ctx context.Context, _ []message.Message) (*message.Message, error) {
+	// Only an agent that can read files is shown them; one without workspace
+	// tools, shown the listing, planned the work itself instead of passing it
+	// on (probe of ladder easy-03: 20 of 60 samples passed it on with the
+	// listing, 42 without).
+	listed.Store(!readsFiles(spec))
+	return func(ctx context.Context, inputs []message.Message) (*message.Message, error) {
+		// A solo agent's finish check judges only what this exchange changed.
+		if s.finish != nil && actor == s.Manager() {
+			s.finish.reset(inputs)
+		}
 		head, err := s.progressReads.Reader.Head(ctx)
 		if err != nil {
 			return nil, err
@@ -89,19 +98,33 @@ func (s *Session) wakeContext(actor identity.ActorID) agent.WakeContext {
 				if real, err := filepath.EvalSymlinks(dir); err == nil {
 					dir = real
 				}
-				workspace = workspaceListing(dir)
+				workspace = s.listWorkspace(actor, dir)
 			}
 		}
 		empty := len(state.Plans)+len(state.Owned)+len(state.Assigned) == 0
-		if empty && workspace == nil {
+		var note string
+		if s.finish != nil && actor == s.Manager() && s.finish.testerRequested() {
+			note = testerNote
+		}
+		if empty && workspace == nil && note == "" {
 			return nil, nil
 		}
-		m := &message.Message{From: actor, To: actor, Kind: message.Observation, Workspace: workspace}
+		m := &message.Message{From: actor, To: actor, Kind: message.Observation, Workspace: workspace, Content: note}
 		if !empty {
 			m.State = &state
 		}
 		return m, nil
 	}
+}
+
+func readsFiles(spec agent.Spec) bool {
+	for _, t := range spec.Tools {
+		switch t.Definition().Name {
+		case "read_file", "list_directory", "glob":
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Session) inboxAdmission(actor identity.ActorID) agent.InboxAdmission {
@@ -114,7 +137,9 @@ func (s *Session) inboxAdmission(actor identity.ActorID) agent.InboxAdmission {
 		}
 		decision := agent.InboxDecision{Session: head.Cursor.Session, Through: head.Cursor.Sequence}
 		for _, m := range inputs {
-			decision.Wake = decision.Wake || workflow.ProgressNoticeWakes(m)
+			// A reply to an assignment the ledger already resolved is consumed
+			// into history without waking: the ledger notice is the one trigger.
+			decision.Wake = decision.Wake || workflow.ProgressNoticeWakes(m) && !s.workflow.ResolvedAssignmentReply(m)
 		}
 		return decision, nil
 	}
@@ -125,7 +150,8 @@ func (s *Session) lookupExecutionEvidence(ref string) (work.ExecutionEvidence, e
 	if err != nil {
 		return work.ExecutionEvidence{}, err
 	}
-	e, err := v.GetExecutionEvidence(context.Background(), s.Root(), ref)
+	// All work belongs to the session's manager, so the host reads as it.
+	e, err := v.GetExecutionEvidence(context.Background(), s.Manager(), ref)
 	if err != nil {
 		return work.ExecutionEvidence{}, err
 	}

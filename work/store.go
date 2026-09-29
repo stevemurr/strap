@@ -27,9 +27,13 @@ type Store struct {
 	submissions      map[SubmissionID]Submission
 	audits           map[AuditID]Audit
 	progressReports  map[ProgressReportID]WorkProgressReport
-	researchBriefs   map[ResearchBriefID]ResearchBrief
+	researchBriefs   map[BriefID]Brief
+	conclusions      map[ConclusionID]Conclusion
+	sequence         map[string]uint64 // Issue order of runs and hypotheses; see order.
+	issuedCount      uint64
 	progressFindings map[ProgressFindingID]ProgressFinding
 	reserved         map[StepID]ID
+	ids              func(prefix string) string
 	events           []Event
 	ready            chan struct{}
 }
@@ -37,7 +41,8 @@ type Store struct {
 func New(options ...Option) *Store {
 	s := &Store{plans: map[PlanID]Plan{}, works: map[ID]Work{}, submissions: map[SubmissionID]Submission{}, audits: map[AuditID]Audit{}, reserved: map[StepID]ID{}, ready: make(chan struct{}, 1)}
 	s.progressReports = map[ProgressReportID]WorkProgressReport{}
-	s.researchBriefs = map[ResearchBriefID]ResearchBrief{}
+	s.researchBriefs = map[BriefID]Brief{}
+	s.conclusions = map[ConclusionID]Conclusion{}
 	s.progressFindings = map[ProgressFindingID]ProgressFinding{}
 	for _, o := range options {
 		o(s)
@@ -54,6 +59,12 @@ func (s *Store) id(prefix string) string { return s.mint(prefix + "-") }
 func (s *Store) mint(prefix string) string {
 	if s.issued == nil {
 		s.issued = map[string]bool{}
+	}
+	if s.ids != nil {
+		if candidate := s.ids(prefix); candidate != "" && !s.issued[candidate] {
+			s.issued[candidate] = true
+			return candidate
+		}
 	}
 	for {
 		suffix := strconv.FormatUint(rand.Uint64()%idSpace, 36)
@@ -152,13 +163,13 @@ func (s *Store) knownBriefs(actor identity.ActorID) string {
 		}
 	}
 	for _, w := range s.works {
-		if w.Kind == Research && live(w) && w.LatestResearchBriefID == "" && w.visibleTo(actor) {
+		if w.Kind.Investigation() && live(w) && w.LatestBriefID == "" && w.visibleTo(actor) {
 			pending = append(pending, string(w.ID))
 		}
 	}
 	out := known("delivered briefs", "no brief has been delivered to you", delivered)
 	if len(pending) > 0 {
-		out += "; " + known("research not yet delivered", "", pending)
+		out += "; " + known("briefs not yet delivered", "", pending)
 	}
 	return out
 }
@@ -273,7 +284,9 @@ func (s *Store) UpdatePlan(actor identity.ActorID, u PlanUpdate) (result Plan, e
 			return Plan{}, fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, *edit.ID, p.ID)
 		}
 		if by := s.reserved[*edit.ID]; by != "" {
-			return Plan{}, fmt.Errorf("%w: step %s is reserved by %s; omit reserved steps from edits", ErrReserved, *edit.ID, by)
+			// Audits check recorded requirements, so a requirement changed only in
+			// messages was later failed as a defect and "repaired" back.
+			return Plan{}, fmt.Errorf("%w: step %s is reserved by %s; omit reserved steps from edits. To change a reserved step's requirements, cancel %s with cancel_work, edit the step, then assign it again", ErrReserved, *edit.ID, by, by)
 		}
 		if p.Steps[i].Status == Completed {
 			return Plan{}, fmt.Errorf("%w: step %s is completed; omit completed steps from edits", ErrState, *edit.ID)
@@ -350,44 +363,75 @@ func (s *Store) AssignWork(actor identity.ActorID, r AssignRequest) (result Work
 	if blank(string(actor)) || blank(string(r.Assignee)) || blank(r.Task) {
 		return Work{}, invalid("actor, assignee and task required")
 	}
-	if r.Scope != nil {
-		p, ok := s.plans[r.Scope.PlanID]
-		if !ok {
-			return Work{}, ErrNotFound
-		}
-		if p.Owner != actor {
-			return Work{}, ErrForbidden
-		}
-		if len(r.Scope.StepIDs) == 0 {
-			return Work{}, invalid("scope must contain steps")
-		}
-		seen := map[StepID]bool{}
-		for _, id := range r.Scope.StepIDs {
-			if seen[id] {
-				return Work{}, invalid("repeated scope step")
-			}
-			seen[id] = true
-			i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == id })
-			if i < 0 {
-				return Work{}, fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, id, p.ID)
-			}
-			if by := s.reserved[id]; by != "" {
-				return Work{}, fmt.Errorf("%w: step %s is reserved by %s; scope only available steps", ErrReserved, id, by)
-			}
-			if p.Steps[i].Status == Completed || p.Steps[i].Status == CancelledStep {
-				return Work{}, fmt.Errorf("%w: step %s is %s and cannot be assigned", ErrState, id, p.Steps[i].Status)
-			}
-		}
+	if err = s.checkScope(actor, r.Scope); err != nil {
+		return Work{}, err
 	}
 	w := Work{ID: ID(s.id("work")), Kind: Implementation, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: actor, RequestedBy: actor, Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput, Scope: r.Scope}.Clone()
+	s.reserve(w)
+	s.putWork(w.ID, w)
+	s.emit(WorkAssigned, actor, w, true)
+	return w.Clone(), nil
+}
+
+// checkScope admits a new assignment's scope: open steps of a plan actor
+// owns that no live work holds.
+func (s *Store) checkScope(actor identity.ActorID, scope *Scope) error {
+	if scope == nil {
+		return nil
+	}
+	p, ok := s.plans[scope.PlanID]
+	if !ok {
+		return ErrNotFound
+	}
+	if p.Owner != actor {
+		return ErrForbidden
+	}
+	if len(scope.StepIDs) == 0 {
+		return invalid("scope must contain steps")
+	}
+	seen := map[StepID]bool{}
+	for _, id := range scope.StepIDs {
+		if seen[id] {
+			return invalid("repeated scope step")
+		}
+		seen[id] = true
+		i := slices.IndexFunc(p.Steps, func(v Step) bool { return v.ID == id })
+		if i < 0 {
+			return fmt.Errorf("%w: step %s is not in plan %s", ErrNotFound, id, p.ID)
+		}
+		if by := s.reserved[id]; by != "" {
+			return fmt.Errorf("%w: step %s is reserved by %s; scope only available steps", ErrReserved, id, by)
+		}
+		if p.Steps[i].Status == Completed || p.Steps[i].Status == CancelledStep {
+			return fmt.Errorf("%w: step %s is %s and cannot be assigned", ErrState, id, p.Steps[i].Status)
+		}
+	}
+	return nil
+}
+
+// reserve holds w's scoped steps for it until it succeeds or is cancelled.
+func (s *Store) reserve(w Work) {
 	if w.Scope != nil {
 		for _, id := range w.Scope.StepIDs {
 			s.reserved[id] = w.ID
 		}
 	}
-	s.putWork(w.ID, w)
-	s.emit(WorkAssigned, actor, w, true)
-	return w.Clone(), nil
+}
+
+// settleScope releases the steps w holds, completing them when w succeeded
+// and returning them to pending when it was cancelled.
+func (s *Store) settleScope(w Work, status StepStatus) {
+	if w.Scope == nil {
+		return
+	}
+	p := s.plans[w.Scope.PlanID].Clone()
+	for i := range p.Steps {
+		if s.reserved[p.Steps[i].ID] == w.ID {
+			delete(s.reserved, p.Steps[i].ID)
+			p.Steps[i].Status = status
+		}
+	}
+	s.putPlan(p.ID, p)
 }
 
 func (s *Store) GetWork(actor identity.ActorID, id ID) (Work, error) {

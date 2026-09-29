@@ -22,8 +22,12 @@ type StepStatus string
 type Verdict string
 type EventKind string
 
+// Review, web research and deep research are investigations: each delivers a
+// brief and is done by its own role (reviewer, web_researcher, deep_researcher).
 const (
-	Research         Kind       = "research"
+	Review           Kind       = "review"
+	WebResearch      Kind       = "web_research"
+	DeepResearch     Kind       = "deep_research"
 	Delivered        State      = "delivered"
 	Implementation   Kind       = "implementation"
 	AuditWork        Kind       = "audit"
@@ -51,6 +55,10 @@ const (
 	WorkReassigned   EventKind  = "work_reassigned"
 	WorkCancelled    EventKind  = "work_cancelled"
 )
+
+// Investigation reports whether k is review or research: work delivered as a
+// brief rather than submitted for an audit.
+func (k Kind) Investigation() bool { return k == Review || k == WebResearch || k == DeepResearch }
 
 var (
 	ErrNotFound  = errors.New("work: not found")
@@ -100,7 +108,9 @@ type Work struct {
 	LatestAuditID          AuditID          `json:"latest_audit_id,omitempty"`
 	ActiveRepairID         ID               `json:"active_repair_id,omitempty"`
 	LatestSubmissionID     SubmissionID     `json:"latest_submission_id,omitempty"`
-	LatestResearchBriefID  ResearchBriefID  `json:"latest_research_brief_id,omitempty"`
+	LatestBriefID          BriefID          `json:"latest_brief_id,omitempty"`
+	LatestConclusionID     ConclusionID     `json:"latest_conclusion_id,omitempty"`
+	Hypotheses             []Hypothesis     `json:"hypotheses,omitempty"` // An experiment's, in the order recorded.
 	LatestProgressReportID ProgressReportID `json:"latest_progress_report_id,omitempty"`
 	LatestPositionReportID ProgressReportID `json:"latest_position_report_id,omitempty"`
 }
@@ -148,16 +158,14 @@ type AssignAuditRequest struct {
 	WorkTarget
 	SubmissionID SubmissionID     `json:"submission_id"`
 	Auditor      identity.ActorID `json:"auditor"`
+	// Brief is what the host hands the auditor up front, such as the
+	// requirements and the changed files; it becomes the audit's context.
+	Brief string `json:"brief,omitempty"`
 }
 type AssignRepairRequest struct {
 	WorkTarget
 	Assignee identity.ActorID `json:"assignee"`
 	AuditID  AuditID          `json:"audit_id"`
-}
-type ReassignRequest struct {
-	WorkTarget
-	// An existing eligible replacement is required.
-	Assignee identity.ActorID `json:"assignee"`
 }
 type CancelRequest struct {
 	WorkTarget
@@ -256,6 +264,7 @@ func (w Work) Clone() Work {
 		scope.StepIDs = slices.Clone(scope.StepIDs)
 		w.Scope = &scope
 	}
+	w.Hypotheses = cloneHypotheses(w.Hypotheses)
 	return w
 }
 func (s Submission) Clone() Submission {

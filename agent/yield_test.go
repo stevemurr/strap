@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
@@ -107,3 +108,64 @@ func TestMixedControlBatchHasNoEffectsAndContinues(t *testing.T) {
 }
 
 func (t countedTool) InputContract() tool.Contract { return emptyContract() }
+
+// finishingSubmit succeeds or fails as told; it ends the exchange only on
+// success.
+func finishingSubmit(t *testing.T, fail bool) tool.Tool {
+	params, err := tool.NewParameters[struct{}]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tool.Finishing(tool.Func[struct{}]{Spec: tool.Definition[struct{}]{Name: "submit", Description: "Submit.", Parameters: params}, Invoke: func(context.Context, tool.Call, struct{}) (tool.Result, error) {
+		if fail {
+			return tool.Result{}, errors.New("rejected")
+		}
+		return tool.Text("submitted"), nil
+	}})
+}
+
+// A successful submission ends the exchange after the rest of its batch,
+// with no closing reply; a rejected one leaves the model to correct it.
+func TestFinishingCallEndsTheExchangeOnlyOnSuccess(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "rejected"}[fail], func(t *testing.T) {
+			c := config()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			yielded := make(chan agent.Yielded, 1)
+			replies := make(chan message.Draft, 2)
+			var effects, calls atomic.Int32
+			c.Spec.Tools = []tool.Tool{countedTool{&effects}, finishingSubmit(t, fail)}
+			c.Reporter = agent.ReporterFunc(func(_ context.Context, e agent.Event) error {
+				if y, ok := e.(agent.Yielded); ok {
+					yielded <- y
+				}
+				return nil
+			})
+			c.Spec.Provider = modelFunc(func(context.Context, provider.Request) (provider.Response, error) {
+				if calls.Add(1) == 1 {
+					return provider.Response{ToolCalls: []provider.ToolCall{{ID: "submit", Name: "submit", Arguments: json.RawMessage(`{"input":{}}`)}, {ID: "effect", Name: "effect", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
+				}
+				return provider.Response{Content: "fixed it"}, nil
+			})
+			c.Outbox = senderFunc(func(_ context.Context, d message.Draft) (message.Receipt, error) {
+				replies <- d
+				return message.Receipt{}, nil
+			})
+			c.Inbox.Send(message.Message{ID: "start", Kind: message.Instruction, Content: "begin"})
+			a := mustAgent(t, c)
+			done := make(chan error, 1)
+			go func() { done <- a.Run(ctx) }()
+			if !fail {
+				y := await(t, yielded)
+				if y.CallID != "submit" || y.SettledRevision != 5 || effects.Load() != 1 || calls.Load() != 1 {
+					t.Fatal(y, effects.Load(), calls.Load())
+				}
+			} else if reply := await(t, replies); reply.Content != "fixed it" || calls.Load() != 2 {
+				t.Fatal(reply, calls.Load())
+			}
+			cancel()
+			await(t, done)
+		})
+	}
+}

@@ -18,11 +18,11 @@ type labAgent struct {
 }
 
 var labAgents = []labAgent{
-	{"root", "Coordinator", "Root", "◇", "#8BCDC8", "root", "working", "Bringing the API and renderer changes together.", "Make agent activity easier to follow", "now", 0},
+	{"manager", "Coordinator", "Manager", "◇", "#8BCDC8", "manager", "working", "Bringing the API and renderer changes together.", "Make agent activity easier to follow", "now", 0},
 	{"agent-2", "Schema", "Sch", "/", "#E8B477", "implementor", "attention", "Needs a decision: should unknown fields be rejected or preserved?", "Tighten the request schema", "18s ago", 2},
 	{"agent-1", "API", "API", "/", "#92B9EE", "implementor", "working", "Running the route tests. The streaming endpoint now keeps its event order.", "Fix streaming event order", "3s ago", 3},
 	{"agent-3", "Renderer", "TUI", "/", "#B3A2E8", "implementor", "working", "Checking wrapped lines at 80 and 120 columns.", "Keep the selected agent visible", "7s ago", 1},
-	{"agent-4", "Research", "Res", "?", "#D7A0C4", "researcher", "working", "Comparing terminal mouse tracking modes and keyboard fallbacks.", "Explore compact agent navigation", "12s ago", 0},
+	{"agent-4", "Research", "Res", "?", "#D7A0C4", "web_researcher", "working", "Comparing terminal mouse tracking modes and keyboard fallbacks.", "Explore compact agent navigation", "12s ago", 0},
 	{"agent-5", "Audit", "Aud", "◎", "#A8C98E", "auditor", "working", "Reviewing the patch for focus changes and unread-count regressions.", "Review navigation behavior", "5s ago", 1},
 	{"agent-6", "Docs", "Doc", "≡", "#9AAFC2", "implementor", "idle", "Draft is ready. Waiting for the interaction names to settle.", "Document navigation shortcuts", "1m ago", 0},
 	{"agent-7", "Fixtures", "Fix", "✓", "#8FBBAA", "implementor", "completed", "Added eight deterministic fixtures. All checks passed.", "Add roster layout fixtures", "2m ago", 0},
@@ -214,7 +214,7 @@ func (m *sidebarLab) View() string {
 	s.paint(39, 12, labStyle("#A7B3BF").Render(lipgloss.NewStyle().Width(w).Render(a.Update)), -1)
 	s.paint(39, 18, labStyle("#85929F").Render("Peek at a teammate while keeping\nyour place in this conversation."), -1)
 	s.paint(39, m.height-5, labStyle("#85929F").Render(strings.Repeat("─", w)), -1)
-	s.paint(39, m.height-3, labStyle("#A7B3BF").Render("› Message root…"), -1)
+	s.paint(39, m.height-3, labStyle("#A7B3BF").Render("› Message manager…"), -1)
 	if peek >= 0 {
 		a = labAgents[peek]
 		content := labStyle(a.Color).Bold(true).Render(a.Icon+" "+a.Name+"  "+labMark(a.State)+" "+a.State) + "\n" +

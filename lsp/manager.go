@@ -160,6 +160,24 @@ func (m *Manager) display(path string) string {
 	}
 	return path
 }
+
+// Covers reports whether a configured server handles path, an absolute path
+// inside the manager's directory.
+func (m *Manager) Covers(path string) bool {
+	return filepath.IsAbs(path) && within(m.config.Dir, path) && m.Handles(path)
+}
+
+// Handles reports whether a configured server handles path's language,
+// wherever the file is.
+func (m *Manager) Handles(path string) bool {
+	for _, s := range m.config.Servers {
+		if language(s, path) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func language(s ServerConfig, path string) string {
 	best, id := "", ""
 	for suffix, v := range s.Languages {

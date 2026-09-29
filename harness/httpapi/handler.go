@@ -31,7 +31,8 @@ type errorResponse struct {
 }
 type SessionView struct {
 	harness.Inspection
-	Root identity.ActorID `json:"root"`
+	Manager  identity.ActorID `json:"manager"`            // The agent the user talks to.
+	Debugger identity.ActorID `json:"debugger,omitempty"` // Beside the manager in a debug session.
 }
 type CreateRequest struct {
 	Config *harness.Config `json:"config,omitempty"`
@@ -192,7 +193,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				respond(w, nil, err)
 				return
 			}
-			writeJSON(w, 201, SessionView{session.Inspect(), session.Root()})
+			writeJSON(w, 201, SessionView{session.Inspect(), session.Manager(), session.Debugger()})
 		default:
 			w.WriteHeader(405)
 		}
@@ -208,7 +209,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(405)
 			return
 		}
-		respond(w, SessionView{session.Inspect(), session.Root()}, nil)
+		respond(w, SessionView{session.Inspect(), session.Manager(), session.Debugger()}, nil)
 		return
 	}
 	path := parts[2:]
@@ -332,7 +333,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		actor := identity.ActorID(r.URL.Query().Get("actor"))
 		var page inspection.ProgressPage
 		if path[0] == "brief-view" {
-			page, err = session.ReadResearchBrief(r.Context(), actor, q)
+			page, err = session.ReadBrief(r.Context(), actor, q)
 		} else {
 			page, err = session.ReadWorkProgress(r.Context(), actor, q)
 		}
@@ -351,7 +352,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "progress-findings":
 			v, err = session.GetProgressFinding(r.Context(), actor, work.ProgressFindingID(path[1]))
 		case "research-briefs":
-			v, err = session.GetResearchBrief(r.Context(), actor, work.ResearchBriefID(path[1]))
+			v, err = session.GetBrief(r.Context(), actor, work.BriefID(path[1]))
 		case "receipts":
 			receipt, ok := session.Receipt(message.MessageID(path[1]))
 			v = receipt
@@ -437,12 +438,10 @@ func serveAgent(w http.ResponseWriter, r *http.Request, s *harness.Session, path
 }
 func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, action string) {
 	switch action {
-	case "assign_implementation", "assign_audit", "assign_repair", "assign_research":
+	case "assign_task", "assign_audit", "assign_repair":
 		decodedCall(w, r, func(raw json.RawMessage) (work.AssignmentRequest, error) {
 			return tool.DecodeAssignment(action, raw)
 		}, s.AssignWork)
-	case "reassign":
-		decodedCall(w, r, tool.DecodeReassignment, s.ReassignWork)
 	case "cancel":
 		decodedCall(w, r, tool.DecodeCancellation, s.CancelWork)
 	case "report-progress":
@@ -457,8 +456,8 @@ func serveWork(w http.ResponseWriter, r *http.Request, s *harness.Session, actio
 		respond(w, value, err)
 	case "submit":
 		decodedCall(w, r, tool.DecodeSubmission, s.SubmitWork)
-	case "research":
-		decodedCall(w, r, tool.DecodeResearchSubmission, s.SubmitResearch)
+	case "brief":
+		decodedCall(w, r, tool.DecodeBriefSubmission, s.SubmitBrief)
 	case "audit":
 		decodedCall(w, r, tool.DecodeAuditSubmission, s.SubmitAudit)
 	default:

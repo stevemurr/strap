@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Session) ListWork(ctx context.Context, actor identity.ActorID, q work.ListQuery) (work.ListPage, error) {
-	if actor == "" || actor != s.Root() {
+	if !s.workflow.Coordinator(actor) {
 		return work.ListPage{}, work.ErrForbidden
 	}
 	reader, err := s.Trace(ctx)

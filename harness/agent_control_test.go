@@ -117,7 +117,7 @@ func TestSessionAgentControlRefusedAfterClose(t *testing.T) {
 // absence rather than a zero receipt for an identifier that was never sent.
 func TestSessionReceiptResolvesDeliveryAndReportsAbsence(t *testing.T) {
 	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
-	sent, err := s.Send(s.Root(), "hello")
+	sent, err := s.Send(s.Manager(), "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestSessionReceiptResolvesDeliveryAndReportsAbsence(t *testing.T) {
 	if !ok {
 		t.Fatal("sent message had no projected receipt", sent.MessageID)
 	}
-	if got.MessageID != sent.MessageID || got.Recipient != s.Root() {
+	if got.MessageID != sent.MessageID || got.Recipient != s.Manager() {
 		t.Fatal("receipt does not describe the sent message", got)
 	}
 	if _, ok := s.Receipt("never-sent"); ok {

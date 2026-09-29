@@ -12,6 +12,7 @@ import (
 	"github.com/stevemurr/strap/lsp"
 	"github.com/stevemurr/strap/prompt"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/tool"
 )
 
 type RoleConfiguration struct {
@@ -25,16 +26,44 @@ type EffectiveConfig struct {
 	DeepResearch          DeepResearchConfig          `json:"deep_research"`
 	LSP                   *LSPConfiguration           `json:"lsp,omitempty"`
 	ToolContractVersion   string                      `json:"tool_contract_version"`
-	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Dir                   string                      `json:"dir"`
+	LocalTools            bool                        `json:"local_tools"`
+	FileEdits             tool.EditMode               `json:"file_edits,omitempty"`
+	Web                   *tool.WebConfig             `json:"web,omitempty"` // Credentials are never serialized.
+	DebugToolkit          bool                        `json:"debug_toolkit,omitempty"`
 	ReasoningLimit        int                         `json:"reasoning_limit"`
 	Telemetry             TelemetryConfig             `json:"telemetry"`
 	Events                EventConfig                 `json:"events"`
-	Root                  RoleConfiguration           `json:"root"`
+	Agent                 *RoleConfiguration          `json:"agent,omitempty"` // Present only in a solo session.
+	Tester                bool                        `json:"tester,omitempty"`
+	Manager               RoleConfiguration           `json:"manager"`
 	Implementor           RoleConfiguration           `json:"implementor"`
 	Auditor               RoleConfiguration           `json:"auditor"`
-	Researcher            RoleConfiguration           `json:"researcher"`
+	WebResearcher         RoleConfiguration           `json:"web_researcher"`
+	DeepResearcher        *RoleConfiguration          `json:"deep_researcher,omitempty"` // Present only when deep research is enabled.
+	Experimenter          *RoleConfiguration          `json:"experimenter,omitempty"`    // Present only with local tools.
+	Reviewer              *RoleConfiguration          `json:"reviewer,omitempty"`        // Present only with local tools.
+	Debugger              *RoleConfiguration          `json:"debugger,omitempty"`
+}
+
+// Roles lists every configured role, the entry agent first.
+func (c EffectiveConfig) Roles() []RoleConfiguration {
+	var roles []RoleConfiguration
+	if c.Agent != nil {
+		roles = append(roles, *c.Agent)
+	}
+	roles = append(roles, c.Manager, c.Implementor, c.Auditor, c.WebResearcher)
+	if c.DeepResearcher != nil {
+		roles = append(roles, *c.DeepResearcher)
+	}
+	if c.Experimenter != nil {
+		roles = append(roles, *c.Experimenter)
+	}
+	if c.Reviewer != nil {
+		roles = append(roles, *c.Reviewer)
+	}
+	return roles
 }
 
 func describeRole(m ModelConfig, spec agent.Spec, injected bool) RoleConfiguration {
@@ -80,8 +109,37 @@ func (s *Session) Configuration() EffectiveConfig {
 		v.Servers = append([]string(nil), v.Servers...)
 		c.LSP = &v
 	}
-	c.ResearchExecution.Env = append([]string(nil), c.ResearchExecution.Env...)
-	for _, r := range []*RoleConfiguration{&c.Root, &c.Implementor, &c.Auditor, &c.Researcher} {
+	if c.Web != nil {
+		w := *c.Web
+		c.Web = &w
+	}
+	roles := []*RoleConfiguration{&c.Manager, &c.Implementor, &c.Auditor, &c.WebResearcher}
+	if c.Agent != nil {
+		a := *c.Agent
+		c.Agent = &a
+		roles = append(roles, c.Agent)
+	}
+	if c.DeepResearcher != nil {
+		d := *c.DeepResearcher
+		c.DeepResearcher = &d
+		roles = append(roles, c.DeepResearcher)
+	}
+	if c.Experimenter != nil {
+		e := *c.Experimenter
+		c.Experimenter = &e
+		roles = append(roles, c.Experimenter)
+	}
+	if c.Reviewer != nil {
+		r := *c.Reviewer
+		c.Reviewer = &r
+		roles = append(roles, c.Reviewer)
+	}
+	if c.Debugger != nil {
+		d := *c.Debugger
+		c.Debugger = &d
+		roles = append(roles, c.Debugger)
+	}
+	for _, r := range roles {
 		r.Prompt = r.Prompt.Clone()
 		if r.Model != nil {
 			m := cloneModel(*r.Model)

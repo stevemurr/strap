@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
+	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -64,7 +66,7 @@ func (m *model) rememberPlan(p work.Plan) {
 		m.plans.views[p.ID] = v
 		m.plans.order = append(m.plans.order, p.ID)
 		current := m.currentPlan()
-		if current == nil || (!m.plans.focused && p.Owner == m.session.Root() && (current.plan.Owner != p.Owner || planFinished(current.plan))) {
+		if current == nil || (!m.plans.focused && p.Owner == m.session.Manager() && (current.plan.Owner != p.Owner || planFinished(current.plan))) {
 			m.plans.active = p.ID
 		}
 	}
@@ -107,6 +109,38 @@ func (m *model) observePlanEvent(e work.Event) {
 		}
 	}
 }
+// observeTodos shows an agent's todo list in the plan dock as a plan it owns,
+// each entry a step. Each list replaces the last.
+func (m *model) observeTodos(e conversation.TodosEvent) {
+	id := work.PlanID("todos-" + string(e.Agent))
+	p := work.Plan{ID: id, Owner: e.Agent, Title: "Todo", Revision: 1}
+	if v := m.plans.views[id]; v != nil {
+		p.Revision = v.plan.Revision + 1
+	}
+	status := map[string]work.StepStatus{"pending": work.Pending, "in_progress": work.InProgress, "completed": work.Completed}
+	for i, t := range e.Todos {
+		p.Steps = append(p.Steps, work.Step{ID: work.StepID(fmt.Sprintf("%s-%d", id, i+1)), Title: t.Content, Status: status[t.Status]})
+	}
+	m.rememberPlan(p)
+}
+
+// observeTester shows an adversarial tester run: the failures the harness
+// reproduced, which go back to the agent, or that it found none.
+func (m *model) observeTester(e conversation.TesterEvent) {
+	body := fmt.Sprintf("No reproduced failures · %d calls · %s", e.Calls, e.Duration.Round(time.Second))
+	if len(e.Failures) > 0 {
+		lines := []string{fmt.Sprintf("%d failing test(s) sent back to the agent · %d calls · %s", len(e.Failures), e.Calls, e.Duration.Round(time.Second))}
+		for _, f := range e.Failures {
+			lines = append(lines, "• "+f.Requirement+" — "+f.Command)
+		}
+		body = strings.Join(lines, "\n")
+	}
+	if e.Error != "" {
+		body += " · " + e.Error
+	}
+	m.addAttributed("Tester", "", body, false, e.Agent)
+}
+
 func (m *model) currentPlan() *planView { return m.plans.views[m.plans.active] }
 func planFinished(p work.Plan) bool {
 	if len(p.Steps) == 0 {
@@ -170,6 +204,9 @@ func planSummaryTitle(p work.Plan, title func(string) string) (string, int) {
 	}
 	if cancelled > 0 {
 		return dimStyle.Render(fmt.Sprintf("Finished · %d cancelled", cancelled)), done
+	}
+	if strings.HasPrefix(string(p.ID), "todos-") {
+		return successStyle.Render("✓ Complete · all done"), done // An agent's own list; nothing audits it.
 	}
 	return successStyle.Render("✓ Complete · all steps accepted"), done
 }

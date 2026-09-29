@@ -18,26 +18,28 @@ forwarded snapshot never creates authority. Store operations validate the runtim
 caller against the current record.
 
 ```text
-Root owns plan
+Manager owns plan
   → create_agent(role=implementor): idle registered agent
-  → assign_implementation: explicit assignee over selected step IDs
+  → assign_task(kind=implementation): explicit assignee over selected step IDs
   → implementor updates shared progress
   → submit_work: immutable outcome, needs_check
-  → root receives review request
-  → create_agent(role=auditor), or select an existing auditor
+  → manager receives review request
+  → create_agent(role=auditor): a new auditor for every audit
   → assign_audit: explicit assignee
   → submit_audit
       pass → implementation accepted, scoped steps completed
       fail → immutable findings, original changes_requested
-               → root assign_repair(assignee, original work/revision, audit_id)
+               → manager assign_repair(assignee, original work/revision, audit_id)
                → submit_work: superseding outcome, needs_check
 ```
 
-The root explicitly chooses an existing implementor for each repair; it may reuse
+The manager explicitly chooses an existing implementor for each repair; it may reuse
 the previous implementor or create a fresh one. The store derives scope and context
 from the immutable audit and its exact source submission. Repair reassignment does
 not change the original work's assignee or grant the replacement broader reads.
-The auditor records findings but does not create or assign repair work.
+The auditor records findings but does not create or assign repair work. Every
+audit, including the re-audit of a repair, goes to a new auditor: `assign_audit`
+refuses an auditor that has held any work.
 
 ## Package boundaries
 
@@ -148,7 +150,7 @@ the reference is immutable or that an auditor inspected those bytes. Artifact
 resolution and verification belong to application tooling.
 
 Verdicts are `pass` and `fail`. Failure requires findings and atomically records `LatestAuditID` and requests changes.
-The root must explicitly assign repair work for the affected subset. Acceptance covers the complete submitted
+The manager must explicitly assign repair work for the affected subset. Acceptance covers the complete submitted
 scope; partial acceptance is deferred. Repair submission creates a new outcome
 for the original scope, ready for another audit.
 
@@ -231,7 +233,7 @@ be rewritten in place to retain acceptance for changed requirements. New work
 must represent a changed outcome. Unrelated delegate progress does not invalidate
 the owner's structural revision.
 
-The root's plan tools are flat, one operation each, over the same `PlanUpdate`
+The manager's plan tools are flat, one operation each, over the same `PlanUpdate`
 contract: `create_plan` (title plus nested initial steps, no IDs), `add_step`,
 `edit_step`, `cancel_steps`, `reorder_steps` and `rename_plan`, each taking
 `plan_id` and `expected_revision`. A single composed `update_plan` was replaced
@@ -241,10 +243,13 @@ edit fields. Flat tools give status no field, require `step_id` for edits, and k
 each tool-call literal small. Workers report progress through
 `report_work_progress`; step status changes only through progress and audits.
 
-`assign_implementation`, `assign_research`, `assign_audit`, and `assign_repair`
-each expose one operation-specific argument contract without a `kind` input.
-Schema generation and decoding share that contract; the adapter supplies the
-internal work kind. `submit_audit` composes pass and fail contracts and publishes
+`assign_task`, `assign_audit`, and `assign_repair` each expose one
+operation-specific argument contract. `assign_task` carries every kind of new
+work (implementation, review, web research, deep research, experiment) because
+they all take the same fields; its required `kind` names the work and the role
+that does it, so no field depends on another. Audits and repairs bind an
+existing submission or audit and keep their own commands without a `kind`.
+Schema generation and decoding share each contract. `submit_audit` composes pass and fail contracts and publishes
 the complete `oneOf` branches. Pass accepts omitted or empty findings; fail
 requires at least one finding.
 `submit_work` maps to its store operation. `get_audit` resolves the immutable
@@ -296,7 +301,7 @@ Record message ID, work ID, recipient, and assignment binding for lifecycle and
 delivery handling. A late failure for an old binding cannot invalidate a new one.
 Stale pending assignment events must be suppressed after cancellation/reassignment.
 
-Routine progress updates refresh shared views and can enter the root's context
+Routine progress updates refresh shared views and can enter the manager's context
 at its next active boundary without waking it. Review requests and blocker changes
 wake the owner. Work/submission correlation stays separate from the user-message
 reply target. Merely adding another message kind does not implement this behavior.
@@ -319,7 +324,8 @@ Dispatch must operate independently of whether a UI consumer is currently readin
    delegation example exercises fail → repair → pass without a model server.
 
 The application exposes one registered creation path, `create_agent(role)`, separate
-from the assignment tools. The root is registered during bootstrap. Raw controller creation
+from the assignment tools. The manager is registered during bootstrap, with the
+user as its parent. Raw controller creation
 remains idle and does not confer tracked-work eligibility. The old task-only
 creation callback has been removed; core tests define a local `create_test_agent`.
 

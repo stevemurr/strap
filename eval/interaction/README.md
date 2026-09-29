@@ -47,7 +47,7 @@ responses and corrupted state transitions.
 ## Schema regressions
 
 These scenarios target known contract failures after the assignment-tool split.
-They run the production catalog and dispatcher for the relevant role: the root
+They run the production catalog and dispatcher for the relevant role: the manager
 assigns an audit, an auditor submits a verdict, and an implementor reports progress.
 
 | Scenario | Malformed operation exercised by the script |

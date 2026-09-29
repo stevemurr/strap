@@ -326,6 +326,42 @@ func TestSynchronizationAndDiagnosticFreshness(t *testing.T) {
 			if len(page.Metadata.Checks) != 1 {
 				t.Fatal("missing completion status")
 			}
+			if mode != "" {
+				return
+			}
+			// After a change to f.go, an unchanged g.go stays unconfirmed: the
+			// server publishes only for documents it is sent. Resync sends it.
+			other := filepath.Join(c.Dir, "g.go")
+			put(t, other, "Beta\n")
+			both := DiagnosticQuery{Paths: []string{"f.go", "g.go"}}
+			// The watcher's events for a write can arrive during a query and
+			// leave it stale; ask again until they have settled.
+			settle := func(q DiagnosticQuery) Page {
+				t.Helper()
+				for range 20 {
+					page, err := m.Diagnostics(context.Background(), q)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if page.Metadata.Freshness == "synchronized" {
+						return page
+					}
+				}
+				t.Fatalf("never synchronized: %+v", q)
+				return Page{}
+			}
+			settle(DiagnosticQuery{Paths: both.Paths, Resync: true}) // Adding g.go moved the epoch past f.go's diagnostics.
+			put(t, path, "BROKEN\n")
+			m.Changed(path)
+			if page, err = m.Diagnostics(context.Background(), both); err != nil || page.Metadata.Freshness == "synchronized" {
+				t.Fatalf("an unchanged file confirmed without a publish: %+v %v", page.Metadata, err)
+			}
+			put(t, path, "Alpha\n")
+			m.Changed(path)
+			both.Resync = true
+			if page = settle(both); len(page.Items) != 0 {
+				t.Fatalf("resync: %+v", page)
+			}
 		})
 	}
 }

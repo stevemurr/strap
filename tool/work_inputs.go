@@ -77,13 +77,14 @@ type FindingInput struct {
 	Verification   string        `json:"verification"`
 }
 
-type SubmitResearchInput struct {
+type SubmitBriefInput struct {
 	work.WorkTarget
-	Summary        string                   `json:"summary"`
-	FindingIDs     []work.ProgressFindingID `json:"finding_ids"`
-	OpenQuestions  []string                 `json:"open_questions"`
-	Recommendation *string                  `json:"recommendation"`
-	ProposedSteps  []ProposedStepInput      `json:"proposed_steps"`
+	Summary        string                      `json:"summary"`
+	FindingIDs     []work.ProgressFindingID    `json:"finding_ids"`
+	Findings       []ProgressFindingDraftInput `json:"findings"`
+	OpenQuestions  []string                    `json:"open_questions"`
+	Recommendation *string                     `json:"recommendation"`
+	ProposedSteps  []ProposedStepInput         `json:"proposed_steps"`
 }
 
 type ProposedStepInput struct {
@@ -131,8 +132,8 @@ func (a FindingInput) domain() work.Finding {
 	return work.Finding{StepIDs: a.StepIDs, Description: a.Description, RequiredChange: a.RequiredChange, Verification: a.Verification}
 }
 
-func (a SubmitResearchInput) domain() work.SubmitResearchRequest {
-	return work.SubmitResearchRequest{WorkTarget: a.WorkTarget, Summary: a.Summary, FindingIDs: a.FindingIDs, OpenQuestions: a.OpenQuestions, Recommendation: valueOrZero(a.Recommendation), ProposedSteps: mapInputs(a.ProposedSteps, ProposedStepInput.domain)}
+func (a SubmitBriefInput) domain() work.SubmitBriefRequest {
+	return work.SubmitBriefRequest{WorkTarget: a.WorkTarget, Summary: a.Summary, FindingIDs: a.FindingIDs, Findings: mapInputs(a.Findings, ProgressFindingDraftInput.domain), OpenQuestions: a.OpenQuestions, Recommendation: valueOrZero(a.Recommendation), ProposedSteps: mapInputs(a.ProposedSteps, ProposedStepInput.domain)}
 }
 
 func (a ProposedStepInput) domain() work.ProposedStep {

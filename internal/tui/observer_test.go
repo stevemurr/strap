@@ -39,8 +39,8 @@ func TestObserveSessionSurfacesSubscriptionFailure(t *testing.T) {
 		t.Fatal("the subscription failure was not reported to the UI", err)
 	}
 	// The rest of the session is still reachable through the wrapper.
-	if observed.Root() != "root" {
-		t.Fatal(observed.Root())
+	if observed.Manager() != "root" {
+		t.Fatal(observed.Manager())
 	}
 }
 

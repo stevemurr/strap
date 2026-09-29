@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
@@ -24,6 +25,7 @@ import (
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/tool"
 )
 
 // Run creates a fresh run directory and records independent, sequential trials.
@@ -125,6 +127,34 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	return report, WriteReport(opts.Output, report)
 }
 
+// relay is a scripted manager that carries a trial's stimulus down the
+// topology to a worker under test, since the user reaches only the manager and
+// each agent only its neighbours. It passes an instruction from the user to
+// target and answers everything else, such as ledger notices and replies from
+// below, with a note.
+type relay struct {
+	target func() identity.ActorID
+}
+
+func (r relay) Submit(_ context.Context, req provider.Request, _ provider.Observer) (provider.Response, error) {
+	if req.Messages[len(req.Messages)-1].Role == "tool" {
+		return provider.Response{Content: "Relayed."}, nil
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		m := req.Messages[i].Envelope
+		if m == nil || m.Kind == message.Observation {
+			continue
+		}
+		target := r.target()
+		if m.Kind == message.Instruction && m.Work == nil && m.Content != "" && target != "" && m.From != target {
+			args, err := tool.MarshalInput(map[string]any{"to": target, "message": m.Content})
+			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "relay", Name: "send_message", Arguments: args}}}, err
+		}
+		break
+	}
+	return provider.Response{Content: "Noted."}, nil
+}
+
 type idleProvider struct{}
 
 func (idleProvider) Submit(ctx context.Context, _ provider.Request, _ provider.Observer) (provider.Response, error) {
@@ -221,7 +251,7 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	trialCtx, cancelTrial := context.WithTimeout(ctx, opts.Timeout)
 	defer cancelTrial()
 	cfg := opts.Config
-	if cfg.Root.Prompt.Role == "" {
+	if cfg.Manager.Prompt.Role == "" {
 		cfg = harness.DefaultConfig()
 	}
 	workspace, err := os.MkdirTemp("", "strap-interaction-")
@@ -230,22 +260,29 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	}
 	defer os.RemoveAll(workspace)
 	cfg.Dir, cfg.LocalTools, cfg.Web = workspace, false, nil
-	cfg.ResearchExecution.Enabled = false
+	cfg.ManualAudits, cfg.AuditBrief = true, false // The scenarios measure the manager assigning audits.
 	cfg.Telemetry.ContextTokens = false
 	cfg.Events.JSONLPath = filepath.Join(dir, "trace.jsonl")
 	gate := &requestGate{requests: make(chan chan struct{}, 1), maxTools: opts.MaxToolCalls}
 	role := schemaRole(scenario.ID)
 	if role == "" {
-		role = roster.Root
+		role = roster.Manager
 	}
+	// The stimulus reaches the agent under test down real edges: the user sends
+	// it to the manager, and in worker trials a relay manager passes it on to
+	// the worker, whose id is known once the fixture is seeded.
+	var worker atomic.Value
+	worker.Store(identity.ActorID(""))
 	deps := harness.Dependencies{Provider: idleProvider{}}
 	switch role {
-	case roster.Root:
-		deps.Root.Provider = gate
+	case roster.Manager:
+		deps.Manager.Provider = gate
 	case roster.Implementor:
 		deps.Implementor.Provider = gate
+		deps.Manager.Provider = relay{target: func() identity.ActorID { return worker.Load().(identity.ActorID) }}
 	case roster.Auditor:
 		deps.Auditor.Provider = gate
+		deps.Manager.Provider = relay{target: func() identity.ActorID { return worker.Load().(identity.ActorID) }}
 	default:
 		return fail("setup", errors.New("unsupported evaluated actor role"))
 	}
@@ -269,9 +306,6 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 			result.Error = err.Error()
 		}
 	}()
-	if err := pauseActor(trialCtx, s, s.Root()); err != nil {
-		return fail("setup", err)
-	}
 	var f fixture
 	if schemaRole(scenario.ID) != "" {
 		f, err = seedSchema(trialCtx, s, scenario.ID)
@@ -281,8 +315,13 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	if err != nil {
 		return fail("setup", err)
 	}
-	if f.actor() != s.Root() {
-		if err := pauseActor(trialCtx, s, f.actor()); err != nil {
+	if err := pauseActor(trialCtx, s, f.actor()); err != nil {
+		return fail("setup", err)
+	}
+	if role != roster.Manager {
+		// The manager was held during seeding; in a worker trial it relays.
+		worker.Store(f.actor())
+		if _, err := s.ResumeAgent(s.Manager()); err != nil {
 			return fail("setup", err)
 		}
 	}
@@ -390,7 +429,9 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 			}
 		}
 	}()
-	if _, err = s.Send(f.actor(), stimulus); err == nil {
+	// The agent under test resumes only once the relayed stimulus is in its
+	// inbox, so its first exchange sees the stimulus with the seeded notices.
+	if err = sendThrough(trialCtx, s, f.actor(), stimulus); err == nil {
 		_, err = s.ResumeAgent(f.actor())
 	}
 	if err != nil {
@@ -544,6 +585,38 @@ func runTrial(ctx context.Context, opts Options, scenario Scenario, trial int, b
 	return result, nil
 }
 
+// sendThrough sends text to the manager and waits until any relay has
+// delivered it to actor.
+func sendThrough(ctx context.Context, s *harness.Session, actor identity.ActorID, text string) error {
+	sub, err := s.Subscribe(ctx, harness.SubscribeOptions{})
+	if err != nil {
+		return err
+	}
+	defer sub.Close()
+	if _, err := s.Send(s.Manager(), text); err != nil {
+		return err
+	}
+	for {
+		rec, err := sub.Next(ctx)
+		if err != nil {
+			return err
+		}
+		if rec.Kind != "message" {
+			continue
+		}
+		if rec, err = s.ResolveRecord(ctx, rec); err != nil {
+			return err
+		}
+		e, err := eventcodec.DecodeEvent(rec)
+		if err != nil {
+			return err
+		}
+		if m, ok := e.(conversation.MessageEvent); ok && m.Message.To == actor && m.Message.Content == text {
+			return nil
+		}
+	}
+}
+
 func pauseActor(ctx context.Context, s *harness.Session, actor identity.ActorID) error {
 	sub, err := s.Subscribe(ctx, harness.SubscribeOptions{})
 	if err != nil {
@@ -581,7 +654,7 @@ func pauseActor(ctx context.Context, s *harness.Session, actor identity.ActorID)
 
 func roleModel(cfg harness.Config, role roster.Role) harness.ModelConfig {
 	m := cfg.Model
-	selected := cfg.Root
+	selected := cfg.Manager
 	switch role {
 	case roster.Implementor:
 		selected = cfg.Implementor
@@ -601,7 +674,7 @@ func effectiveRole(cfg harness.EffectiveConfig, role roster.Role) harness.RoleCo
 	case roster.Auditor:
 		return cfg.Auditor
 	default:
-		return cfg.Root
+		return cfg.Manager
 	}
 }
 

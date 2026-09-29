@@ -173,15 +173,18 @@ func TestDeepResearchDefaultsAndRetrievalAvailability(t *testing.T) {
 				t.Fatal("effective configuration does not reflect available retrieval")
 			}
 			registered, reader := false, false
-			for _, def := range effective.Researcher.Tools {
-				registered = registered || def.Name == "deep_research"
-				reader = reader || def.Name == "get_research_run"
+			if effective.DeepResearcher != nil {
+				for _, def := range effective.DeepResearcher.Tools {
+					registered = registered || def.Name == "deep_research"
+					reader = reader || def.Name == "get_research_run"
+				}
 			}
 			if registered != tt.want || reader != tt.want {
 				t.Fatalf("research tools registered = %v/%v, want %v", registered, reader, tt.want)
 			}
-			// Other roles read the delivered brief, never the researcher's runs.
-			for role, tools := range map[string][]provider.ToolDefinition{"root": effective.Root.Tools, "implementor": effective.Implementor.Tools, "auditor": effective.Auditor.Tools} {
+			// Other roles read the delivered brief, never the deep researcher's
+			// runs, and the web researcher never starts one.
+			for role, tools := range map[string][]provider.ToolDefinition{"manager": effective.Manager.Tools, "implementor": effective.Implementor.Tools, "auditor": effective.Auditor.Tools, "web_researcher": effective.WebResearcher.Tools} {
 				for _, def := range tools {
 					if def.Name == "deep_research" || def.Name == "get_research_run" {
 						t.Fatalf("%s received %s", role, def.Name)
@@ -195,7 +198,7 @@ func TestDeepResearchDefaultsAndRetrievalAvailability(t *testing.T) {
 func readDeep(t *testing.T, s *harness.Session, q research.ReadQuery) []byte {
 	t.Helper()
 	return readDeepPages(t, func(q research.ReadQuery) (inspection.ResearchPage, error) {
-		return s.ReadResearchReport(context.Background(), s.Root(), q)
+		return s.ReadResearchReport(context.Background(), s.Manager(), q)
 	}, q)
 }
 func readDeepPages(t *testing.T, read func(research.ReadQuery) (inspection.ResearchPage, error), q research.ReadQuery) []byte {
@@ -229,21 +232,21 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "deep.jsonl")
 	worker := &deepWorker{receipt: make(chan string, 4)}
 	model := &deepModel{}
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Researcher: harness.AgentDependencies{Provider: worker}, DeepResearchProvider: model, ResearchWeb: deepWeb{}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), DeepResearcher: harness.AgentDependencies{Provider: worker}, DeepResearchProvider: model, ResearchWeb: deepWeb{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	for _, def := range s.Configuration().Root.Tools {
+	for _, def := range s.Configuration().Manager.Tools {
 		if def.Name == "deep_research" {
-			t.Fatal("root received blocking research tool")
+			t.Fatal("manager received blocking research tool")
 		}
 	}
 	if s.Configuration().DeepResearch.Limits.Standard.ModelCalls != 40 {
 		t.Fatal("effective configuration not resolved")
 	}
-	researcher := createWorker(t, s, roster.Researcher)
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Research, Assignee: researcher, Task: "Measure"})
+	researcher := createWorker(t, s, roster.DeepResearcher)
+	w, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.DeepResearch, Assignee: researcher, Task: "Measure"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +292,7 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	for _, route := range []string{"research-view", "trace/research-view"} {
-		base := "/sessions/" + s.ID() + "/" + route + "?actor=" + url.QueryEscape(string(s.Root()))
+		base := "/sessions/" + s.ID() + "/" + route + "?actor=" + url.QueryEscape(string(s.Manager()))
 		w := call("GET", base+"&mode=source&run_id="+digest.ID+"&source_id="+source.ID+"&max_bytes=2048")
 		var page inspection.ResearchPage
 		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || page.NextCursor == "" {
@@ -305,21 +308,14 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 			t.Fatal("unknown selector accepted", w.Code)
 		}
 	}
-	replacement := createWorker(t, s, roster.Researcher)
-	if _, err = s.ReassignWork(ctx, s.Root(), work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Assignee: replacement}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ReadResearchReport(ctx, researcher, research.ReadQuery{Mode: "continue", Cursor: first.NextCursor}); !errors.Is(err, work.ErrForbidden) {
-		t.Fatal("continuation retained stale authorization", err)
-	}
 	if err = s.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if page, err := s.ReadResearchReport(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: digest.ID}); err != nil || !strings.Contains(string(page.Data), "12 milliseconds") {
+	if page, err := s.ReadResearchReport(ctx, s.Manager(), research.ReadQuery{Mode: "run", RunID: digest.ID}); err != nil || !strings.Contains(string(page.Data), "12 milliseconds") {
 		t.Fatal("report lost after execution close", page, err)
 	}
 	// A ledger ID in run_id names its own reader instead of a bare not-found.
-	if _, err := s.ReadResearchReport(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: "brief-1"}); !errors.Is(err, projection.ErrNotFound) || !strings.Contains(err.Error(), "read it with get_research_brief") {
+	if _, err := s.ReadResearchReport(ctx, s.Manager(), research.ReadQuery{Mode: "run", RunID: "brief-1"}); !errors.Is(err, projection.ErrNotFound) || !strings.Contains(err.Error(), "read it with get_brief") {
 		t.Fatal(err)
 	}
 	calls := model.calls.Load()
@@ -332,7 +328,7 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := reader.Read(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: digest.ID})
+	page, err := reader.Read(ctx, s.Manager(), research.ReadQuery{Mode: "run", RunID: digest.ID})
 	if err != nil || !strings.Contains(string(page.Data), "12 milliseconds") {
 		t.Fatal(page, err)
 	}
@@ -377,26 +373,26 @@ func TestDeepResearchToolArchiveAndAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err = partialReader.Read(ctx, s.Root(), research.ReadQuery{Mode: "run", RunID: digest.ID})
+	page, err = partialReader.Read(ctx, s.Manager(), research.ReadQuery{Mode: "run", RunID: digest.ID})
 	if err != nil || !strings.Contains(string(page.Data), `"status":"incomplete"`) {
 		t.Fatal(string(page.Data), err)
 	}
 }
-func TestDeepResearchCancelReassignAndInterrupt(t *testing.T) {
-	for _, mode := range []string{"cancel", "reassign", "interrupt"} {
+func TestDeepResearchCancelAndInterrupt(t *testing.T) {
+	for _, mode := range []string{"cancel", "interrupt"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			worker := &deepWorker{receipt: make(chan string, 4)}
 			model := &deepModel{verifying: make(chan struct{})}
 			rootCalled := make(chan struct{}, 1)
-			s, err := harness.New(ctx, deepConfig(t), harness.Dependencies{Provider: responsiveDeepRoot{called: rootCalled}, Researcher: harness.AgentDependencies{Provider: worker}, DeepResearchProvider: model, ResearchWeb: deepWeb{}})
+			s, err := harness.New(ctx, deepConfig(t), harness.Dependencies{Provider: responsiveDeepRoot{called: rootCalled}, DeepResearcher: harness.AgentDependencies{Provider: worker}, DeepResearchProvider: model, ResearchWeb: deepWeb{}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer s.Dispose(context.Background())
-			researcher := createWorker(t, s, roster.Researcher)
-			w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Research, Assignee: researcher, Task: "Measure"})
+			researcher := createWorker(t, s, roster.DeepResearcher)
+			w, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.DeepResearch, Assignee: researcher, Task: "Measure"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -405,7 +401,7 @@ func TestDeepResearchCancelReassignAndInterrupt(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
-			if _, err = s.Send(s.Root(), "Still available?"); err != nil {
+			if _, err = s.Send(s.Manager(), "Still available?"); err != nil {
 				t.Fatal("root unavailable", err)
 			}
 			select {
@@ -415,10 +411,7 @@ func TestDeepResearchCancelReassignAndInterrupt(t *testing.T) {
 			}
 			switch mode {
 			case "cancel":
-				_, err = s.CancelWork(ctx, s.Root(), work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "Stop research"})
-			case "reassign":
-				replacement := createWorker(t, s, roster.Researcher)
-				_, err = s.ReassignWork(ctx, s.Root(), work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Assignee: replacement})
+				_, err = s.CancelWork(ctx, s.Manager(), work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "Stop research"})
 			case "interrupt":
 				err = s.Interrupt(ctx)
 			}
@@ -438,7 +431,7 @@ func TestDeepResearchCancelReassignAndInterrupt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			read := func(q research.ReadQuery) (inspection.ResearchPage, error) { return reader.Read(ctx, s.Root(), q) }
+			read := func(q research.ReadQuery) (inspection.ResearchPage, error) { return reader.Read(ctx, s.Manager(), q) }
 			data := readDeepPages(t, read, research.ReadQuery{Mode: "runs", WorkID: string(w.ID)})
 			var runs []struct {
 				ID     string `json:"run_id"`
@@ -451,11 +444,7 @@ func TestDeepResearchCancelReassignAndInterrupt(t *testing.T) {
 			if err = json.Unmarshal(readDeepPages(t, read, research.ReadQuery{Mode: "run", RunID: runs[0].ID}), &report); err != nil {
 				t.Fatal(err)
 			}
-			expected := "cancelled"
-			if mode == "reassign" {
-				expected = "reassigned"
-			}
-			if report.Status != "partial" || report.StopReason != expected || len(report.Sources) != 1 || len(report.Claims) != 0 || report.Binding.Actor != string(researcher) {
+			if report.Status != "partial" || report.StopReason != "cancelled" || len(report.Sources) != 1 || len(report.Claims) != 0 || report.Binding.Actor != string(researcher) {
 				t.Fatalf("bad cancellation result: %+v", report)
 			}
 		})

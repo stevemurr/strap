@@ -9,14 +9,17 @@ import (
 	"github.com/stevemurr/strap/identity"
 )
 
-type ResearchAssignRequest struct {
+// InvestigationRequest assigns review, web research or deep research.
+type InvestigationRequest struct {
+	Kind           Kind             `json:"kind"`
 	Assignee       identity.ActorID `json:"assignee"`
 	Task           string           `json:"task"`
 	Context        string           `json:"context,omitempty"`
 	ExpectedOutput string           `json:"expected_output,omitempty"`
+	Scope          *Scope           `json:"scope,omitempty"` // Plan steps the investigation fulfils; delivery completes them.
 }
 
-func (s *Store) AssignResearch(actor identity.ActorID, r ResearchAssignRequest) (result Work, err error) {
+func (s *Store) AssignInvestigation(actor identity.ActorID, r InvestigationRequest) (result Work, err error) {
 	if err = s.beginMutation(); err != nil {
 		return result, err
 	}
@@ -24,30 +27,40 @@ func (s *Store) AssignResearch(actor identity.ActorID, r ResearchAssignRequest) 
 	if blank(string(actor)) || blank(string(r.Assignee)) || blank(r.Task) {
 		return result, invalid("actor, assignee and task required")
 	}
-	w := Work{ID: ID(s.id("work")), Kind: Research, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: actor, RequestedBy: actor, Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput}
+	if !r.Kind.Investigation() {
+		return result, invalid("investigation kind must be review, web_research or deep_research")
+	}
+	if err = s.checkScope(actor, r.Scope); err != nil {
+		return result, err
+	}
+	w := Work{ID: ID(s.id("work")), Kind: r.Kind, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: actor, RequestedBy: actor, Assignee: r.Assignee, Task: r.Task, Context: r.Context, ExpectedOutput: r.ExpectedOutput, Scope: r.Scope}.Clone()
+	s.reserve(w)
 	s.putWork(w.ID, w)
 	s.emit(WorkAssigned, actor, w, true)
 	return w.Clone(), nil
 }
 
-type ResearchBriefID string
+type BriefID string
 
-const ResearchDelivered EventKind = "research_delivered"
+const BriefDelivered EventKind = "brief_delivered"
 
 type ProposedStep struct {
 	Title              string   `json:"title"`
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 }
-type SubmitResearchRequest struct {
+type SubmitBriefRequest struct {
 	WorkTarget
-	Summary        string              `json:"summary"`
-	FindingIDs     []ProgressFindingID `json:"finding_ids,omitempty"`
-	OpenQuestions  []string            `json:"open_questions,omitempty"`
-	Recommendation string              `json:"recommendation,omitempty"`
-	ProposedSteps  []ProposedStep      `json:"proposed_steps,omitempty"`
+	Summary    string              `json:"summary"`
+	FindingIDs []ProgressFindingID `json:"finding_ids,omitempty"`
+	// Findings are recorded as a progress report before delivery, and the
+	// brief cites them after FindingIDs. The store takes only FindingIDs.
+	Findings       []ProgressFindingDraft `json:"findings,omitempty"`
+	OpenQuestions  []string               `json:"open_questions,omitempty"`
+	Recommendation string                 `json:"recommendation,omitempty"`
+	ProposedSteps  []ProposedStep         `json:"proposed_steps,omitempty"`
 }
-type ResearchBrief struct {
-	ID                 ResearchBriefID     `json:"brief_id"`
+type Brief struct {
+	ID                 BriefID             `json:"brief_id"`
 	Author             identity.ActorID    `json:"author"`
 	RecordedAt         time.Time           `json:"recorded_at"`
 	WorkID             ID                  `json:"work_id"`
@@ -59,17 +72,17 @@ type ResearchBrief struct {
 	Recommendation     string              `json:"recommendation,omitempty"`
 	ProposedSteps      []ProposedStep      `json:"proposed_steps,omitempty"`
 }
-type SubmitResearchResult struct {
-	WorkID             ID              `json:"work_id"`
-	WorkRevision       Revision        `json:"work_revision"`
-	AssignedAtRevision Revision        `json:"assigned_at_revision"`
-	State              State           `json:"state"`
-	BriefID            ResearchBriefID `json:"brief_id"`
-	FindingCount       int             `json:"finding_count"`
-	RecordedAt         time.Time       `json:"recorded_at"`
+type SubmitBriefResult struct {
+	WorkID             ID        `json:"work_id"`
+	WorkRevision       Revision  `json:"work_revision"`
+	AssignedAtRevision Revision  `json:"assigned_at_revision"`
+	State              State     `json:"state"`
+	BriefID            BriefID   `json:"brief_id"`
+	FindingCount       int       `json:"finding_count"`
+	RecordedAt         time.Time `json:"recorded_at"`
 }
 
-func (b ResearchBrief) Clone() ResearchBrief {
+func (b Brief) Clone() Brief {
 	b.FindingIDs = slices.Clone(b.FindingIDs)
 	b.OpenQuestions = slices.Clone(b.OpenQuestions)
 	b.ProposedSteps = slices.Clone(b.ProposedSteps)
@@ -78,7 +91,7 @@ func (b ResearchBrief) Clone() ResearchBrief {
 	}
 	return b
 }
-func (s *Store) SubmitResearch(actor identity.ActorID, r SubmitResearchRequest) (result SubmitResearchResult, err error) {
+func (s *Store) SubmitBrief(actor identity.ActorID, r SubmitBriefRequest) (result SubmitBriefResult, err error) {
 	if err = s.beginMutation(); err != nil {
 		return result, err
 	}
@@ -87,8 +100,11 @@ func (s *Store) SubmitResearch(actor identity.ActorID, r SubmitResearchRequest) 
 	if err != nil {
 		return result, err
 	}
-	if w.Kind != Research || w.State != Active {
+	if !w.Kind.Investigation() || w.State != Active {
 		return result, ErrState
+	}
+	if len(r.Findings) > 0 {
+		return result, invalid("record findings before submitting; the store cites finding_ids only")
 	}
 	if blank(r.Summary) || len(r.FindingIDs) > 256 || len(r.OpenQuestions) > 32 || len(r.ProposedSteps) > 32 {
 		return result, invalid("summary required; at most 256 findings, 32 questions and 32 proposed steps")
@@ -123,7 +139,7 @@ func (s *Store) SubmitResearch(actor identity.ActorID, r SubmitResearchRequest) 
 			}
 		}
 	}
-	b := ResearchBrief{ID: ResearchBriefID(s.id("brief")), Author: actor, RecordedAt: time.Now().UTC(), WorkID: w.ID, WorkRevision: w.Revision + 1, AssignedAtRevision: w.AssignedAtRevision, Summary: r.Summary, FindingIDs: r.FindingIDs, OpenQuestions: r.OpenQuestions, Recommendation: r.Recommendation, ProposedSteps: r.ProposedSteps}.Clone()
+	b := Brief{ID: BriefID(s.id("brief")), Author: actor, RecordedAt: time.Now().UTC(), WorkID: w.ID, WorkRevision: w.Revision + 1, AssignedAtRevision: w.AssignedAtRevision, Summary: r.Summary, FindingIDs: r.FindingIDs, OpenQuestions: r.OpenQuestions, Recommendation: r.Recommendation, ProposedSteps: r.ProposedSteps}.Clone()
 	encoded, err := json.Marshal(b)
 	if err != nil {
 		return result, err
@@ -131,29 +147,32 @@ func (s *Store) SubmitResearch(actor identity.ActorID, r SubmitResearchRequest) 
 	if len(encoded) > 64*1024 {
 		return result, invalid("encoded brief exceeds 64 KiB")
 	}
-	w.State, w.Revision, w.LatestResearchBriefID, w.Blocker = Delivered, b.WorkRevision, b.ID, ""
+	w.State, w.Revision, w.LatestBriefID, w.Blocker = Delivered, b.WorkRevision, b.ID, ""
+	// Delivery is research's success, as acceptance is implementation's: it
+	// completes the steps the investigation was scoped to.
+	s.settleScope(w, Completed)
 	s.researchBriefs[b.ID] = b
-	s.change.ResearchBriefs = append(s.change.ResearchBriefs, b.Clone())
+	s.change.Briefs = append(s.change.Briefs, b.Clone())
 	s.putWork(w.ID, w)
-	s.emit(ResearchDelivered, actor, w, true)
-	return SubmitResearchResult{WorkID: w.ID, WorkRevision: w.Revision, AssignedAtRevision: w.AssignedAtRevision, State: Delivered, BriefID: b.ID, FindingCount: len(b.FindingIDs), RecordedAt: b.RecordedAt}, nil
+	s.emit(BriefDelivered, actor, w, true)
+	return SubmitBriefResult{WorkID: w.ID, WorkRevision: w.Revision, AssignedAtRevision: w.AssignedAtRevision, State: Delivered, BriefID: b.ID, FindingCount: len(b.FindingIDs), RecordedAt: b.RecordedAt}, nil
 }
-func (s *Store) GetResearchBrief(actor identity.ActorID, id ResearchBriefID) (ResearchBrief, error) {
+func (s *Store) GetBrief(actor identity.ActorID, id BriefID) (Brief, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.researchBriefs[id]
 	if !ok {
 		if hint, ok := Misrouted(string(id), "brief-"); ok {
-			return ResearchBrief{}, fmt.Errorf("%w: %s; %s", ErrNotFound, hint, s.knownBriefs(actor))
+			return Brief{}, fmt.Errorf("%w: %s; %s", ErrNotFound, hint, s.knownBriefs(actor))
 		}
-		return ResearchBrief{}, fmt.Errorf("%w: research brief %s; %s", ErrNotFound, id, s.knownBriefs(actor))
+		return Brief{}, fmt.Errorf("%w: brief %s; %s", ErrNotFound, id, s.knownBriefs(actor))
 	}
 	w := s.works[b.WorkID]
 	if !w.visibleTo(actor) {
-		return ResearchBrief{}, ErrForbidden
+		return Brief{}, ErrForbidden
 	}
 	return b.Clone(), nil
 }
-func (v *ReadModel) GetResearchBrief(actor identity.ActorID, id ResearchBriefID) (ResearchBrief, error) {
-	return v.store.GetResearchBrief(actor, id)
+func (v *ReadModel) GetBrief(actor identity.ActorID, id BriefID) (Brief, error) {
+	return v.store.GetBrief(actor, id)
 }

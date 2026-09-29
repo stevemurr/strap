@@ -73,10 +73,10 @@ func TestSharedWorkDecodersMatchToolDomainConversions(t *testing.T) {
 		})
 	})
 	t.Run("research", func(t *testing.T) {
-		checkSharedDecoder[work.SubmitResearchRequest](t, SubmitResearch, DecodeResearchSubmission, []string{
-			`{"input":{"work_id":"w","expected_revision":1,"summary":"done","finding_ids":null,"open_questions":null,"recommendation":null,"proposed_steps":null}}`,
-			`{"input":{"work_id":"w","expected_revision":1,"summary":"done","finding_ids":[],"open_questions":[],"recommendation":"","proposed_steps":[]}}`,
-			`{"input":{"work_id":"w","expected_revision":1,"summary":"done","finding_ids":["f"],"open_questions":["q"],"recommendation":"r","proposed_steps":[{"title":"verify","acceptance_criteria":null}]}}`,
+		checkSharedDecoder[work.SubmitBriefRequest](t, SubmitBrief, DecodeBriefSubmission, []string{
+			`{"input":{"work_id":"w","expected_revision":1,"summary":"done","finding_ids":null,"findings":null,"open_questions":null,"recommendation":null,"proposed_steps":null}}`,
+			`{"input":{"work_id":"w","expected_revision":1,"summary":"done","finding_ids":[],"findings":[],"open_questions":[],"recommendation":"","proposed_steps":[]}}`,
+			`{"input":{"work_id":"w","expected_revision":1,"summary":"done","finding_ids":["f"],"findings":[{"claim":"c","basis":"observed","evidence":[{"uri":"file:x","revision":null,"locator":"l","detail":null}],"limitation":null,"supersedes":null}],"open_questions":["q"],"recommendation":"r","proposed_steps":[{"title":"verify","acceptance_criteria":null}]}}`,
 		})
 	})
 }

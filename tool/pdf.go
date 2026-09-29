@@ -86,7 +86,7 @@ func (p *PDF) handle(ctx context.Context, _ Call, args pdfArgs) (Result, error) 
 	if strings.TrimSpace(args.Path) == "" {
 		return Result{}, errors.New("path must name a PDF file")
 	}
-	path := args.Path
+	path := ExpandHome(args.Path)
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(p.config.Dir, path)
 	}

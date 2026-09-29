@@ -42,7 +42,7 @@ func (r *revisionRace) inject(ctx context.Context, response provider.Response) e
 		if err != nil || request.Kind != work.AuditWork || request.WorkID != f.Original.ID || request.Assignee != f.Auditor || request.SubmissionID != f.Submission.ID {
 			continue
 		}
-		current, err := r.session.GetWork(ctx, f.Root, request.WorkID)
+		current, err := r.session.GetWork(ctx, f.Coordinator, request.WorkID)
 		if err != nil {
 			r.err = fmt.Errorf("read revision-race precondition: %w", err)
 			return r.err
@@ -55,19 +55,23 @@ func (r *revisionRace) inject(ctx context.Context, response provider.Response) e
 			r.err = fmt.Errorf("capture revision-race start: %w", err)
 			return r.err
 		}
-		audit, err := r.session.AssignWork(ctx, f.Root, request)
+		// The competing audit goes to its own auditor: every audit needs a new
+		// one, so the fixture's auditor stays free for the model's retry.
+		competing := request
+		competing.Assignee = f.RaceAuditor
+		audit, err := r.session.AssignWork(ctx, f.Coordinator, competing)
 		if err != nil {
 			r.err = fmt.Errorf("assign competing audit: %w", err)
 			return r.err
 		}
-		cancelled, err := r.session.CancelWork(ctx, f.Root, work.CancelRequest{
+		cancelled, err := r.session.CancelWork(ctx, f.Coordinator, work.CancelRequest{
 			WorkTarget: work.WorkTarget{ID: audit.ID, ExpectedRevision: audit.Revision}, Reason: revisionRaceReason,
 		})
 		if err != nil {
 			r.err = fmt.Errorf("withdraw competing audit: %w", err)
 			return r.err
 		}
-		after, err := r.session.GetWork(ctx, f.Root, request.WorkID)
+		after, err := r.session.GetWork(ctx, f.Coordinator, request.WorkID)
 		if err != nil {
 			r.err = fmt.Errorf("read revision-race outcome: %w", err)
 			return r.err

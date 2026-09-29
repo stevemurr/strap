@@ -15,11 +15,11 @@ type ProgressReportRef struct {
 	WorkRevision       work.Revision         `json:"work_revision"`
 	ReportID           work.ProgressReportID `json:"report_id"`
 }
-type ResearchBriefRef struct {
-	WorkID             work.ID              `json:"work_id"`
-	AssignedAtRevision work.Revision        `json:"assigned_at_revision"`
-	WorkRevision       work.Revision        `json:"work_revision"`
-	BriefID            work.ResearchBriefID `json:"brief_id"`
+type BriefRef struct {
+	WorkID             work.ID       `json:"work_id"`
+	AssignedAtRevision work.Revision `json:"assigned_at_revision"`
+	WorkRevision       work.Revision `json:"work_revision"`
+	BriefID            work.BriefID  `json:"brief_id"`
 }
 type ProgressCoverage struct {
 	WorkID             work.ID       `json:"work_id"`
@@ -30,7 +30,7 @@ type ProgressCoverage struct {
 // WorkProgressNotice contains locators, never report bodies or model authority.
 type WorkProgressNotice struct {
 	Reports   []ProgressReportRef `json:"reports,omitempty"`
-	Briefs    []ResearchBriefRef  `json:"briefs,omitempty"`
+	Briefs    []BriefRef          `json:"briefs,omitempty"`
 	Covered   []ProgressCoverage  `json:"covered,omitempty"`
 	Attention bool                `json:"attention,omitempty"`
 }

@@ -107,6 +107,30 @@ func (q *Inbox[T]) signal() {
 	}
 }
 
+// Await waits until ready holds for the queued values, without removing any.
+// It shares the single consumer contract with Receive.
+func (q *Inbox[T]) Await(ctx context.Context, ready func([]T) bool) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		q.mu.Lock()
+		ok, closed := ready(q.items), q.closed
+		q.mu.Unlock()
+		if ok {
+			return nil
+		}
+		if closed {
+			return ErrClosed
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-q.wake:
+		}
+	}
+}
+
 // Wait waits for available input without removing it. It shares the single
 // consumer contract with Receive and lets a loop check controls before dequeueing.
 func (q *Inbox[T]) Wait(ctx context.Context) error {

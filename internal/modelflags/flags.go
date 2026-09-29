@@ -6,6 +6,7 @@ package modelflags
 
 import (
 	"errors"
+	"fmt"
 	"flag"
 
 	"github.com/stevemurr/strap/harness"
@@ -46,7 +47,26 @@ func Register(fs *flag.FlagSet, cfg *harness.Config, modelTimeout string) *Optio
 			fs.Var(f.Value, name, f.Usage)
 		})
 	}
+	// One agent does the work unless -agents team asks for the manager and
+	// its workers: on the ladder tasks the team failed, a plain single agent
+	// did as well or better (2026-09-28).
+	cfg.Solo = true
+	fs.Func("agents", "solo: one agent with every tool (default); team: a manager that plans and assigns workers, with independent audits", func(v string) error {
+		switch v {
+		case "solo":
+			cfg.Solo = true
+		case "team":
+			cfg.Solo = false
+		default:
+			return fmt.Errorf("agents must be solo or team, not %q", v)
+		}
+		return nil
+	})
+	fs.DurationVar(&cfg.TesterBudget, "tester-budget", cfg.TesterBudget, "Wall clock for one adversarial tester run (default 20m)")
+	fs.BoolVar(&cfg.TesterReportAll, "tester-report-all", cfg.TesterReportAll, "Have the adversarial tester report every failing test and leave judging it to the agent (experimental)")
+	fs.BoolVar(&cfg.Tester, "tester", cfg.Tester, "Before a solo agent's reply to a code change, run an adversarial tester; the failing tests the harness reproduces go back to the agent (experimental)")
 	fs.IntVar(&cfg.ReasoningLimit, "reasoning-limit", cfg.ReasoningLimit, "Reasoning bytes a model call may stream before it is cut off and retried once (0 disables)")
+	fs.BoolVar(&cfg.DebugToolkit, "debug-toolkit", cfg.DebugToolkit, "Start a debugger agent beside the manager that the user can ask to read and steer any part of the agent tree")
 	fs.Func("file-edits", "How edit_file names what it changes: text (unique old text, default), anchors (line labels from read_file; experimental) or merge (old text applied exactly, then tolerantly with a three-way merge; experimental)", func(v string) error {
 		mode := tool.EditMode(v)
 		if err := mode.Validate(); err != nil {

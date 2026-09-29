@@ -91,13 +91,13 @@ func TestProjectorRejectsInconsistentToolActivity(t *testing.T) {
 	}
 	s.reject("tool without an invocation id", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("", time.Time{})}))
 	// The envelope's agent and the payload's agent must agree.
-	s.reject("tool agent mismatch", relabel(s.event(conversation.ToolEvent{Agent: "ghost", Activity: activity("root/tool-1", time.Time{})}), seedAgent))
-	s.reject("finish without a start", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("root/tool-1", now.Add(time.Second))}))
+	s.reject("tool agent mismatch", relabel(s.event(conversation.ToolEvent{Agent: "ghost", Activity: activity("manager/tool-1", time.Time{})}), seedAgent))
+	s.reject("finish without a start", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("manager/tool-1", now.Add(time.Second))}))
 
-	s.apply(s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("root/tool-1", time.Time{})}))
-	s.reject("duplicate tool start", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("root/tool-1", time.Time{})}))
-	s.apply(s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("root/tool-1", now.Add(time.Second))}))
-	s.reject("duplicate tool finish", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("root/tool-1", now.Add(2*time.Second))}))
+	s.apply(s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("manager/tool-1", time.Time{})}))
+	s.reject("duplicate tool start", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("manager/tool-1", time.Time{})}))
+	s.apply(s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("manager/tool-1", now.Add(time.Second))}))
+	s.reject("duplicate tool finish", s.event(conversation.ToolEvent{Agent: seedAgent, Activity: activity("manager/tool-1", now.Add(2*time.Second))}))
 }
 
 // A tool batch and a context measurement both pin themselves to an exact

@@ -1,5 +1,7 @@
 # Role prompt review — 2026-09-14
 
+> Terminology note (2026-09-25): in this document "root" is the coordinating agent. That role is now the **manager**, which the user talks to directly: the separate root/user agent was removed on 2026-09-25, and the manager is the session's entry agent (see the [README](../../README.md)).
+
 The tic-tac-toe trace showed root implementing directly, never assigning work or
 triggering review, and announcing completion after rejected plan-status updates.
 The user reported that automatic delegation worked before the recent prompt

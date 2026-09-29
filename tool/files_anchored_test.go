@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -234,4 +235,33 @@ func TestMatchLinesKeepsLongestCommonSubsequence(t *testing.T) {
 			t.Fatalf("match %v, want %v", got, want)
 		}
 	}
+}
+
+// Reads run together under EditAnchors while edits change the file; every
+// read still shows a label on every line. Run with -race.
+func TestAnchoredConcurrentReads(t *testing.T) {
+	dir, kit := anchoredFile(t, "a\nb\nc\n")
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				readLabels(t, kit, "f.go")
+			}
+		}()
+		if i == 0 {
+			// Changes made outside Files make readers reconcile the labels.
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := range 10 {
+					if err := os.WriteFile(filepath.Join(dir, "f.go"), []byte(strings.Repeat("x\n", j+1)), 0o644); err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+		}
+	}
+	wg.Wait()
 }

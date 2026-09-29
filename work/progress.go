@@ -224,7 +224,7 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 				}
 				evidence, err := s.evidenceLookup(e.URI)
 				if errors.Is(err, ErrNotFound) {
-					return result, fmt.Errorf("%w: no execution evidence %s; an execution URI must be an evidence_ref returned by a diagnostic shell result, never one composed by hand; cite the file or output you read instead", ErrNotFound, e.URI)
+					return result, fmt.Errorf("%w: no execution evidence %s; an execution URI must be an evidence_ref returned by a shell or run_trials result, never one composed by hand; cite the file or output you read instead", ErrNotFound, e.URI)
 				}
 				if err != nil {
 					return result, fmt.Errorf("execution evidence %s: %w", e.URI, err)
@@ -300,8 +300,11 @@ func (s *Store) ReportWorkProgress(actor identity.ActorID, u ReportWorkProgressR
 // progressSteps prepares a detached plan; validation failures cannot partially
 // update shared steps. Both mutation paths use exactly the same scope rules.
 func (s *Store) progressSteps(w Work, changes []StepProgress) (Plan, error) {
+	if len(changes) > 0 && (w.Kind.Investigation() || w.Kind == Experiment) {
+		return Plan{}, fmt.Errorf("%w: %s %s reports no steps; delivering it completes its scoped steps, so set steps to null", ErrForbidden, w.Kind, w.ID)
+	}
 	if len(changes) > 0 && (w.Kind != Implementation && w.Kind != Repair || w.Scope == nil) {
-		return Plan{}, ErrForbidden
+		return Plan{}, fmt.Errorf("%w: %s %s has no plan scope, so it reports no steps; set steps to null", ErrForbidden, w.Kind, w.ID)
 	}
 	var p Plan
 	if w.Scope != nil {
@@ -314,7 +317,9 @@ func (s *Store) progressSteps(w Work, changes []StepProgress) (Plan, error) {
 		}
 		seen[change.ID] = true
 		if !slices.Contains(w.Scope.StepIDs, change.ID) {
-			return Plan{}, ErrForbidden
+			// Nothing in the report was recorded; a manager that listed every
+			// plan step it had finished read a bare "forbidden" as final.
+			return Plan{}, fmt.Errorf("%w: step %s is outside %s's scope %v; nothing was recorded. Report only scoped steps", ErrForbidden, change.ID, w.ID, w.Scope.StepIDs)
 		}
 		if change.Status != nil && *change.Status != Pending && *change.Status != InProgress && *change.Status != Blocked && *change.Status != ReadyForReview {
 			return Plan{}, invalid("progress cannot accept or cancel work")
@@ -360,7 +365,7 @@ func (s *Store) GetProgressFinding(actor identity.ActorID, id ProgressFindingID)
 		if hint, ok := Misrouted(string(id), "finding-"); ok {
 			return ProgressFinding{}, fmt.Errorf("%w: %s", ErrNotFound, hint)
 		}
-		return ProgressFinding{}, fmt.Errorf("%w: finding %s; finding IDs are listed in research briefs and by get_work_progress mode findings", ErrNotFound, id)
+		return ProgressFinding{}, fmt.Errorf("%w: finding %s; finding IDs are listed in briefs and by get_work_progress mode findings", ErrNotFound, id)
 	}
 	w := s.works[f.WorkID]
 	if !w.visibleTo(actor) {

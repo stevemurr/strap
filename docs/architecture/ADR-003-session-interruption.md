@@ -1,5 +1,7 @@
 # ADR-003: Stop current work without terminating the conversation
 
+> Terminology note (2026-09-25): in this document "root" is the coordinating agent. That role is now the **manager**, which the user talks to directly: the separate root/user agent was removed on 2026-09-25, and the manager is the session's entry agent (see the [README](../../README.md)).
+
 ## Context
 
 Strap sessions and agents persist across user messages. Pause waits for an

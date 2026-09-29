@@ -98,5 +98,5 @@ func inspectionResult(in AgentInspection) (tool.Result, error) {
 		out.Transcript.Entries = append(out.Transcript.Entries, entry)
 	}
 	slices.Reverse(out.Transcript.Entries)
-	return tool.JSON(out)
+	return agentJSON(out)
 }

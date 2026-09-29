@@ -78,7 +78,7 @@ func setup(t *testing.T, tools ...tool.Tool) (*conversation.Controller, *control
 	t.Helper()
 	m := &controlledProvider{calls: make(chan call, 16)}
 	c := conversation.New(context.Background())
-	executionSpec := agent.Spec{Provider: m, Prompt: prompt.Prompt{Role: "Complete the assignment.", Instructions: []string{"Complete assigned work."}}, Tools: append(append([]tool.Tool(nil), tools...), tool.SendMessage(), tool.MessageStatus(c.Receipt))}
+	executionSpec := agent.Spec{Provider: m, Prompt: prompt.Prompt{Role: "Complete the assignment.", Instructions: []string{"Complete assigned work."}}, Tools: append(append([]tool.Tool(nil), tools...), tool.SendMessage(nil), tool.MessageStatus(c.Receipt))}
 	rootTools := append(append([]tool.Tool(nil), executionSpec.Tools...), creationTool(c, executionSpec))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -324,20 +324,29 @@ func TestImmediateCloseJoinsAgentsAndRefusesFurtherWork(t *testing.T) {
 	}
 }
 
-func TestConversationHasExactlyOneRoot(t *testing.T) {
+// The first agent the user creates is the root; later ones may also answer
+// the user directly, and the root stays the first.
+func TestConversationRootIsTheFirstUserAgent(t *testing.T) {
 	c, m := setup(t)
 	root := c.Root()
 	agents := c.Agents()
 	if root == "" || len(agents) != 1 || agents[0].ID != root || agents[0].Parent != message.User {
 		t.Fatalf("invalid root: %q, agents: %+v", root, agents)
 	}
-	for _, parent := range []message.ActorID{message.User, "", "missing-agent"} {
+	for _, parent := range []message.ActorID{"", "missing-agent"} {
 		if _, err := c.CreateAgent(parent, agent.Spec{Provider: m}); err == nil {
 			t.Fatalf("accepted invalid parent %q", parent)
 		}
 	}
 	if len(c.Agents()) != 1 {
 		t.Fatal("invalid creation registered an agent")
+	}
+	beside, err := c.CreateAgent(message.User, agent.Spec{Provider: m})
+	if err != nil || c.Root() != root {
+		t.Fatalf("second user agent %v, root %q → %q", err, root, c.Root())
+	}
+	if a := c.Agents(); len(a) != 2 || a[1].ID != beside.AgentID || a[1].Parent != message.User {
+		t.Fatalf("agents: %+v", a)
 	}
 	child, err := c.CreateAgent(root, agent.Spec{Provider: m})
 	if err != nil {
@@ -348,7 +357,7 @@ func TestConversationHasExactlyOneRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents = c.Agents()
-	if len(agents) != 3 || agents[1].Parent != root || agents[2].ID != descendant.AgentID || agents[2].Parent != child.AgentID {
+	if len(agents) != 4 || agents[2].Parent != root || agents[3].ID != descendant.AgentID || agents[3].Parent != child.AgentID {
 		t.Fatalf("invalid creation tree: %+v", agents)
 	}
 	if _, err := c.StopAgent(root); err != nil {
@@ -358,13 +367,14 @@ func TestConversationHasExactlyOneRoot(t *testing.T) {
 		exited, ok := e.(conversation.AgentExited)
 		return ok && exited.Agent == root
 	})
-	if _, err := c.CreateAgent(message.User, agent.Spec{Provider: m}); err == nil {
-		t.Fatal("created a replacement root")
+	// Another user agent is admitted, but it does not replace the root.
+	if _, err := c.CreateAgent(message.User, agent.Spec{Provider: m}); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := c.CreateAgent(root, agent.Spec{Provider: m}); err == nil {
 		t.Fatal("accepted a stopped parent")
 	}
-	if c.Root() != root || len(c.Agents()) != 3 {
+	if c.Root() != root || len(c.Agents()) != 5 {
 		t.Fatal("root identity or registry changed")
 	}
 	for _, a := range c.Agents() {

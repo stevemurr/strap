@@ -33,7 +33,7 @@ type traceFixture struct {
 	ctx     context.Context
 	reader  *inspection.Reader
 	handler http.Handler
-	root    identity.ActorID
+	manager identity.ActorID // The agent the user talks to; owns the session's work.
 	worker  identity.ActorID
 	through uint64
 }
@@ -51,17 +51,17 @@ func tracedSession(t *testing.T) traceFixture {
 	}
 	t.Cleanup(func() { _ = s.Dispose(ctx) })
 
-	reg, err := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Implementor})
+	reg, err := s.CreateAgent(ctx, s.Manager(), roster.CreateRequest{Role: roster.Implementor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: reg.AgentID, Task: "inspect me"}); err != nil {
+	if _, err = s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: reg.AgentID, Task: "inspect me"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Send(s.Root(), "hello"); err != nil {
+	if _, err = s.Send(s.Manager(), "hello"); err != nil {
 		t.Fatal(err)
 	}
-	// The root returns to Idle once its tool call and reply have been recorded.
+	// The manager returns to Idle once its reply has been recorded.
 	awaitIdle(t, s)
 	reader, err := s.Trace(ctx)
 	if err != nil {
@@ -72,7 +72,7 @@ func tracedSession(t *testing.T) traceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return traceFixture{ctx: ctx, reader: reader, handler: inspection.Handler(reader), root: s.Root(), worker: reg.AgentID, through: head.Cursor.Sequence}
+	return traceFixture{ctx: ctx, reader: reader, handler: inspection.Handler(reader), manager: s.Manager(), worker: reg.AgentID, through: head.Cursor.Sequence}
 }
 
 func (f traceFixture) get(t *testing.T, path string) *httptest.ResponseRecorder {
@@ -107,7 +107,7 @@ func TestInspectionHandlerServesEveryReadRoute(t *testing.T) {
 
 	agents := decode[inspection.AgentPage](t, f.get(t, "/agents"))
 	if len(agents.Items) < 2 {
-		t.Fatal("trace did not record both the root and the worker", agents)
+		t.Fatal("trace did not record both the manager and the worker", agents)
 	}
 	if one := decode[any](t, f.get(t, "/agents/"+string(f.worker))); one == nil {
 		t.Fatal("worker inspection was empty")
@@ -141,15 +141,15 @@ func TestInspectionHandlerServesEveryReadRoute(t *testing.T) {
 	if text := decode[inspection.TextPage](t, f.get(t, path+"/text")); text.Through.Sequence == 0 {
 		t.Fatal("text page was not pinned to the prefix", text)
 	}
-	if byAgent := decode[inspection.OutputPage](t, f.get(t, "/outputs?agent="+string(f.root))); len(byAgent.Items) == 0 {
-		t.Fatal("agent filter excluded the root's outputs")
+	if byAgent := decode[inspection.OutputPage](t, f.get(t, "/outputs?agent="+string(f.manager))); len(byAgent.Items) == 0 {
+		t.Fatal("agent filter excluded the manager's outputs")
 	}
 
 	if rec := decode[map[string]any](t, f.get(t, "/records/1")); rec["sequence"] == nil {
 		t.Fatal("record read returned no sequence", rec)
 	}
 
-	listed := decode[work.ListPage](t, f.get(t, "/work?actor="+string(f.root)))
+	listed := decode[work.ListPage](t, f.get(t, "/work?actor="+string(f.manager)))
 	if len(listed.Items) != 1 {
 		t.Fatal("work listing did not return the assignment", listed)
 	}
@@ -182,7 +182,7 @@ func TestInspectionHandlerPaginatesWithinThePinnedPrefix(t *testing.T) {
 // that tells the caller whether to fix the query or give up.
 func TestInspectionHandlerRejectsMalformedReads(t *testing.T) {
 	f := tracedSession(t)
-	out := fmt.Sprintf("/outputs/%s/1", f.root)
+	out := fmt.Sprintf("/outputs/%s/1", f.manager)
 	cases := []struct {
 		path   string
 		status int

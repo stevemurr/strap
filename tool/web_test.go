@@ -189,7 +189,7 @@ func TestSnapshotEvictionAndSourceTruncation(t *testing.T) {
 }
 
 func TestOpenQueueDeadlineAndRuntimeClose(t *testing.T) {
-	w := testWeb(t, WebConfig{})
+	w := testWeb(t, WebConfig{OpenConcurrency: 2}) // Two slots, both held below.
 	started := make(chan struct{}, 3)
 	var active atomic.Int32
 	w.browser = pageFunc(func(ctx context.Context, _ string) (agentbrowser.Page, error) {

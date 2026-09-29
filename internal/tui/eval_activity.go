@@ -11,11 +11,11 @@ import (
 
 // The eval activity renderer receives facts, never a live session handle. Even
 // an accidentally forwarded composer/control command cannot affect execution.
-type evalSession struct{ root message.ActorID }
+type evalSession struct{ manager message.ActorID }
 
 var errEvalReadOnly = errors.New("eval activity is read only")
 
-func (s evalSession) Root() message.ActorID        { return s.root }
+func (s evalSession) Manager() message.ActorID     { return s.manager }
 func (s evalSession) Agents() []harness.AgentInfo  { return nil }
 func (s evalSession) AutomaticContextTokens() bool { return true }
 func (s evalSession) NextEvent(context.Context) (conversation.Event, error) {
@@ -39,8 +39,8 @@ func (s evalSession) StopAgent(message.ActorID) (conversation.AgentInfo, error) 
 	return conversation.AgentInfo{}, errEvalReadOnly
 }
 
-func newEvalActivity(ctx context.Context, root message.ActorID) *model {
-	a := newModel(ctx, func() {}, evalSession{root: root}, Options{})
+func newEvalActivity(ctx context.Context, manager message.ActorID) *model {
+	a := newModel(ctx, func() {}, evalSession{manager: manager}, Options{})
 	a.embedded = true
 	a.entries = nil // The eval host supplies the task, not the conversational welcome.
 	a.input.Blur()

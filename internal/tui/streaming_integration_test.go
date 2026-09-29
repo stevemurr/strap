@@ -66,6 +66,7 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	cfg.Web, cfg.LocalTools = nil, false
 	cfg.Telemetry.ContextTokens = false
 	cfg.Model.BaseURL = server.URL
+	// The manager streams over HTTP.
 	session, err := harness.New(ctx, cfg, harness.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -74,9 +75,10 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 	observed, detach := observeSession(session)
 	defer detach()
 	m := newModel(ctx, cancel, observed, Options{})
+	m.focusCommand([]string{"/focus", string(session.Manager())}) // Watch the agent that streams.
 	m.input.SetValue("unfinished draft")
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Expanding tools must not reveal reasoning.
-	if _, err := session.Send(session.Root(), "respond"); err != nil {
+	if _, err := session.Send(session.Manager(), "respond"); err != nil {
 		t.Fatal(err)
 	}
 	reasoningRecorded, firstVisible, secondVisible := false, false, false
@@ -109,7 +111,7 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 		if m.input.Value() != "unfinished draft" {
 			t.Fatal("streaming overwrote draft input")
 		}
-		if e, ok := msg.event.(conversation.MessageEvent); ok && e.Message.Kind == message.Reply && e.Message.To == message.User {
+		if e, ok := msg.event.(conversation.MessageEvent); ok && e.Message.Kind == message.Reply && e.Message.From == session.Manager() {
 			if !reasoningRecorded || !firstVisible || !secondVisible || strings.Count(view, "Early text arrives") != 1 {
 				t.Fatalf("expected one incrementally rendered reply:\n%s", view)
 			}
@@ -120,7 +122,7 @@ func TestTUIRendersHTTPStreamBeforeCompletion(t *testing.T) {
 			}
 			// Clearing display rows must not destroy reasoning inspection.
 			enter(m, "/clear")
-			m.openTranscript(session.Root())
+			m.openTranscript(session.Manager())
 			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 			if cmd == nil {
 				t.Fatal("reasoning inspection did not load")

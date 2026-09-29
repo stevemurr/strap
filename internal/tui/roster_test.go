@@ -36,7 +36,7 @@ func TestRosterKeyboardNavigation(t *testing.T) {
 		t.Fatal("home did not select the combined transcript", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyDown)
-	if m.streamUI.focusID != s.Root() {
+	if m.streamUI.focusID != s.Manager() {
 		t.Fatal("down did not advance to the first agent", m.streamUI.focusID)
 	}
 	pressed(m, tea.KeyUp)
@@ -53,7 +53,7 @@ func TestRosterKeyboardNavigation(t *testing.T) {
 	}
 	// Bracket keys mirror the arrows.
 	typeText(m, "]")
-	if m.streamUI.focusID != s.Root() {
+	if m.streamUI.focusID != s.Manager() {
 		t.Fatal("] did not advance the selection", m.streamUI.focusID)
 	}
 	typeText(m, "[")
@@ -80,7 +80,7 @@ func TestFocusCommandSelectsStreams(t *testing.T) {
 		t.Fatal(m.streamUI.selected)
 	}
 	m.focusCommand([]string{"/focus", "root"})
-	if m.streamUI.selected != s.Root() {
+	if m.streamUI.selected != s.Manager() {
 		t.Fatal(m.streamUI.selected)
 	}
 	m.focusCommand([]string{"/focus", "agent-2"})
@@ -88,7 +88,7 @@ func TestFocusCommandSelectsStreams(t *testing.T) {
 		t.Fatal(m.streamUI.selected)
 	}
 	m.focusCommand([]string{"/focus"})
-	if m.streamUI.selected != s.Root() {
+	if m.streamUI.selected != s.Manager() {
 		t.Fatal("a bare /focus did not return to the root", m.streamUI.selected)
 	}
 	m.focusCommand([]string{"/focus", "nobody"})
@@ -140,7 +140,7 @@ func TestWorkStatusPhrasing(t *testing.T) {
 // An agent's role in the roster follows the work it holds.
 func TestStreamRoleFollowsAssignedWork(t *testing.T) {
 	m, s := focusedSetup(t)
-	if got := m.streamRole(s.Root()); got != "root" {
+	if got := m.streamRole(s.Manager()); got != "manager" {
 		t.Fatal(got)
 	}
 	if got := m.streamRole("agent-2"); got != "agent" {

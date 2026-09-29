@@ -107,7 +107,7 @@ func TestOracleRejectsCorruptedDomainFacts(t *testing.T) {
 		inserted := false
 		for i, x := range mutated {
 			e, ok := x.event.(conversation.ToolEvent)
-			if !ok || x.record.Sequence <= baseline.Start.Sequence || e.Agent != f.Root || e.Activity.Err == nil || e.Activity.FinishedAt.IsZero() {
+			if !ok || x.record.Sequence <= baseline.Start.Sequence || e.Agent != f.Coordinator || e.Activity.Err == nil || e.Activity.FinishedAt.IsZero() {
 				continue
 			}
 			original := f.Original.Clone()

@@ -30,7 +30,11 @@ type Controller struct {
 	interrupted  bool
 	interruption *interruptAttempt
 	admitInbox   func(message.ActorID) agent.InboxAdmission
-	wakeContext  func(message.ActorID) agent.WakeContext
+	route        func(from, to message.ActorID, kind message.MessageKind) error
+	wakeContext  func(message.ActorID, agent.Spec) agent.WakeContext
+	intake       func(message.ActorID) agent.Intake
+	sequence     func(message.ActorID) agent.Sequence
+	sendOrder    SendOrder
 	emission     sync.Mutex
 	reporter     Reporter
 	source       func(context.Context) (Event, error)
@@ -69,8 +73,35 @@ func WithInboxAdmission(f func(message.ActorID) agent.InboxAdmission) Option {
 	return func(c *Controller) { c.admitInbox = f }
 }
 
+// WithRoute restricts who may message whom. Every agent send, host delivery
+// and user message is checked; only a host notice an agent sends to itself,
+// which the application uses for ledger notices to an owner, is exempt.
+func WithRoute(f func(from, to message.ActorID, kind message.MessageKind) error) Option {
+	return func(c *Controller) { c.route = f }
+}
+
+// SendOrder is called before a message is admitted, outside every controller
+// lock, and may block. The returned function is called once the send is
+// decided; sent reports whether a message was created. Message ids follow
+// admission order, which is a race when agents send at the same moment; a
+// replay uses it to admit each sender's messages in the recorded order.
+type SendOrder func(ctx context.Context, from message.ActorID) (admitted func(sent bool))
+
+// WithSendOrder orders message admission; see SendOrder.
+func WithSendOrder(f SendOrder) Option { return func(c *Controller) { c.sendOrder = f } }
+
+// WithSequence supplies per-agent step ordering; see agent.Sequence.
+func WithSequence(f func(message.ActorID) agent.Sequence) Option {
+	return func(c *Controller) { c.sequence = f }
+}
+
+// WithIntake supplies per-agent inbox intake; see agent.Intake.
+func WithIntake(f func(message.ActorID) agent.Intake) Option {
+	return func(c *Controller) { c.intake = f }
+}
+
 // WithWakeContext supplies per-agent wake context; see agent.WakeContext.
-func WithWakeContext(f func(message.ActorID) agent.WakeContext) Option {
+func WithWakeContext(f func(message.ActorID, agent.Spec) agent.WakeContext) Option {
 	return func(c *Controller) { c.wakeContext = f }
 }
 func New(ctx context.Context, options ...Option) *Controller {
@@ -122,9 +153,10 @@ func New(ctx context.Context, options ...Option) *Controller {
 	return c
 }
 
-// Root returns the conversation entry agent, whose parent is the user.
-// It is empty until the first successful creation with message.User as parent.
-// Its identity remains stable even after that agent stops.
+// Root returns the conversation entry agent: the first agent created with
+// the user as parent. It is empty until then, and its identity remains
+// stable even after that agent stops. Later agents may also have the user as
+// parent, each answering the user directly.
 func (c *Controller) Root() message.ActorID {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -132,8 +164,8 @@ func (c *Controller) Root() message.ActorID {
 }
 
 // CreateAgent starts an idle agent. Send a message separately to give it work.
-// The first agent has message.User as its parent and becomes the root.
-// Subsequent parents must be active agents. The parent receives text responses
+// The first agent with message.User as its parent becomes the root. Other
+// parents must be active agents. The parent receives text responses
 // and model failures. The supplied spec is used without tool or prompt injection.
 func (c *Controller) CreateAgent(parent message.ActorID, spec agent.Spec) (Creation, error) {
 	c.emission.Lock()
@@ -150,12 +182,10 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	if c.interrupted {
 		return Creation{}, ErrInterrupted
 	}
-	if parent == message.User {
-		if c.root != "" {
-			return Creation{}, errors.New("conversation already has a root agent")
+	if parent != message.User {
+		if err := c.activeLocked(parent); err != nil {
+			return Creation{}, err
 		}
-	} else if err := c.activeLocked(parent); err != nil {
-		return Creation{}, err
 	}
 	c.nextAgent++
 	id := message.ActorID(fmt.Sprintf("agent-%d", c.nextAgent))
@@ -167,9 +197,17 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	}
 	var wake agent.WakeContext
 	if c.wakeContext != nil {
-		wake = c.wakeContext(id)
+		wake = c.wakeContext(id, spec)
 	}
-	runner, err := agent.New(agent.Config{AdmitInbox: admit, WakeContext: wake,
+	var intake agent.Intake
+	if c.intake != nil {
+		intake = c.intake(id)
+	}
+	var sequence agent.Sequence
+	if c.sequence != nil {
+		sequence = c.sequence(id)
+	}
+	runner, err := agent.New(agent.Config{AdmitInbox: admit, WakeContext: wake, Intake: intake, Sequence: sequence,
 		ID: id, ReplyTo: parent, Spec: spec, Inbox: mail,
 		Outbox: sender{controller: c, actor: id},
 		Reporter: agent.ReporterFunc(func(ctx context.Context, e agent.Event) error {
@@ -198,7 +236,7 @@ func (c *Controller) createLocked(parent message.ActorID, spec agent.Spec) (Crea
 	owned := &ownedAgent{
 		info: AgentInfo{ID: id, Parent: parent, State: agent.Idle, StateRevision: 1}, agent: runner, inbox: mail, ctx: ctx, cancel: cancel,
 	}
-	if parent == message.User {
+	if parent == message.User && c.root == "" {
 		c.root = id
 	}
 	c.agents[id] = owned
@@ -223,7 +261,11 @@ func (c *Controller) Send(to message.ActorID, content string) (message.Receipt, 
 
 // SendContext checks caller cancellation before admitting a delivery. Publication
 // is not rollback: an already admitted delivery may finish after cancellation.
-func (c *Controller) SendContext(ctx context.Context, to message.ActorID, content string) (message.Receipt, error) {
+func (c *Controller) SendContext(ctx context.Context, to message.ActorID, content string) (r message.Receipt, err error) {
+	if err := c.refuse(message.User, message.Draft{To: to, Kind: message.Instruction, Content: content}, false); err != nil {
+		return message.Receipt{}, err
+	}
+	defer c.admit(ctx, message.User)(&r)
 	c.emission.Lock()
 	defer c.emission.Unlock()
 	c.mu.Lock()
@@ -255,7 +297,11 @@ func (c *Controller) SendContext(ctx context.Context, to message.ActorID, conten
 
 // Deliver is a host operation for application-owned work dispatch. Model tools
 // continue to use their bound Sender; they cannot supply a sender identity.
-func (c *Controller) Deliver(from message.ActorID, draft message.Draft) (message.Receipt, error) {
+func (c *Controller) Deliver(from message.ActorID, draft message.Draft) (r message.Receipt, err error) {
+	if err := c.refuse(from, draft, true); err != nil {
+		return message.Receipt{}, err
+	}
+	defer c.admit(context.Background(), from)(&r)
 	c.emission.Lock()
 	defer c.emission.Unlock()
 	c.mu.Lock()
@@ -269,6 +315,31 @@ func (c *Controller) Deliver(from message.ActorID, draft message.Draft) (message
 		}
 	}
 	return c.sendLocked(from, draft)
+}
+
+// refuse reports what makes a draft impossible to send whatever the timing:
+// an invalid draft or a route the topology forbids. It runs before a send
+// waits its turn, so a refusal never holds a place in the send order, and
+// outside the controller lock, since the route reads only the topology. Only a
+// host notice to its own owner is exempt from routing (selfNotice); an agent
+// can never message itself.
+func (c *Controller) refuse(from message.ActorID, draft message.Draft, selfNotice bool) error {
+	if err := draft.Validate(); err != nil {
+		return err
+	}
+	if c.route != nil && !(selfNotice && from == draft.To) {
+		return c.route(from, draft.To, draft.Kind)
+	}
+	return nil
+}
+
+// admit waits for the send order, if any, and returns what reports the outcome.
+func (c *Controller) admit(ctx context.Context, from message.ActorID) func(*message.Receipt) {
+	if c.sendOrder == nil {
+		return func(*message.Receipt) {}
+	}
+	admitted := c.sendOrder(ctx, from)
+	return func(r *message.Receipt) { admitted(r.MessageID != "") }
 }
 
 func (c *Controller) sendLocked(from message.ActorID, draft message.Draft) (message.Receipt, error) {
@@ -530,11 +601,15 @@ type sender struct {
 	actor      message.ActorID
 }
 
-func (s sender) Send(ctx context.Context, draft message.Draft) (message.Receipt, error) {
+func (s sender) Send(ctx context.Context, draft message.Draft) (r message.Receipt, err error) {
 	if draft.Progress != nil {
 		return message.Receipt{}, errors.New("progress notices require host delivery")
 	}
 	c := s.controller
+	if err := c.refuse(s.actor, draft, false); err != nil {
+		return message.Receipt{}, err
+	}
+	defer c.admit(ctx, s.actor)(&r)
 	c.emission.Lock()
 	defer c.emission.Unlock()
 	c.mu.Lock()

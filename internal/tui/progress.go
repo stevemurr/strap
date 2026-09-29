@@ -81,7 +81,7 @@ func progressBody(e work.Event) string {
 			}
 		}
 	}
-	for _, b := range e.Change.ResearchBriefs {
+	for _, b := range e.Change.Briefs {
 		lines = append(lines, "Research delivered · "+string(b.ID), b.Summary)
 		if b.Recommendation != "" {
 			lines = append(lines, progressField("Recommendation", b.Recommendation))

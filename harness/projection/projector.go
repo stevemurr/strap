@@ -19,6 +19,7 @@ import (
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 	"hash"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -287,7 +288,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		if _, exists := p.registrations[reg.AgentID]; exists {
 			return errors.New("duplicate agent registration")
 		}
-		if !(reg.Role.Creatable() && reg.Parent != message.User || reg.Role == roster.Root && reg.Parent == message.User) {
+		if !(reg.Role.Creatable() && reg.Parent != message.User || (reg.Role == roster.Manager || reg.Role == roster.Debugger || reg.Role == roster.Agent) && reg.Parent == message.User) {
 			return errors.New("invalid agent registration role")
 		}
 		commit = func() { p.registrations[reg.AgentID] = reg }
@@ -442,7 +443,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			return errors.New("missing or duplicate work event identity")
 		}
 		switch c.Kind {
-		case work.PlanChanged, work.WorkAssigned, work.WorkReassigned, work.WorkCancelled, work.ProgressChanged, work.WorkProgressReported, work.ResearchDelivered, work.ReviewRequested, work.AuditCompleted:
+		case work.PlanChanged, work.WorkAssigned, work.WorkReassigned, work.WorkCancelled, work.ProgressChanged, work.WorkProgressReported, work.BriefDelivered, work.ReviewRequested, work.AuditCompleted, work.HypothesisRecorded, work.HypothesisResolved, work.ExperimentDelivered:
 		default:
 			return errors.New("invalid work event kind")
 		}
@@ -451,7 +452,7 @@ func (p *Projector) Apply(e eventlog.Record) error {
 				return errors.New("invalid work revision")
 			}
 			switch w.Kind {
-			case work.Implementation, work.AuditWork, work.Repair, work.Research:
+			case work.Implementation, work.AuditWork, work.Repair, work.Review, work.WebResearch, work.DeepResearch, work.Experiment:
 			default:
 				return errors.New("invalid work kind")
 			}
@@ -476,18 +477,32 @@ func (p *Projector) Apply(e eventlog.Record) error {
 				return errors.New("invalid audit header")
 			}
 		}
-		if c.Kind == work.ResearchDelivered && len(c.ResearchBriefs) != 1 {
+		if c.Kind == work.BriefDelivered && len(c.Briefs) != 1 {
 			return errors.New("research delivery requires one brief")
 		}
-		for _, b := range c.ResearchBriefs {
+		for _, b := range c.Briefs {
 			matched := false
 			for _, w := range c.Works {
-				if w.ID == b.Work && w.Revision == b.Revision && w.State == work.Delivered && w.Kind == work.Research {
+				if w.ID == b.Work && w.Revision == b.Revision && w.State == work.Delivered && w.Kind.Investigation() {
 					matched = true
 				}
 			}
 			if !matched || b.ID == "" || b.AssignedAtRevision == 0 || b.AssignedAtRevision > b.Revision {
 				return errors.New("invalid research brief header")
+			}
+		}
+		if c.Kind == work.ExperimentDelivered && len(c.Conclusions) != 1 {
+			return errors.New("experiment delivery requires one conclusion")
+		}
+		for _, x := range c.Conclusions {
+			matched := false
+			for _, w := range c.Works {
+				if w.ID == x.Work && w.Revision == x.Revision && w.State == work.Delivered && w.Kind == work.Experiment {
+					matched = true
+				}
+			}
+			if !matched || x.ID == "" || x.AssignedAtRevision == 0 || x.AssignedAtRevision > x.Revision {
+				return errors.New("invalid conclusion header")
 			}
 		}
 		if c.Kind == work.WorkProgressReported && len(c.ProgressReports) != 1 {
@@ -518,8 +533,8 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			p.workEvents[c.ID] = true
 			for _, w := range c.Works {
 				p.workViews[w.ID] = WorkView{WorkHeader: w, Record: e.Cursor()}
-				// Any active assignee may hold execution evidence: researchers
-				// through diagnostics, implementors and auditors through shell.
+				// Any active assignee may hold run evidence: deep researchers
+				// through deep research, implementors and auditors through shell.
 				if w.State == work.Active && w.AssignedAtRevision > 0 && w.Assignee != "" {
 					p.bindings[fmt.Sprintf("%s/%d", w.ID, w.AssignedAtRevision)] = w.Assignee
 				}
@@ -533,7 +548,9 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		}
 		b := p.lastBatch[actor]
 		o, ok := p.outputs[v.Output]
-		if !ok || v.Output.Agent != actor || o.Status != agent.OutputComplete || o.HistoryPosition == nil || *o.HistoryPosition+1 != v.SettledRevision || len(b.Calls) != 1 || b.Calls[0] != v.CallID || b.ContextRevision != v.SettledRevision || v.SettledRevision != uint64(len(p.histories[actor])) {
+		// A wait is the batch's sole call; a successful submission ends the
+		// exchange after the rest of its batch, so it may be one of several.
+		if !ok || v.Output.Agent != actor || o.Status != agent.OutputComplete || o.HistoryPosition == nil || *o.HistoryPosition+uint64(len(b.Calls)) != v.SettledRevision || !slices.Contains(b.Calls, v.CallID) || b.ContextRevision != v.SettledRevision || v.SettledRevision != uint64(len(p.histories[actor])) {
 			return errors.New("yield without matching settled batch")
 		}
 		commit = func() { delete(p.lastBatch, actor) }
@@ -559,6 +576,35 @@ func (p *Projector) Apply(e eventlog.Record) error {
 			return errors.New("invalid tool batch")
 		}
 		commit = func() { p.lastBatch[actor] = v.Batch }
+	case "todos":
+		var v conversation.TodosEvent
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		if _, ok := p.registrations[v.Agent]; !ok || v.Agent != actor {
+			return errors.New("todos from an unregistered agent")
+		}
+		for _, t := range v.Todos {
+			if t.Content == "" || t.Status != "pending" && t.Status != "in_progress" && t.Status != "completed" {
+				return errors.New("invalid todo")
+			}
+		}
+	case "tester":
+		var v conversation.TesterEvent
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		if _, ok := p.registrations[v.Agent]; !ok || v.Agent != actor {
+			return errors.New("tester run for an unregistered agent")
+		}
+	case "server_metrics":
+		var v conversation.ServerMetricsEvent
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		if v.Phase != "start" && v.Phase != "sample" && v.Phase != "end" {
+			return errors.New("invalid server metrics phase")
+		}
 	case "context_tokens":
 		var v conversation.ContextTokensEvent
 		if err := json.Unmarshal(e.Payload, &v); err != nil {
@@ -590,6 +636,14 @@ func (p *Projector) Apply(e eventlog.Record) error {
 		case "debug", "info", "warn", "error":
 		default:
 			return errors.New("invalid diagnostic level")
+		}
+	case "environment":
+		var v conversation.EnvironmentEvent
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		if v.Agent != actor || v.InvocationID == "" || v.Name == "" {
+			return errors.New("invalid environment record")
 		}
 	case "agent_exited":
 		var v struct {
@@ -686,11 +740,11 @@ func (p *Projector) History(id identity.ActorID, before uint64, limit int) ([]Hi
 	if !ok {
 		return nil, ErrNotFound
 	}
+	// A position past the end reads the latest entries. A root that had no
+	// earlier page asked for before=100 on a 13-entry transcript, meaning "the
+	// latest", and got an event-cursor error it could not act on.
 	end := len(h)
-	if before > 0 {
-		if before > uint64(end)+1 {
-			return nil, eventlog.ErrFuture
-		}
+	if before > 0 && before <= uint64(end) {
 		end = int(before - 1)
 	}
 	if limit < 1 || limit > 1000 {

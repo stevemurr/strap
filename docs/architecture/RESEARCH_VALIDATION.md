@@ -1,5 +1,7 @@
 # Research validation — 2026-09-13
 
+> Terminology note (2026-09-25): in this document "root" is the coordinating agent. That role is now the **manager**, which the user talks to directly: the separate root/user agent was removed on 2026-09-25, and the manager is the session's entry agent (see the [README](../../README.md)).
+
 Areas 1–14 are implemented in separate rollback checkpoints. Area 15 has a
 passing deterministic acceptance gate and a runnable bounded live comparison;
 its live-model gate remains open because neither saved model server was reachable.

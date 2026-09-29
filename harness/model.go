@@ -20,6 +20,8 @@ type ModelConfig struct {
 	Model      string          `json:"model"`
 	Timeout    time.Duration   `json:"timeout_ns"`
 	Generation vllm.Generation `json:"generation"`
+	// LooseTools sends tool schemas without strict (vllm backend only).
+	LooseTools bool `json:"loose_tools,omitempty"`
 }
 
 // NewProvider borrows the supplied HTTP client. Sessions supply their owned transport.
@@ -31,7 +33,7 @@ func (o ModelConfig) NewProvider(httpClient *http.Client) (provider.Provider, er
 	if resolved.Backend == "chatcompletions" {
 		return chatcompletions.New(chatcompletions.Config{BaseURL: resolved.BaseURL, Model: resolved.Model, HTTPClient: httpClient})
 	}
-	return vllm.New(vllm.Config{BaseURL: resolved.BaseURL, Model: resolved.Model, HTTPClient: httpClient, Generation: resolved.Generation})
+	return vllm.New(vllm.Config{BaseURL: resolved.BaseURL, Model: resolved.Model, HTTPClient: httpClient, Generation: resolved.Generation, LooseTools: resolved.LooseTools})
 }
 
 // Resolve validates the backend and returns an independent copy without

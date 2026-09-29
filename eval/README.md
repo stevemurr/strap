@@ -35,6 +35,29 @@ exit; read each `results/<problem-id>/result.json` for the outcome. Interrupting
 launcher stops its active container and keeps artifacts. `scripts/eval.sh --help`
 lists all options. No model requests are made by `--list`.
 
+## Timing
+
+`strap eval timing [-json] TRACE|DIR...` reports where the wall clock went in
+recorded traces, from the timestamps every record carries; it starts no model.
+Point it at a batch directory to see all its tasks together and one per line.
+
+- **Where the wall clock went:** each moment counted once, as model, model and
+  tool together, tool, harness (an agent running between its own steps), or
+  idle.
+- **Model calls by role:** calls, wall share, p50/p90/max, prefill (start to
+  first token), reasoning and answer time, tokens and output rate.
+- **Tools:** calls, wall share, summed time, p50/p90/max and failures;
+  `wait_for_input` is reported as blocked time instead.
+- **Harness gaps** between an agent's steps, and **protocol stages** such as a
+  worker picking up its assignment or the manager assigning an audit.
+- **Model server:** `strap eval run` and the `strap` CLI sample vLLM's
+  `/metrics` into the trace (`server_metrics` records at start, end and every
+  5 seconds), from which the report gives queue, prefill and decode time,
+  prefix-cache hit rate, speculative-decoding acceptance, preemptions and peak
+  queue depth and KV use. These are server-wide, so they are exact only while
+  the session is the server's sole client. Per-call cached and reasoning token
+  counts come from each response's usage.
+
 ## Run from the web page
 
 ```sh
@@ -241,9 +264,9 @@ summary and errors. `-q` overrides `-ui tui`. `-report=false` skips the agent's
 ungraded execution report; grading always writes reports.
 The TUI retains the shared tool activity, plan and agent inspection controls.
 
-A session completes when the root has replied and all work and tool calls have
+A session completes when the manager has replied and all work and tool calls have
 settled for `-quiet` (default 3s). This delay is independent of `-q`.
-`-idle` (default 3m) bounds an idle session without a root reply. Per-problem
+`-idle` (default 3m) bounds an idle session without a manager reply. Per-problem
 session budgets are unchanged (15/25/40 minutes by tier unless overridden).
 
 ## Validation
@@ -297,7 +320,7 @@ outside the main module's `go build ./...`.
 
 `report` reads `results.jsonl` and every `trace.jsonl`. Per task it counts model
 calls and tokens (usage events), the peak measured context size, tool calls and
-tool errors by tool name, agents by role, work events and audit verdicts, root
+tool errors by tool name, agents by role, work events and audit verdicts, manager
 replies and time to first reply, failed model outputs and agent exits. Per tier
 it reports pass rate, timeouts, mean duration, mean model and tool calls, and
 mean tokens. Failures list the session or capture error and the tail of the

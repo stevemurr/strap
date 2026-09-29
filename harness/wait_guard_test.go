@@ -26,17 +26,16 @@ func (p *waitScript) Submit(context.Context, provider.Request, provider.Observer
 	return provider.Response{Content: "Final reply."}, nil
 }
 
-func TestRootWaitWithoutActiveWorkIsRejectedAndReplyFollows(t *testing.T) {
+func TestManagerWaitWithoutActiveWorkIsRejectedAndReplyFollows(t *testing.T) {
 	cfg := testConfig(t, true)
 	p := &waitScript{}
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ok"), Manager: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err := s.Send(s.Root(), "finish the task"); err != nil {
-		t.Fatal(err)
-	}
+	manager := s.Manager()
+	startManager(t, s, "finish the task")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	rejected, replied := false, false
@@ -54,7 +53,7 @@ func TestRootWaitWithoutActiveWorkIsRejectedAndReplyFollows(t *testing.T) {
 				rejected = true
 			}
 		case conversation.MessageEvent:
-			if v.Message.From == s.Root() && v.Message.To == message.User && v.Message.Kind == message.Reply {
+			if v.Message.From == manager && v.Message.To == message.User && v.Message.Kind == message.Reply {
 				if v.Message.Content != "Final reply." {
 					t.Fatalf("reply %q", v.Message.Content)
 				}

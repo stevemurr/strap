@@ -22,7 +22,7 @@ func (m *model) observeOutput(fact agent.Event) {
 			return
 		}
 		label := "Message"
-		if e.Output.Agent == m.session.Root() {
+		if e.Output.Agent == m.session.Manager() {
 			label = "Strap"
 		}
 		m.addAttributed(label, fmt.Sprintf("%s · generating", e.Output.Agent), "", false, e.Output.Agent)

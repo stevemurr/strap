@@ -18,6 +18,8 @@ type options struct {
 
 func parseOptions(args []string, stderr io.Writer) (options, error) {
 	o := options{config: harness.DefaultConfig()}
+	// Record the model server's metrics in traces for strap eval timing.
+	o.config.Telemetry.ServerMetrics = true
 	flags := flag.NewFlagSet("strap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
@@ -28,7 +30,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.StringVar(&o.config.Dir, "C", o.config.Dir, "Working directory for shell and file tools")
 	flags.StringVar(&o.config.Events.JSONLPath, "record", "", "Record session events and tool diagnostics to a new JSONL file")
 	flags.StringVar(&o.listen, "listen", "", "Serve the harness HTTP API at a loopback address (requires STRAP_API_TOKEN)")
-	flags.BoolVar(&o.config.DeepResearch.Enabled, "deep-research", o.config.DeepResearch.Enabled, "Enable researcher deep research with retained evidence and verification (requires web)")
+	flags.BoolVar(&o.config.DeepResearch.Enabled, "deep-research", o.config.DeepResearch.Enabled, "Offer the deep_researcher role, which runs deep research with retained evidence and verification when the user asks for it (requires web)")
 	webEnabled := flags.Bool("web", o.config.Web != nil, "Enable web_search and open_url (backends start lazily)")
 	flags.StringVar(&o.config.Web.WKRenderPath, "wkrender", "", "Path to wkrender (default PATH or ~/.harness/bin/wkrender)")
 	flags.StringVar(&o.config.Web.AgentBrowserPath, "agent-browser", "", "Path to agent-browser (default PATH or Strap's isolated installation)")

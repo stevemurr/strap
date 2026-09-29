@@ -34,14 +34,14 @@ func run(ctx context.Context, baseURL, model string) (err error) {
 		defer stop()
 		err = errors.Join(err, s.Close(cleanup))
 	}()
-	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Tools: s.RootTools(), Prompt: prompt.Prompt{Role: "Coordinate one audited arithmetic task.", Instructions: []string{"Create an agent with role implementor, then call assign_implementation once with its agent_id as assignee and task: calculate two plus two. After review_requested, create an agent with role auditor, then call assign_audit with that assignee, the original work_id, current expected_revision and submission_id; use get_work to refresh. On failed audit explicitly call assign_repair to the implementor, referencing original work_id, current expected_revision and audit_id. Assign a new audit after repair submission. Wait for acceptance before claiming success. Do not poll; events arrive automatically."}}})
+	// Boot the session's permanent agent: the manager, which the user talks
+	// to and which coordinates the work.
+	s.UseManager(agent.Spec{Provider: p, Tools: s.CoordinationTools(), Prompt: prompt.Prompt{Role: "Coordinate one audited arithmetic task.", Instructions: []string{"Create an agent with role implementor, then call assign_task once with kind implementation, its agent_id as assignee and task: calculate two plus two. After review_requested, create an agent with role auditor, then call assign_audit with that assignee, the original work_id, current expected_revision and submission_id; use get_work to refresh. On failed audit explicitly call assign_repair to the implementor, referencing original work_id, current expected_revision and audit_id. Assign a new audit after repair submission. Wait for acceptance before claiming success. Do not poll; events arrive automatically."}}})
+	manager, err := s.CreateManager(ctx)
 	if err != nil {
 		return err
 	}
-	if err = s.RegisterRoot(); err != nil {
-		return err
-	}
-	if _, err = c.Send(c.Root(), "Delegate and audit the answer to two plus two."); err != nil {
+	if _, err = c.Send(manager, "Delegate and audit the answer to two plus two."); err != nil {
 		return err
 	}
 	for {

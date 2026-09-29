@@ -35,7 +35,10 @@ const usage = `usage:
   strap eval list [-tier easy,medium,hard] [-task ID,...]
   strap eval grade [-q]
   strap eval report
+  strap eval timing [-json] TRACE|DIR...
   strap eval web [-results DIR] [-listen ADDR]
+  strap eval replay [-verify-only] [-intents LIST] [-out FILE] TRACE|DIR
+  strap eval probe [-agent ID] [-call N] [-samples N] [-variants LIST] TRACE|DIR
   strap eval interaction list|run|report [options]
 
 Run one coding problem per container. Public fixtures live at /problems.
@@ -47,6 +50,10 @@ Retries require fresh mounts. Launch separate containers for parallel problems.
 -q suppresses the TUI and progress logs, retaining the final summary and errors.
 selfcheck proves hidden tests fail on the stub and pass on the reference.
 interaction is the separate bounded coordination suite; use interaction -help.
+replay checks a recorded run offline against the state machine and re-runs it
+with recorded model outputs and environment results; use replay -help.
+probe re-samples one recorded model call on the live model under variants that
+change one thing at a time; use probe -help.
 web serves a local page for reading and comparing the runs under a results
 directory (default eval/results); it reads results.jsonl and traces directly.
 Starting runs from the page requires Apple's container CLI. It builds the eval
@@ -72,8 +79,14 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return listCmd(args[1:], stdout, stderr)
 	case "report":
 		return reportCmd(ctx, args[1:], stdout, stderr)
+	case "timing":
+		return timingCmd(args[1:], stdout, stderr)
 	case "web":
 		return webCmd(ctx, args[1:], stdout, stderr)
+	case "replay":
+		return replayCmd(ctx, args[1:], stdout, stderr)
+	case "probe":
+		return probeCmd(ctx, args[1:], stdout, stderr)
 	case "interaction":
 		return interactionCmd(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
@@ -168,8 +181,9 @@ func runMounted(ctx context.Context, args []string, stdout, stderr io.Writer, mo
 	ui := fs.String("ui", "auto", "Progress display: auto, tui, plain, or quiet")
 	quietMode := fs.Bool("q", false, "Disable the TUI and progress logs (overrides -ui with quiet)")
 	report := fs.Bool("report", true, "Write an ungraded execution report on completion")
-	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
+	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the manager's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
+	variantName := fs.String("variant", "", "Run under a probe variant's prompt and model changes, factors combined with + (see probe -help)")
 	cfg := harness.DefaultConfig()
 	model := modelflags.Register(fs, &cfg, "timeout")
 	if err := fs.Parse(args); err != nil {
@@ -223,7 +237,15 @@ func runMounted(ctx context.Context, args []string, stdout, stderr io.Writer, mo
 		if err := model.Languages(); err != nil {
 			return err
 		}
+		// After the profile loads, so model factors override it.
+		if *variantName != "" {
+			if err := runVariant(*variantName, &cfg); err != nil {
+				return err
+			}
+		}
 	}
+	// Eval runs always record the model server's metrics for strap eval timing.
+	cfg.Telemetry.ServerMetrics = true
 	// Human summaries never mix with the stdout protocol.
 	progressOut := stdout
 	if *progressJSON {
@@ -391,6 +413,47 @@ func reportCmd(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	return nil
 }
 
+const timingUsage = `usage: strap eval timing [-json] TRACE|DIR...
+
+Reads recorded traces and reports where the wall clock went: model calls by
+role (prefill, reasoning, answer), tools by name, harness gaps between an
+agent's steps, time with nothing running, and protocol stages such as a
+worker picking up its assignment. A directory is searched for trace.jsonl
+files, so a ladder batch reports all its tasks together and one per line.
+`
+
+func timingCmd(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("strap eval timing", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { fmt.Fprint(stderr, timingUsage); fs.PrintDefaults() }
+	asJSON := fs.Bool("json", false, "Print the per-trace timings as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() == 0 {
+		fs.Usage()
+		return flag.ErrHelp
+	}
+	var all []eval.Timing
+	for _, p := range fs.Args() {
+		ts, err := eval.AnalyzeTimingDir(p)
+		if err != nil {
+			return err
+		}
+		all = append(all, ts...)
+	}
+	if len(all) == 0 {
+		return errors.New("no traces found")
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(all)
+	}
+	fmt.Fprint(stdout, eval.TimingMarkdown(all))
+	return nil
+}
+
 // gradeCmd does not initialize a model or launch an agent.
 func gradeCmd(ctx context.Context, args []string, stdout, stderr io.Writer, mounts eval.Mounts) error {
 	fs := flag.NewFlagSet("strap eval grade", flag.ContinueOnError)
@@ -429,7 +492,7 @@ func webCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	noBuild := fs.Bool("no-build", false, "Use the existing eval image instead of building it")
 	buildContext := fs.String("build-context", "", "Eval image build context (default repository containing the ladder)")
 	ladder := fs.String("ladder", filepath.Join("eval", "ladder"), "Private task ladder used to run and grade from the page; missing disables running")
-	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the root's final reply before a task is considered finished")
+	quiet := fs.Duration("quiet", 3*time.Second, "Silence required after the manager's final reply before a task is considered finished")
 	idle := fs.Duration("idle", 3*time.Minute, "Silence with every agent idle and no root reply after which a task is finished and flagged no_reply")
 	cfg := harness.DefaultConfig()
 	model := modelflags.Register(fs, &cfg, "timeout")

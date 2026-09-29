@@ -197,6 +197,13 @@ func control(e conversation.Event) (json.RawMessage, error) {
 		v = conversation.CommentaryEvent{Agent: e.Agent, Output: e.Output}
 	case conversation.DiagnosticEvent:
 		v = conversation.DiagnosticEvent{Level: e.Level, Message: "details in content"}
+	case conversation.EnvironmentEvent:
+		v = conversation.EnvironmentEvent{Agent: e.Agent, InvocationID: e.InvocationID, Name: e.Name}
+	case conversation.TodosEvent:
+		v = conversation.TodosEvent{Agent: e.Agent}
+	case conversation.TesterEvent:
+		// The transcript and failures are in content; the run's size is not.
+		v = conversation.TesterEvent{Agent: e.Agent, Calls: e.Calls, Duration: e.Duration}
 	default:
 		return nil, errors.New("control fields exceed framing budget")
 	}

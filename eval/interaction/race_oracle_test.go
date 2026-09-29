@@ -33,7 +33,7 @@ func TestRevisionRaceOracleCounterexamples(t *testing.T) {
 	t.Run("missing conflict is not recovery", func(t *testing.T) {
 		var filtered []fact
 		for _, x := range facts {
-			if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == f.Root && e.Activity.Call.ID == baseline.RevisionRace.TriggerCallID {
+			if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == f.Coordinator && e.Activity.Call.ID == baseline.RevisionRace.TriggerCallID {
 				continue
 			}
 			filtered = append(filtered, x)
@@ -95,13 +95,13 @@ func TestRevisionRaceOracleCounterexamples(t *testing.T) {
 				continue
 			}
 			start := x.record
-			start.Kind, start.Agent = "tool", string(f.Root)
+			start.Kind, start.Agent = "tool", string(f.Coordinator)
 			finish := start
 			finish.Sequence++
 			activity := agent.ToolActivity{InvocationID: "unexpected-interleaved-invocation", Call: provider.ToolCall{ID: "unexpected-interleaved-call", Name: "rename_plan", Arguments: json.RawMessage(`{"input":{}}`)}, StartedAt: time.Now()}
-			startEvent := conversation.ToolEvent{Agent: f.Root, Activity: activity}
+			startEvent := conversation.ToolEvent{Agent: f.Coordinator, Activity: activity}
 			activity.FinishedAt = activity.StartedAt.Add(time.Millisecond)
-			finishEvent := conversation.ToolEvent{Agent: f.Root, Activity: activity}
+			finishEvent := conversation.ToolEvent{Agent: f.Coordinator, Activity: activity}
 			for j := i; j < len(mutated); j++ {
 				mutated[j].record.Sequence += 2
 			}

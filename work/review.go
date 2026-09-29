@@ -35,16 +35,29 @@ func (s *Store) SubmitWork(actor identity.ActorID, r SubmitRequest) (result Subm
 			return SubmitReceipt{}, ErrState
 		}
 	}
-	steps := s.steps(original.Scope)
-	var pending []string
-	for _, step := range steps {
-		if step.Status != ReadyForReview {
-			pending = append(pending, fmt.Sprintf("%s is %s", step.ID, step.Status))
+	// Submitting says the scoped steps are ready for review, so it marks them;
+	// implementors otherwise spent a model turn reporting exactly that. A step
+	// the implementor reported blocked, or one in any other state, still stops
+	// the submission.
+	var stuck []string
+	for _, step := range s.steps(original.Scope) {
+		if step.Status != Pending && step.Status != InProgress && step.Status != ReadyForReview {
+			stuck = append(stuck, fmt.Sprintf("%s is %s", step.ID, step.Status))
 		}
 	}
-	if len(pending) > 0 {
-		return SubmitReceipt{}, invalid("all scoped steps must be ready_for_review before submit_work: " + strings.Join(pending, ", ") + "; report them through report_work_progress steps, then submit with the returned work_revision")
+	if len(stuck) > 0 {
+		return SubmitReceipt{}, invalid("scoped steps cannot be submitted: " + strings.Join(stuck, ", ") + "; report blocked steps unblocked through report_work_progress steps, then submit with the returned work_revision")
 	}
+	if original.Scope != nil {
+		p := s.plans[original.Scope.PlanID].Clone()
+		for i := range p.Steps {
+			if slices.Contains(original.Scope.StepIDs, p.Steps[i].ID) {
+				p.Steps[i].Status = ReadyForReview
+			}
+		}
+		s.putPlan(p.ID, p)
+	}
+	steps := s.steps(original.Scope)
 	sub := Submission{ID: SubmissionID(s.id("submission")), WorkID: original.ID, SubmittedVia: w.ID, SubmittedBy: actor, Supersedes: original.LatestSubmissionID, Task: original.Task, ExpectedOutput: original.ExpectedOutput, Steps: steps, Summary: r.Summary, Evidence: r.Evidence, Artifacts: r.Artifacts}.Clone()
 	if w.Kind == Repair {
 		w.State = Closed
@@ -77,6 +90,31 @@ func (s *Store) contributor(actor identity.ActorID, id SubmissionID) bool {
 	}
 	return false
 }
+
+// AuditTask is the task an audit of submission records. Scoped work is
+// audited against the acceptance criteria of its plan steps, which the
+// auditor reads with the assignment; the implementor's task, which can carry
+// how the manager wanted it built, is left out so the audit checks what the
+// work must do rather than how it was done (ladder easy-18, 2026-09-25).
+// Unscoped work has no criteria, so its task is the requirement.
+func AuditTask(original Work, submission SubmissionID) string {
+	if original.Scope != nil && len(original.Scope.StepIDs) > 0 {
+		return fmt.Sprintf("Audit submission %s of work %s against the acceptance criteria of its scoped plan steps, and the README where they defer to it.", submission, original.ID)
+	}
+	return "Audit the submitted outcome: " + original.Task
+}
+
+// firstWorkHeldBy returns the lowest-numbered work actor was ever assigned, or
+// "" when it has held none.
+func (s *Store) firstWorkHeldBy(actor identity.ActorID) ID {
+	var first ID
+	for _, w := range s.works {
+		if w.Assignee == actor && (first == "" || w.ID < first) {
+			first = w.ID
+		}
+	}
+	return first
+}
 func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (result Work, err error) {
 	if err = s.beginMutation(); err != nil {
 		return result, err
@@ -92,7 +130,17 @@ func (s *Store) AssignAudit(actor identity.ActorID, r AssignAuditRequest) (resul
 	if blank(string(r.Auditor)) || r.Auditor == original.Assignee || s.contributor(r.Auditor, r.SubmissionID) {
 		return Work{}, ErrForbidden
 	}
-	w := Work{ID: ID(s.id("work")), Kind: AuditWork, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: original.Owner, RequestedBy: actor, Assignee: r.Auditor, Task: "Audit the submitted outcome: " + original.Task, ExpectedOutput: "Submit a pass or fail verdict with evidence. If unable to verify, report a blocker.", Scope: original.Scope, ParentID: original.ID, SubjectSubmissionID: r.SubmissionID}.Clone()
+	// Every audit gets a new auditor. One that already held work carries its
+	// context: re-auditing a repair, the auditor of the earlier submission
+	// re-ran its earlier tests instead of checking the contract again (ladder
+	// medium-01 and medium-19, 2026-09-25).
+	if held := s.firstWorkHeldBy(r.Auditor); held != "" {
+		return Work{}, fmt.Errorf("%w: %s already held %s; create a new auditor for every audit", ErrForbidden, r.Auditor, held)
+	}
+	if len(r.Brief) > 64*1024 {
+		return Work{}, invalid("audit brief exceeds 64 KiB")
+	}
+	w := Work{ID: ID(s.id("work")), Kind: AuditWork, State: Active, Revision: 1, AssignedAtRevision: 1, Owner: original.Owner, RequestedBy: actor, Assignee: r.Auditor, Task: AuditTask(original, r.SubmissionID), Context: r.Brief, ExpectedOutput: "Submit a pass or fail verdict with evidence. If unable to verify, report a blocker.", Scope: original.Scope, ParentID: original.ID, SubjectSubmissionID: r.SubmissionID}.Clone()
 	original.State = Checking
 	original.Revision++
 	s.putWork(original.ID, original)
@@ -232,51 +280,13 @@ func (s *Store) AssignRepair(actor identity.ActorID, r AssignRepairRequest) (res
 	return repair.Clone(), nil
 }
 
-func (s *Store) Reassign(actor identity.ActorID, r ReassignRequest) (result Work, err error) {
-	if err = s.beginMutation(); err != nil {
-		return result, err
-	}
-	defer s.endMutation(&err)
-	w, err := s.target(actor, r.WorkTarget, true)
-	if err != nil {
-		return Work{}, err
-	}
-	if w.State != Active {
-		return Work{}, ErrState
-	}
-	if blank(string(r.Assignee)) {
-		return Work{}, invalid("assignee required")
-	}
-	if w.Kind == AuditWork && (s.works[w.ParentID].Assignee == r.Assignee || s.contributor(r.Assignee, w.SubjectSubmissionID)) {
-		return Work{}, ErrForbidden
-	}
-	w.Assignee = r.Assignee
-	w.Revision++
-	w.AssignedAtRevision = w.Revision
-	w.Blocker = ""
-	w.Note = ""
-	w.LatestProgressReportID = ""
-	w.LatestPositionReportID = ""
-	s.putWork(w.ID, w)
-	s.emit(WorkReassigned, actor, w, true)
-	return w.Clone(), nil
-}
 func (s *Store) cancelImplementation(actor identity.ActorID, w Work, reason string) {
 	for _, child := range s.works {
 		if child.ParentID == w.ID && live(child) {
 			s.cancelWork(actor, child, reason)
 		}
 	}
-	if w.Scope != nil {
-		p := s.plans[w.Scope.PlanID].Clone()
-		for i := range p.Steps {
-			if s.reserved[p.Steps[i].ID] == w.ID {
-				delete(s.reserved, p.Steps[i].ID)
-				p.Steps[i].Status = Pending
-			}
-		}
-		s.putPlan(p.ID, p)
-	}
+	s.settleScope(w, Pending)
 	w.ActiveRepairID = ""
 	s.cancelWork(actor, w, reason)
 }
@@ -308,7 +318,8 @@ func (s *Store) Cancel(actor identity.ActorID, r CancelRequest) (result Work, er
 		s.cancelImplementation(actor, w, r.Reason)
 	case Repair:
 		s.cancelImplementation(actor, s.works[w.ParentID], r.Reason)
-	case Research:
+	case Review, WebResearch, DeepResearch, Experiment:
+		s.settleScope(w, Pending)
 		s.cancelWork(actor, w, r.Reason)
 	case AuditWork:
 		s.cancelWork(actor, w, r.Reason)

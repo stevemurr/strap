@@ -60,7 +60,7 @@ func reportingStore(log eventlog.Store, last *eventlog.Cursor) *work.Store {
 	})))
 }
 
-// awaitIdle drains events until the root returns to Idle.
+// awaitIdle drains events until the manager returns to Idle.
 func awaitIdle(t *testing.T, s *harness.Session) {
 	t.Helper()
 	wait, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -70,7 +70,7 @@ func awaitIdle(t *testing.T, s *harness.Session) {
 		if err != nil {
 			t.Fatal("session never settled", err)
 		}
-		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Root() && c.State == agent.Idle {
+		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Manager() && c.State == agent.Idle {
 			return
 		}
 	}

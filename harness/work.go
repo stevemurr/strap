@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -57,20 +58,31 @@ func (s *Session) InspectWork(ctx context.Context, actor identity.ActorID, id wo
 	}
 	return view.InspectWork(actor, id)
 }
-func (s *Session) ReassignWork(ctx context.Context, actor identity.ActorID, r work.ReassignRequest) (work.Work, error) {
-	return s.workflow.ReassignWork(ctx, actor, r)
-}
 func (s *Session) AssignWork(ctx context.Context, actor identity.ActorID, a work.AssignmentRequest) (work.Work, error) {
 	return s.workflow.AssignWork(ctx, actor, a)
 }
 
-func (s *Session) SubmitResearch(ctx context.Context, actor identity.ActorID, r work.SubmitResearchRequest) (work.SubmitResearchResult, error) {
-	return s.workflow.SubmitResearch(ctx, actor, r)
+func (s *Session) SubmitBrief(ctx context.Context, actor identity.ActorID, r work.SubmitBriefRequest) (work.SubmitBriefResult, error) {
+	return s.workflow.SubmitBrief(ctx, actor, r)
 }
-func (s *Session) GetResearchBrief(ctx context.Context, actor identity.ActorID, id work.ResearchBriefID) (work.ResearchBrief, error) {
+func (s *Session) GetConclusion(ctx context.Context, actor identity.ActorID, id work.ConclusionID) (work.Conclusion, error) {
 	v, err := s.workView(ctx)
 	if err != nil {
-		return work.ResearchBrief{}, err
+		return work.Conclusion{}, err
 	}
-	return v.GetResearchBrief(actor, id)
+	return v.GetConclusion(actor, id)
+}
+func (s *Session) conclusionReadTool(ctx context.Context, c tool.Call, id work.ConclusionID) (tool.Result, error) {
+	v, err := s.GetConclusion(ctx, c.Actor, id)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return modelJSON(v)
+}
+func (s *Session) GetBrief(ctx context.Context, actor identity.ActorID, id work.BriefID) (work.Brief, error) {
+	v, err := s.workView(ctx)
+	if err != nil {
+		return work.Brief{}, err
+	}
+	return v.GetBrief(actor, id)
 }

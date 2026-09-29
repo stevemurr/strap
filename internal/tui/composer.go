@@ -33,7 +33,7 @@ func (m *model) composerActivity() string {
 		label, hint = "Stopping", ""
 	}
 	// Reuse the existing spinner clock; only this row changes on a tick.
-	style := stackIdentity(m.session.Root())
+	style := stackIdentity(m.session.Manager())
 	if m.interrupting {
 		style = stateStyle
 	}

@@ -1,5 +1,7 @@
 # Shared work progress, research, and root commentary
 
+> Terminology note (2026-09-25): in this document "root" is the coordinating agent. That role is now the **manager**, which the user talks to directly: the separate root/user agent was removed on 2026-09-25, and the manager is the session's entry agent (see the [README](../../README.md)).
+
 Status: revised design, 2026-09-13. Incorporates the taxonomy audit and subsequent
 plan/todo clarification, the seven contract audit findings, bounded researcher
 execution, and the follow-up audit of wakeups, yielding, and cursor access.

@@ -5,18 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stevemurr/strap/tool"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stevemurr/strap/tool"
+
 	"github.com/stevemurr/strap/eval"
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/provider"
 )
 
@@ -29,15 +32,20 @@ func shellWrite(path, content string) map[string]any {
 	return map[string]any{"command": "cat > " + path + " <<'STRAP_EOF'\n" + content + "STRAP_EOF\n", "timeout_ms": nil}
 }
 
-// script drives the root agent without a model: optionally write the solution
-// through the shell, then reply.
+// script drives the manager and its implementor without a model. With write,
+// the manager creates an implementor and assigns it the problem, the
+// implementor writes the solution through the shell and replies, and the
+// manager reports. With wait, the implementor never finishes, so the session
+// idles with live work and no report for the user.
 type script struct {
-	calls   atomic.Int32
-	write   bool
-	block   bool
-	wait    bool  // Delegate to a worker that never finishes, then wait on it.
-	fail    error // Returned from every Submit, like an unreachable server.
-	content string
+	calls    atomic.Int32
+	mu       sync.Mutex
+	perAgent map[message.ActorID]int
+	write    bool
+	block    bool
+	wait     bool  // The implementor never finishes; the manager waits on it.
+	fail     error // Returned from every Submit, like an unreachable server.
+	content  string
 }
 
 func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Observer) (provider.Response, error) {
@@ -48,46 +56,49 @@ func (p *script) Submit(ctx context.Context, r provider.Request, _ provider.Obse
 	if p.fail != nil {
 		return provider.Response{}, p.fail
 	}
-	n := p.calls.Add(1)
-	if p.write && n == 1 {
-		args, _ := tool.MarshalInput(shellWrite("probe.go", p.content))
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "shell", Arguments: args}}}, nil
+	p.calls.Add(1)
+	p.mu.Lock()
+	if p.perAgent == nil {
+		p.perAgent = map[message.ActorID]int{}
 	}
-	if p.wait {
-		return p.delegate(r, n)
-	}
-	return provider.Response{Content: "Done: Answer returns 42."}, nil
-}
-
-// delegate scripts a root that creates an implementor, assigns it work and
-// waits, and an implementor that only acknowledges. The session then idles
-// with live work and no root reply, which is what the runner's idle rule is
-// for now that a root without live work cannot wait.
-func (p *script) delegate(r provider.Request, n int32) (provider.Response, error) {
-	if r.Agent != "agent-1" {
-		return provider.Response{Content: "Working on it."}, nil
-	}
+	p.perAgent[r.Agent]++
+	n := p.perAgent[r.Agent]
+	p.mu.Unlock()
 	call := func(name, args string) provider.Response {
-		return provider.Response{ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("call-%d", n), Name: name, Arguments: json.RawMessage(args)}}}
+		return provider.Response{ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("%s-%d", name, n), Name: name, Arguments: json.RawMessage(args)}}}
+	}
+	if r.Agent != "agent-1" { // Not the manager: the implementor.
+		if p.write && n == 1 {
+			args, _ := tool.MarshalInput(shellWrite("probe.go", p.content))
+			return provider.Response{ToolCalls: []provider.ToolCall{{ID: "write", Name: "shell", Arguments: args}}}, nil
+		}
+		if p.wait {
+			return provider.Response{Content: "Working on it."}, nil
+		}
+		return provider.Response{Content: "Written probe.go."}, nil
+	}
+	if !p.write && !p.wait {
+		return provider.Response{Content: "Done: Answer returns 42."}, nil
 	}
 	switch n {
-	case 2:
+	case 1:
 		return call("create_agent", `{"input":{"role":"implementor"}}`), nil
-	case 3:
+	case 2:
 		assignee := "agent-2"
 		for i := len(r.Messages) - 1; i >= 0; i-- {
-			if r.Messages[i].Role != "tool" {
-				continue
-			}
-			if m := regexp.MustCompile(`"agent_id":"([^"]+)"`).FindStringSubmatch(r.Messages[i].Content.Text()); m != nil {
+			if m := regexp.MustCompile(`"agent_id":"([^"]+)"`).FindStringSubmatch(r.Messages[i].Content.Text()); r.Messages[i].Role == "tool" && m != nil {
 				assignee = m[1]
+				break
 			}
-			break
 		}
-		return call("assign_implementation", fmt.Sprintf(`{"input":{"assignee":%q,"task":"Implement Answer in probe.go","context":null,"expected_output":null,"scope":null}}`, assignee)), nil
-	default:
-		return provider.Response{Content: "Waiting for the implementor.", ToolCalls: []provider.ToolCall{{ID: fmt.Sprintf("wait-%d", n), Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
+		return call("assign_task", fmt.Sprintf(`{"input":{"kind":"implementation","assignee":%q,"task":"Implement Answer in probe.go","context":null,"expected_output":null,"scope":null}}`, assignee)), nil
+	case 3:
+		return call("wait_for_input", `{"input":{}}`), nil
 	}
+	if p.wait {
+		return call("wait_for_input", `{"input":{}}`), nil
+	}
+	return provider.Response{Content: "Done: Answer returns 42."}, nil
 }
 
 func writeLadder(t *testing.T) string {
@@ -138,6 +149,7 @@ func TestRunPassesAndRetainsMounts(t *testing.T) {
 		t.Fatal(results, err)
 	}
 	r := results[0]
+	// The manager answers the user once, with its report.
 	if r.Outcome != eval.Passed || !r.Passed || r.TimedOut || r.Replies != 1 || r.Error != "" || r.Grade == nil || !r.Grade.Compiled {
 		t.Fatalf("%+v", r)
 	}
@@ -177,7 +189,7 @@ func TestRunPassesAndRetainsMounts(t *testing.T) {
 		t.Fatal(rep, err)
 	}
 	m := rep.Tasks[0]
-	if !m.Passed || m.Agents != 1 || m.Replies != 1 || m.ToolCalls["shell"] != 1 || m.ModelCalls < 2 || m.Error != "" {
+	if !m.Passed || m.Agents != 2 || m.Roles["manager"] != 1 || m.Roles["implementor"] != 1 || m.Replies != 1 || m.ToolCalls["shell"] != 1 || m.ModelCalls < 2 || m.Error != "" {
 		t.Fatalf("%+v", m)
 	}
 	if md := rep.Markdown(); !strings.Contains(md, "easy-00-probe") || !strings.Contains(md, "100%") {
@@ -250,7 +262,8 @@ func TestRunFinishesIdleSessionWithoutReply(t *testing.T) {
 // outage.
 func TestRunClassifiesNeverConnectedSessionAsError(t *testing.T) {
 	ladder := writeLadder(t)
-	opts := options(t, ladder, &script{fail: errors.New(`vllm: submit: Post "http://model.test/v1/chat/completions": dial tcp: connection refused`)})
+	p := &script{fail: errors.New(`vllm: submit: Post "http://model.test/v1/chat/completions": dial tcp: connection refused`)}
+	opts := options(t, ladder, p)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	results, err := runAndGrade(t, ctx, opts)

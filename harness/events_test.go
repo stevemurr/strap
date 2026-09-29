@@ -45,7 +45,7 @@ func TestSessionSubscribersSeeStartupAndFinalEvents(t *testing.T) {
 	if !started || !exited || !terminal {
 		t.Fatal(started, exited, terminal)
 	}
-	info, err := s.InspectAgent(s.Root(), conversation.InspectOptions{})
+	info, err := s.InspectAgent(s.Manager(), conversation.InspectOptions{})
 	if err != nil || info.StateRevision < 2 {
 		t.Fatal(info, err)
 	}

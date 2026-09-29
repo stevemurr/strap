@@ -22,7 +22,12 @@ type Engine struct {
 	mu         sync.Mutex
 	active     bool
 	retained   int
+	ids        func(prefix string) string
 }
+
+// UseIDs makes run ids come from next, such as a session's seeded ids, instead
+// of a random nonce.
+func (e *Engine) UseIDs(next func(prefix string) string) { e.ids = next }
 
 type Dependencies struct {
 	Web    Retrieval
@@ -126,8 +131,12 @@ func (e *Engine) Run(ctx context.Context, b Binding, req Request, deps Dependenc
 	defer cancel()
 	var nonce [16]byte
 	rand.Read(nonce[:])
+	id := "run-" + hex.EncodeToString(nonce[:])
+	if e.ids != nil {
+		id = e.ids("run-")
+	}
 	policy, _ := newPolicy(req.AllowDomains, req.BlockDomains)
-	r := &run{engine: e, request: clone(req), binding: b, deps: deps, limits: limits, policy: policy, ctx: runctx, cancel: cancel, id: "run-" + hex.EncodeToString(nonce[:]), started: started, deadline: deadline, sources: map[string]Source{}, urls: map[string]*fetchFlight{}, claims: map[string]Claim{}}
+	r := &run{engine: e, request: clone(req), binding: b, deps: deps, limits: limits, policy: policy, ctx: runctx, cancel: cancel, id: id, started: started, deadline: deadline, sources: map[string]Source{}, urls: map[string]*fetchFlight{}, claims: map[string]Claim{}}
 	initial := boundReport(r.snapshot(), e.config.MaxReportBytes)
 	initial.Status = "running"
 	if err := r.emit(Event{Kind: "started", Stage: "plan", Report: &initial}, false); err != nil {
@@ -350,7 +359,7 @@ func Digest(p Report) json.RawMessage {
 		Coverage   []Coverage `json:"coverage"`
 		Spend      Spend      `json:"spend"`
 		Truncated  bool       `json:"truncated"`
-	}{p.ID, p.Status, p.StopReason, clip(p.Summary, 4096), "Read claims and sources with get_research_run using this run_id. To deliver a claim, record it with report_work_progress; submit_research cites the finding IDs that call returns.", p.Coverage, p.Spend, false}
+	}{p.ID, p.Status, p.StopReason, clip(p.Summary, 4096), "Read claims and sources with get_research_run using this run_id. To deliver a claim, record it with report_work_progress; submit_brief cites the finding IDs that call returns.", p.Coverage, p.Spend, false}
 	for {
 		raw, _ := json.Marshal(v)
 		if len(raw) <= 12<<10 {

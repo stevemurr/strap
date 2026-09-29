@@ -18,6 +18,7 @@ import (
 type toolDisplay struct {
 	name, preview, arguments, result, failure, notice string
 	path                                              string
+	kind                                              string // assign_task's kind, which names the work.
 	numbered                                          bool
 	finished                                          time.Time
 }
@@ -43,6 +44,10 @@ func displayTool(a agent.ToolActivity) *toolDisplay {
 		args := envelope.Input
 		_ = json.Unmarshal(args["path"], &d.path)
 		d.path = safeText(d.path)
+		if d.name == "assign_task" {
+			_ = json.Unmarshal(args["kind"], &d.kind)
+			d.kind = safeText(d.kind)
+		}
 		for _, key := range []string{"path", "url", "command", "query", "pattern", "task", "agent_id"} {
 			var value string
 			if json.Unmarshal(args[key], &value) == nil && strings.TrimSpace(value) != "" {
@@ -151,6 +156,10 @@ func (m *model) renderTool(e *entry, firstRow int) string {
 		verb = "Listed"
 	case "search", "search_files", "web_search", "glob", "grep_search":
 		verb = "Searched"
+	case "assign_task":
+		if d.kind != "" {
+			verb = "Assign " + strings.ReplaceAll(d.kind, "_", " ")
+		}
 	}
 	resultRows := e.toolResultRows(max(1, width-4))
 	commandLines := strings.Split(e.toolLayout.preview, "\n")

@@ -34,6 +34,7 @@ func config() harness.Config {
 	c.Web = nil
 	c.LocalTools = false
 	c.Telemetry.ContextTokens = false
+	c.ManualAudits = true // These tests drive the audit protocol through the API.
 	return c
 }
 func request(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
@@ -104,7 +105,7 @@ func awaitIdle(t *testing.T, s *harness.Session, what string) {
 		if err != nil {
 			t.Fatal(what, err)
 		}
-		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Root() && c.State == agent.Idle {
+		if c, ok := e.(conversation.AgentStateChanged); ok && c.Agent == s.Manager() && c.State == agent.Idle {
 			return
 		}
 	}
@@ -119,7 +120,7 @@ func operationResult[T any](t *testing.T, s *testSession, viaHTTP bool, actor id
 		}
 		return v
 	}
-	action := map[string]string{"assign_implementation": "assign_implementation", "assign_audit": "assign_audit", "assign_repair": "assign_repair", "assign_research": "assign_research", "reassign_work": "reassign", "cancel_work": "cancel", "create_plan": "plan", "submit_work": "submit", "submit_audit": "audit", "report_work_progress": "report-progress"}[name]
+	action := map[string]string{"assign_task": "assign_task", "assign_audit": "assign_audit", "assign_repair": "assign_repair", "reassign_work": "reassign", "cancel_work": "cancel", "create_plan": "plan", "submit_work": "submit", "submit_audit": "audit", "report_work_progress": "report-progress"}[name]
 	method, path, body := "POST", "/sessions/"+s.ID()+"/work/"+action, any(httpapi.WorkRequest[any]{Actor: actor, Request: tool.Input[any]{Value: params}})
 	if name == "create_plan" {
 		body = httpapi.WorkRequest[any]{Actor: actor, Request: params}
@@ -161,20 +162,19 @@ type operationOutcome struct {
 func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 	t.Helper()
 	ctx, s := recoverySession(t, viaHTTP)
-	root := s.Root()
+	manager := s.Manager()
 	create := func(role roster.Role) roster.Registration {
 		r := roster.CreateRequest{Role: role}
-		return operationResult(t, s, viaHTTP, root, "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(ctx, root, r) })
+		return operationResult(t, s, viaHTTP, manager, "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(ctx, manager, r) })
 	}
 	implementor := create(roster.Implementor)
-	auditor := create(roster.Auditor)
 	planRequest := work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Unassigned")}}}
-	plan := operationResult(t, s, viaHTTP, root, "create_plan", planRequest, func() (work.Plan, error) {
-		return s.UpdatePlan(ctx, root, planRequest)
+	plan := operationResult(t, s, viaHTTP, manager, "create_plan", planRequest, func() (work.Plan, error) {
+		return s.UpdatePlan(ctx, manager, planRequest)
 	})
 	assignment := work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "implement storage", Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}}
-	implementation := operationResult(t, s, viaHTTP, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
-		return s.AssignWork(ctx, root, assignment)
+	implementation := operationResult(t, s, viaHTTP, manager, "assign_task", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(assignment.Assignee), Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
+		return s.AssignWork(ctx, manager, assignment)
 	})
 	implementationID := implementation.ID
 	var lastAudit work.Audit
@@ -188,11 +188,12 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 		submission := operationResult(t, s, viaHTTP, implementation.Assignee, "submit_work", tool.SubmitInput{WorkTarget: submissionRequest.WorkTarget, Summary: submissionRequest.Summary, Evidence: submissionRequest.Evidence}, func() (work.SubmitReceipt, error) {
 			return s.SubmitWork(ctx, implementation.Assignee, submissionRequest)
 		})
-		originalView := operationResult(t, s, viaHTTP, root, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) { return s.InspectWork(ctx, root, implementationID) })
+		originalView := operationResult(t, s, viaHTTP, manager, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) { return s.InspectWork(ctx, manager, implementationID) })
 		original := originalView.Work
+		auditor := create(roster.Auditor) // Every audit gets a new auditor.
 		auditRequest := work.AssignmentRequest{Kind: work.AuditWork, Assignee: auditor.AgentID, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: submission.ID}
-		auditing := operationResult(t, s, viaHTTP, root, "assign_audit", tool.AssignAuditArgs{Assignee: auditRequest.Assignee, WorkTarget: work.WorkTarget{ID: auditRequest.WorkID, ExpectedRevision: auditRequest.ExpectedRevision}, SubmissionID: auditRequest.SubmissionID}, func() (work.Work, error) {
-			return s.AssignWork(ctx, root, auditRequest)
+		auditing := operationResult(t, s, viaHTTP, manager, "assign_audit", tool.AssignAuditArgs{Assignee: auditRequest.Assignee, WorkTarget: work.WorkTarget{ID: auditRequest.WorkID, ExpectedRevision: auditRequest.ExpectedRevision}, SubmissionID: auditRequest.SubmissionID}, func() (work.Work, error) {
+			return s.AssignWork(ctx, manager, auditRequest)
 		})
 		inspection := operationResult(t, s, viaHTTP, auditing.Assignee, "get_work", map[string]any{"work_id": auditing.ID}, func() (work.Inspection, error) {
 			return s.InspectWork(ctx, auditing.Assignee, auditing.ID)
@@ -212,12 +213,12 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 			return s.SubmitAudit(ctx, auditing.Assignee, verdictRequest)
 		})
 		if verdict == work.Fail {
-			original, e := s.GetWork(ctx, root, implementationID)
+			original, e := s.GetWork(ctx, manager, implementationID)
 			if e != nil {
 				t.Fatal(e)
 			}
 			repairRequest := work.AssignmentRequest{Kind: work.Repair, Assignee: implementation.Assignee, WorkID: original.ID, ExpectedRevision: original.Revision, AuditID: lastAudit.ID}
-			repairWork := operationResult(t, s, viaHTTP, root, "assign_repair", tool.AssignRepairArgs{Assignee: repairRequest.Assignee, WorkTarget: work.WorkTarget{ID: repairRequest.WorkID, ExpectedRevision: repairRequest.ExpectedRevision}, AuditID: repairRequest.AuditID}, func() (work.Work, error) { return s.AssignWork(ctx, root, repairRequest) })
+			repairWork := operationResult(t, s, viaHTTP, manager, "assign_repair", tool.AssignRepairArgs{Assignee: repairRequest.Assignee, WorkTarget: work.WorkTarget{ID: repairRequest.WorkID, ExpectedRevision: repairRequest.ExpectedRevision}, AuditID: repairRequest.AuditID}, func() (work.Work, error) { return s.AssignWork(ctx, manager, repairRequest) })
 			repair := operationResult(t, s, viaHTTP, implementation.Assignee, "get_work", map[string]any{"work_id": repairWork.ID}, func() (work.Inspection, error) {
 				return s.InspectWork(ctx, implementation.Assignee, repairWork.ID)
 			})
@@ -227,34 +228,25 @@ func operationCycle(t *testing.T, viaHTTP bool) operationOutcome {
 			implementation = repair.Work
 		}
 	}
-	final := operationResult(t, s, viaHTTP, root, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) {
-		return s.InspectWork(ctx, root, implementationID)
+	final := operationResult(t, s, viaHTTP, manager, "get_work", map[string]any{"work_id": implementationID}, func() (work.Inspection, error) {
+		return s.InspectWork(ctx, manager, implementationID)
 	})
-	plan = operationResult(t, s, viaHTTP, root, "get_plan", map[string]any{"plan_id": plan.ID}, func() (work.Plan, error) {
-		return s.GetPlan(ctx, root, plan.ID)
+	plan = operationResult(t, s, viaHTTP, manager, "get_plan", map[string]any{"plan_id": plan.ID}, func() (work.Plan, error) {
+		return s.GetPlan(ctx, manager, plan.ID)
 	})
-	audit := operationResult(t, s, viaHTTP, root, "get_audit", map[string]any{"audit_id": lastAudit.ID}, func() (work.Audit, error) {
-		return s.GetAudit(ctx, root, lastAudit.ID)
+	audit := operationResult(t, s, viaHTTP, manager, "get_audit", map[string]any{"audit_id": lastAudit.ID}, func() (work.Audit, error) {
+		return s.GetAudit(ctx, manager, lastAudit.ID)
 	})
 	if final.Work.State != work.Accepted || plan.Steps[0].Status != work.Completed || plan.Steps[1].Status != work.Pending || audit.Verdict != work.Pass {
 		t.Fatalf("unexpected audit/repair outcome: %+v, %+v, %+v", final, plan, audit)
 	}
-	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "reassign then cancel"}
-	extra := operationResult(t, s, viaHTTP, root, "assign_implementation", tool.AssignImplementationArgs{Assignee: assignment.Assignee, Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
-		return s.AssignWork(ctx, root, assignment)
+	assignment = work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor.AgentID, Task: "assign then cancel"}
+	extra := operationResult(t, s, viaHTTP, manager, "assign_task", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(assignment.Assignee), Task: assignment.Task, Context: &assignment.Context, ExpectedOutput: &assignment.ExpectedOutput, Scope: assignment.Scope}, func() (work.Work, error) {
+		return s.AssignWork(ctx, manager, assignment)
 	})
-	oldAssignee := extra.Assignee
-	replacement := create(roster.Implementor)
-	reassign := work.ReassignRequest{Assignee: replacement.AgentID, WorkTarget: work.WorkTarget{ID: extra.ID, ExpectedRevision: extra.Revision}}
-	extra = operationResult(t, s, viaHTTP, root, "reassign_work", reassign, func() (work.Work, error) {
-		return s.ReassignWork(ctx, root, reassign)
-	})
-	if extra.Assignee == oldAssignee {
-		t.Fatal("replacement was not provisioned")
-	}
 	cancel := work.CancelRequest{WorkTarget: work.WorkTarget{ID: extra.ID, ExpectedRevision: extra.Revision}, Reason: "withdrawn"}
-	extra = operationResult(t, s, viaHTTP, root, "cancel_work", cancel, func() (work.Work, error) {
-		return s.CancelWork(ctx, root, cancel)
+	extra = operationResult(t, s, viaHTTP, manager, "cancel_work", cancel, func() (work.Work, error) {
+		return s.CancelWork(ctx, manager, cancel)
 	})
 	if extra.State != work.Cancelled {
 		t.Fatal(extra)
@@ -304,8 +296,8 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 		{"GET", base + "/events?after=999999", nil, 400},
 		{"GET", base + "/events?limit=0", nil, 400},
 		{"GET", base + "/agents/missing", nil, 404},
-		{"POST", base + "/messages", map[string]any{"to": s.Root(), "unexpected": true}, 400},
-		{"POST", base + "/work/assign_implementation", wireRequest("intruder", tool.AssignImplementationArgs{Assignee: "worker", Task: "forbidden"}), 403},
+		{"POST", base + "/messages", map[string]any{"to": s.Manager(), "unexpected": true}, 400},
+		{"POST", base + "/work/assign_task", wireRequest("intruder", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(identity.ActorID("worker")), Task: "forbidden"}), 403},
 	}
 	for _, tc := range cases {
 		w := request(t, s.http, tc.method, tc.path, tc.body)
@@ -313,7 +305,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 			t.Fatal(tc.path, w.Code, w.Body.String())
 		}
 	}
-	w := request(t, s.http, "POST", base+"/work/assign_implementation", wireRequest(s.Root(), tool.AssignImplementationArgs{Assignee: createHTTPWorker(t, s), Task: "task"}))
+	w := request(t, s.http, "POST", base+"/work/assign_task", wireRequest(s.Manager(), tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(createHTTPWorker(t, s)), Task: "task"}))
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -321,7 +313,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	w = request(t, s.http, "POST", base+"/work/cancel", wireRequest(s.Root(), work.CancelRequest{WorkTarget: work.WorkTarget{ID: item.ID, ExpectedRevision: item.Revision + 1}, Reason: "withdrawn"}))
+	w = request(t, s.http, "POST", base+"/work/cancel", wireRequest(s.Manager(), work.CancelRequest{WorkTarget: work.WorkTarget{ID: item.ID, ExpectedRevision: item.Revision + 1}, Reason: "withdrawn"}))
 	if w.Code != 409 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -337,7 +329,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	w = request(t, s.http, "POST", base+"/messages", httpapi.SendRequest{To: s.Root(), Content: "late"})
+	w = request(t, s.http, "POST", base+"/messages", httpapi.SendRequest{To: s.Manager(), Content: "late"})
 	if w.Code != 409 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -346,7 +338,7 @@ func TestHTTPAuthorizationValidationAndConflictErrors(t *testing.T) {
 func createHTTPWorker(t *testing.T, s *testSession) identity.ActorID {
 	t.Helper()
 	r := roster.CreateRequest{Role: roster.Implementor}
-	v := operationResult(t, s, true, s.Root(), "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(context.Background(), s.Root(), r) })
+	v := operationResult(t, s, true, s.Manager(), "create_agent", r, func() (roster.Registration, error) { return s.CreateAgent(context.Background(), s.Manager(), r) })
 	return v.AgentID
 }
 

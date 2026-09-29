@@ -47,7 +47,7 @@ func TestLiveReasoningTUI(t *testing.T) {
 	m := newModel(ctx, cancel, observed, Options{})
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT}) // Expanding output must not reveal thinking.
 	start := time.Now()
-	if _, err = session.Send(session.Root(), "For this smoke test, answer what 17 plus 25 equals. Keep reasoning brief, do not call tools, and reply in one sentence."); err != nil {
+	if _, err = session.Send(session.Manager(), "For this smoke test, answer what 17 plus 25 equals. Keep reasoning brief, do not call tools, and reply in one sentence."); err != nil {
 		t.Fatal(err)
 	}
 	var id identity.OutputID
@@ -109,7 +109,7 @@ func TestLiveReasoningTUI(t *testing.T) {
 			if stored.String() != reasoning.String() {
 				t.Fatal("recovered reasoning differs from streamed text")
 			}
-			in, err := session.InspectAgent(session.Root(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
+			in, err := session.InspectAgent(session.Manager(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +126,7 @@ func TestLiveReasoningTUI(t *testing.T) {
 				t.Fatal("successful reasoning missing from assistant history")
 			}
 			// Inspect the retained reasoning through the TUI's on-demand view too.
-			m.openTranscript(session.Root())
+			m.openTranscript(session.Manager())
 			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 			if cmd == nil {
 				t.Fatal("inspection did not load")

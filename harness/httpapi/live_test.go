@@ -45,7 +45,7 @@ func TestLiveModelHTTP(t *testing.T) {
 	cfg.Web = nil
 	cfg.Dir = t.TempDir()
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
-	cfg.Root.Prompt = prompt.Prompt{Role: "Follow the user's smoke-test instructions precisely. Keep responses short. You have a callable read_file tool. Use it when the current user message requests a file read. Each user message is a separate step: a no-tool instruction in an earlier step does not prohibit tool use in a later step. Do not delegate work, change files, or run shell commands."}
+	cfg.Manager.Prompt = prompt.Prompt{Role: "Follow the user's smoke-test instructions precisely. Keep responses short. You have a callable read_file tool. Use it when the current user message requests a file read. Each user message is a separate step: a no-tool instruction in an earlier step does not prohibit tool use in a later step. Do not delegate work, change files, or run shell commands."}
 	var entropy [16]byte
 	if _, err := rand.Read(entropy[:]); err != nil {
 		t.Fatal(err)
@@ -107,11 +107,11 @@ func TestLiveModelHTTP(t *testing.T) {
 	}
 	var view httpapi.SessionView
 	call("POST", "/sessions", httpapi.CreateRequest{}, 201, &view)
-	if view.State != harness.Open || view.Root == "" || view.Config.Root.InjectedProvider {
+	if view.State != harness.Open || view.Manager == "" || view.Config.Manager.InjectedProvider {
 		t.Fatalf("not a live session: %+v", view)
 	}
 	path := "/sessions/" + view.ID
-	t.Logf("live HTTP session=%s model=%s backend=%s", view.ID, view.Config.Root.Model.Model, view.Config.Root.Model.Backend)
+	t.Logf("live HTTP session=%s model=%s backend=%s", view.ID, view.Config.Manager.Model.Model, view.Config.Manager.Model.Backend)
 	var cursor uint64
 	var stream *http.Response
 	var decoder *json.Decoder
@@ -212,7 +212,7 @@ func TestLiveModelHTTP(t *testing.T) {
 	}
 	send := func(text string) message.Receipt {
 		var receipt message.Receipt
-		call("POST", path+"/messages", httpapi.SendRequest{To: view.Root, Content: text}, 200, &receipt)
+		call("POST", path+"/messages", httpapi.SendRequest{To: view.Manager, Content: text}, 200, &receipt)
 		if receipt.MessageID == "" {
 			t.Fatal("missing delivery receipt")
 		}
@@ -225,7 +225,7 @@ func TestLiveModelHTTP(t *testing.T) {
 			if end {
 				t.Fatal("session ended before reply")
 			}
-			if reply, ok := e.(conversation.MessageEvent); ok && reply.Message.From == view.Root && reply.Message.To == message.User && reply.Message.Kind == message.Reply {
+			if reply, ok := e.(conversation.MessageEvent); ok && reply.Message.From == view.Manager && reply.Message.To == message.User && reply.Message.Kind == message.Reply {
 				if strings.TrimSpace(reply.Message.Content) != want {
 					t.Fatalf("reply=%q, want %q", reply.Message.Content, want)
 				}

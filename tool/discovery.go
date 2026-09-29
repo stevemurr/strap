@@ -67,7 +67,7 @@ func (f *Files) discoveryTools() []Tool {
 func (f *Files) searchRoot(p *string) (string, fs.FileInfo, error) {
 	root := f.config.Dir
 	if p != nil {
-		root = *p
+		root = ExpandHome(*p)
 		if !filepath.IsAbs(root) {
 			root = filepath.Join(f.config.Dir, root)
 		}

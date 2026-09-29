@@ -9,7 +9,7 @@ import (
 )
 
 // One row follows a research run. Source and usage events update retained state
-// without flooding the transcript or waking the root agent.
+// without flooding the transcript or waking the manager.
 func (m *model) observeResearch(e research.Event) {
 	if e.Kind == "source" || e.Kind == "usage" {
 		return

@@ -22,13 +22,11 @@ func (s *Session) publish(e conversation.Event) error {
 		s.mu.Lock()
 		s.executionError = errors.Join(s.executionError, exit.Err)
 		s.mu.Unlock()
-		if exit.Agent == s.Root() {
-			// Nothing can deliver a worker's result once the root is gone;
-			// letting workers run only burns budget and fails their sends
-			// with "agent stopped". Publish runs on the controller's event
-			// path, so the stops go through a goroutine rather than reenter it.
-			go s.stopWorkers(exit.Agent)
-		}
+		// Nothing can deliver a worker's result once the agent it reports to
+		// is gone; letting workers run only burns budget and fails their sends
+		// with "agent stopped". Publish runs on the controller's event path,
+		// so the stops go through a goroutine rather than reenter it.
+		go s.stopDescendants(exit.Agent)
 	}
 	if err := s.encoder.Publish(context.Background(), e); err != nil {
 		s.log.Fail(err)
@@ -40,13 +38,23 @@ func (s *Session) publish(e conversation.Event) error {
 	return nil
 }
 
-// stopWorkers requests a stop for every live agent other than the root.
-func (s *Session) stopWorkers(root message.ActorID) {
-	for _, a := range s.Agents() {
-		if a.ID == root || a.State.Terminal() {
-			continue
+// stopDescendants requests a stop for every live agent under parent, such as
+// the workers of a manager that failed.
+func (s *Session) stopDescendants(parent message.ActorID) {
+	agents := s.Agents()
+	under := map[message.ActorID]bool{parent: true}
+	for changed := true; changed; {
+		changed = false
+		for _, a := range agents {
+			if !under[a.ID] && under[a.Parent] {
+				under[a.ID], changed = true, true
+			}
 		}
-		_, _ = s.StopAgent(a.ID)
+	}
+	for _, a := range agents {
+		if a.ID != parent && under[a.ID] && !a.State.Terminal() {
+			_, _ = s.StopAgent(a.ID)
+		}
 	}
 }
 

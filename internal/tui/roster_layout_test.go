@@ -47,7 +47,7 @@ func TestTaskFirstRosterWithManyAgents(t *testing.T) {
 	m := manyAgents(t)
 	m.resize(200, 38)
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"All activity", "root", "Completed 4"} {
+	for _, want := range []string{"All activity", "manager", "Completed 4"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q:\n%s", want, view)
 		}

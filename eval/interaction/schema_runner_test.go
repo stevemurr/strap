@@ -82,7 +82,7 @@ func TestSchemaRunnerUsesEvaluatedRoleAndStopsAfterItsBatch(t *testing.T) {
 				for _, tool := range request.Tools {
 					available[tool.Name] = true
 				}
-				if !available[f.Schema.Operation] || available["assign_work"] || (f.Schema.Role != roster.Root && available["assign_audit"]) {
+				if !available[f.Schema.Operation] || available["assign_work"] || (f.Schema.Role != roster.Manager && available["assign_audit"]) {
 					t.Fatal("incorrect production role catalog", available)
 				}
 				switch calls.Add(1) {

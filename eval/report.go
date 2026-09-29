@@ -190,7 +190,7 @@ func scanTrace(ctx context.Context, path string, m *TaskMetrics) error {
 		return err
 	}
 	defer reader.Close(context.Background())
-	var root identity.ActorID
+	var manager identity.ActorID
 	var first, last, firstReply time.Time
 	usage := 0
 	outputs := 0
@@ -226,8 +226,8 @@ func scanTrace(ctx context.Context, path string, m *TaskMetrics) error {
 			switch v := v.(type) {
 			case conversation.AgentStarted:
 				m.Agents++
-				if v.Agent.Parent == message.User && root == "" {
-					root = v.Agent.ID
+				if v.Agent.Parent == message.User && manager == "" {
+					manager = v.Agent.ID
 				}
 			case conversation.AgentRegistered:
 				m.Roles[string(v.Registration.Role)]++
@@ -280,7 +280,7 @@ func scanTrace(ctx context.Context, path string, m *TaskMetrics) error {
 			case conversation.MessageEvent:
 				m.Messages++
 				msg := v.Message
-				if msg.From == root && msg.To == message.User && (msg.Kind == message.Reply || msg.Kind == message.Failure) {
+				if msg.From == manager && answersUser(msg) {
 					m.Replies++
 					if firstReply.IsZero() {
 						firstReply = e.Time
@@ -422,7 +422,7 @@ func (r Report) Markdown() string {
 				b.WriteString(", session budget exhausted")
 			}
 			if t.NoReply {
-				b.WriteString(", finished idle without a root reply")
+				b.WriteString(", finished idle without a manager reply")
 			}
 			if t.ExecutionError != "" {
 				fmt.Fprintf(&b, "; execution: %s", oneLine(t.ExecutionError))

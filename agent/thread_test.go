@@ -69,9 +69,17 @@ func TestThreadPagingIsStableAcrossAppends(t *testing.T) {
 	if err != nil || len(empty.Entries) != 0 || empty.HasEarlier {
 		t.Fatalf("%+v %v", empty, err)
 	}
-	for _, q := range []TranscriptQuery{{Limit: -1}, {Limit: 101}, {Before: ^uint64(0)}} {
+	for _, q := range []TranscriptQuery{{Limit: -1}, {Limit: 101}} {
 		if _, err := thread.snapshot(q); err == nil {
 			t.Fatalf("accepted %+v", q)
+		}
+	}
+	// A position past the end reads the latest page, as a caller without an
+	// earlier page means it to.
+	for _, before := range []uint64{47, 100, ^uint64(0)} {
+		past, err := thread.snapshot(TranscriptQuery{Before: before})
+		if err != nil || len(past.Entries) != 20 || past.Entries[19].Position != 46 {
+			t.Fatalf("before=%d: %+v %v", before, past, err)
 		}
 	}
 }

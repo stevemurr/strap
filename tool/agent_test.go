@@ -37,7 +37,7 @@ func TestCreateAgentCallback(t *testing.T) {
 			t.Fatalf("lost assignment fields: %+v", assignment)
 		}
 		return Text("operation result"), callbackErr
-	})
+	}, true)
 	result, err := operation.Call(ctx, invocation)
 	if result.Content.Text() != "operation result" || !errors.Is(err, callbackErr) || calls != 1 {
 		t.Fatalf("callback outcome: %v, %v, calls=%d", result, err, calls)
@@ -49,7 +49,7 @@ func TestCreateAgentRejectsInputBeforeCallingHandler(t *testing.T) {
 	operation := CreateAgent(func(context.Context, Call, roster.CreateRequest) (Result, error) {
 		calls++
 		return Result{}, nil
-	})
+	}, true)
 	for _, raw := range []string{`{}`, `null`, `[]`, `{"input":{"task":" "}}`, `{"input":{"task":"ok","instructions":"override"}}`, `{"input":{"task":"ok","actor":"forged"}}`, `{"input":{"task":"ok"}} {}`} {
 		if _, err := operation.Call(context.Background(), Call{Arguments: json.RawMessage(raw)}); err == nil {
 			t.Errorf("accepted %s", raw)
@@ -99,7 +99,7 @@ func TestMessageStatusLookup(t *testing.T) {
 func TestSendMessageUsesInvocationSender(t *testing.T) {
 	want := message.Receipt{MessageID: "message-1", Recipient: "agent-2", Status: message.Queued}
 	sender := &recordingSender{receipt: want}
-	result, err := SendMessage().Call(context.Background(), Call{
+	result, err := SendMessage(nil).Call(context.Background(), Call{
 		Actor: "agent-1", Sender: sender,
 		Arguments: json.RawMessage(`{"input":{"to":"agent-2","message":"follow up"}}`),
 	})

@@ -28,9 +28,10 @@ type cycleProvider struct {
 	mu          sync.Mutex
 	session     *workflow.Session
 	plan        work.Plan
-	root        message.ActorID
+	manager     message.ActorID
 	implementor message.ActorID
-	auditor     message.ActorID
+	auditor     message.ActorID          // The latest auditor created.
+	audited     map[message.ActorID]bool // Auditors that already audited; each audits once.
 	repaired    map[work.AuditID]bool
 	assigned    bool
 	reviews     map[work.SubmissionID]bool
@@ -52,7 +53,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 			return provider.Response{}, fmt.Errorf("script tool failed: %s", m.Content.Text())
 		}
 	}
-	if r.Agent == p.root {
+	if r.Agent == p.manager {
 		for _, m := range r.Messages {
 			if m.Role == "tool" {
 				var reg roster.Registration
@@ -74,7 +75,8 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 		if !p.assigned {
 			p.assigned = true
-			return invoke("assign_implementation", tool.AssignImplementationArgs{Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
+			implementor := p.implementor
+			return invoke("assign_task", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: &implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
 		}
 		for i := len(r.Messages) - 1; i >= 0; i-- {
 			m := r.Messages[i]
@@ -83,7 +85,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 			}
 			e := m.Envelope.Event
 			if e.Kind == work.AuditCompleted && e.Work.State == work.ChangesRequested && !p.repaired[e.AuditID] {
-				w, err := p.session.Store.GetWork(p.root, e.Work.ID)
+				w, err := p.session.Store.GetWork(p.manager, e.Work.ID)
 				if err != nil {
 					return provider.Response{}, err
 				}
@@ -103,13 +105,20 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 				return provider.Response{Content: "Audited outcome accepted."}, nil
 			}
 			if e.Kind == work.ReviewRequested && !p.reviews[e.SubmissionID] {
-				w, err := p.session.Store.GetWork(p.root, e.Work.ID)
+				w, err := p.session.Store.GetWork(p.manager, e.Work.ID)
 				if err != nil {
 					return provider.Response{}, err
 				}
 				if w.State != work.NeedsCheck {
 					continue
 				}
+				if p.audited[p.auditor] {
+					return invoke("create_agent", roster.CreateRequest{Role: roster.Auditor})
+				}
+				if p.audited == nil {
+					p.audited = map[message.ActorID]bool{}
+				}
+				p.audited[p.auditor] = true
 				p.reviews[e.SubmissionID] = true
 				return invoke("assign_audit", tool.AssignAuditArgs{Assignee: p.auditor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: w.LatestSubmissionID})
 			}
@@ -130,7 +139,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		return provider.Response{}, err
 	}
 	for _, def := range r.Tools {
-		if def.Name == "assign_implementation" || def.Name == "create_agent" {
+		if def.Name == "assign_task" || def.Name == "create_agent" {
 			return provider.Response{}, fmt.Errorf("delegation leaked to worker")
 		}
 		if w.Kind == work.AuditWork && def.Name == "submit_work" {
@@ -172,6 +181,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 	}
 	return invoke("submit_work", tool.SubmitInput{WorkTarget: target, Summary: "Implemented and checked", Evidence: []string{"scripted evidence"}})
 }
+
 func run(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -184,19 +194,19 @@ func run(ctx context.Context) error {
 		defer stop()
 		_ = s.Close(cleanup)
 	}()
-	_, err := c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "root"}, Tools: s.RootTools()})
+	// Boot the session's permanent agent: the manager, which the user talks
+	// to and which coordinates the work.
+	s.UseManager(agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "manager"}, Tools: s.CoordinationTools()})
+	manager, err := s.CreateManager(ctx)
 	if err != nil {
 		return err
 	}
-	if err = s.RegisterRoot(); err != nil {
-		return err
-	}
-	p.root = c.Root()
-	p.plan, err = s.Store.UpdatePlan(p.root, work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Test")}, {Title: ptr("Integrate")}}})
+	p.manager = manager
+	p.plan, err = s.Store.UpdatePlan(p.manager, work.PlanUpdate{Title: ptr("Storage"), Steps: []work.StepEdit{{Title: ptr("Implement")}, {Title: ptr("Test")}, {Title: ptr("Integrate")}}})
 	if err != nil {
 		return err
 	}
-	if _, err = c.Send(c.Root(), "Begin"); err != nil {
+	if _, err = c.Send(p.manager, "Begin"); err != nil {
 		return err
 	}
 	return reportOutcome(ctx, s, p)
@@ -206,7 +216,7 @@ func reportOutcome(ctx context.Context, s *workflow.Session, p *cycleProvider) e
 	select {
 	case w := <-p.done:
 		fmt.Printf("%s accepted after failed audit, scoped repair, and passing audit.\n", w.ID)
-		plan, e := s.Store.GetPlan(p.root, p.plan.ID)
+		plan, e := s.Store.GetPlan(p.manager, p.plan.ID)
 		if e != nil {
 			return e
 		}

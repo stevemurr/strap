@@ -426,3 +426,47 @@ func TestWriteFileCreatesMissingParents(t *testing.T) {
 		}
 	}
 }
+
+// Reads share the gate; a writer waits for them, holds back later readers,
+// and a canceled wait leaves the gate usable.
+func TestFilesGateSharesReads(t *testing.T) {
+	var g rwGate
+	ctx := context.Background()
+	for range 3 {
+		if err := g.acquire(ctx, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if err := g.acquire(short, true); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("writer got in beside readers: %v", err)
+	}
+	if err := g.acquire(ctx, false); err != nil {
+		t.Fatalf("a canceled writer still blocks readers: %v", err)
+	}
+	wrote := make(chan struct{})
+	go func() {
+		if g.acquire(ctx, true) == nil {
+			close(wrote)
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	late, cancelLate := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancelLate()
+	if err := g.acquire(late, false); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a reader overtook a waiting writer: %v", err)
+	}
+	for range 4 {
+		g.release(false)
+	}
+	select {
+	case <-wrote:
+	case <-time.After(time.Second):
+		t.Fatal("writer never got the gate")
+	}
+	g.release(true)
+	if err := g.acquire(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+}

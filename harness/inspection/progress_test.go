@@ -2,7 +2,6 @@ package inspection_test
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"testing"
 
@@ -38,19 +37,15 @@ func TestProgressRecordedPrefixAndArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err = s.Reassign("root", work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: first.WorkRevision}, Assignee: "replacement"})
-	if err != nil {
+	if _, err = s.ReportWorkProgress("worker", work.ReportWorkProgressRequest{WorkID: w.ID, Position: &work.WorkPosition{Objective: "moved on"}}); err != nil {
 		t.Fatal(err)
 	}
 	latest, err := reader.At(ctx, eventlog.Cursor{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := latest.GetWorkProgressReport(ctx, "worker", first.ReportID); !errors.Is(err, work.ErrForbidden) {
-		t.Fatalf("current access after reassignment: %v", err)
-	}
-	current, err := latest.GetWorkProgress(ctx, "replacement", w.ID)
-	if err != nil || current.LastReportedPosition != nil || len(current.Findings) != 1 {
+	current, err := latest.GetWorkProgress(ctx, "worker", w.ID)
+	if err != nil || current.LastReportedPosition == nil || current.LastReportedPosition.Value.Objective != "moved on" || len(current.Findings) != 1 {
 		t.Fatalf("current snapshot: %+v %v", current, err)
 	}
 	if err := log.Seal(ctx, eventlog.Outcome{Reason: "requested"}); err != nil {

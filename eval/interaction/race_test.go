@@ -149,7 +149,7 @@ func TestRevisionRaceLiveProviderUsesActualConflictAndFreshRead(t *testing.T) {
 	starts, finishes := 0, 0
 	for _, fact := range facts {
 		e, ok := fact.event.(conversation.ToolEvent)
-		if !ok || e.Agent != f.Root || e.Activity.Call.ID != proposed.ID {
+		if !ok || e.Agent != f.Coordinator || e.Activity.Call.ID != proposed.ID {
 			continue
 		}
 		if !reflect.DeepEqual(e.Activity.Call, proposed) {
@@ -301,7 +301,7 @@ func assertRaceMetadata(t *testing.T, result Result, f fixture) {
 	if !reflect.DeepEqual(r.OriginalBefore, f.Original) || !reflect.DeepEqual(r.OriginalAfter, wantAfter) {
 		t.Fatalf("competing audit should only advance original revision twice: %+v", r)
 	}
-	if r.CancelledAudit.Kind != work.AuditWork || r.CancelledAudit.State != work.Cancelled || r.CancelledAudit.Revision != 2 || r.CancelledAudit.ParentID != f.Original.ID || r.CancelledAudit.SubjectSubmissionID != f.Submission.ID || r.CancelledAudit.Assignee != f.Auditor {
+	if r.CancelledAudit.Kind != work.AuditWork || r.CancelledAudit.State != work.Cancelled || r.CancelledAudit.Revision != 2 || r.CancelledAudit.ParentID != f.Original.ID || r.CancelledAudit.SubjectSubmissionID != f.Submission.ID || r.CancelledAudit.Assignee != f.RaceAuditor {
 		t.Fatalf("intervention must preserve identifiable cancelled competing audit: %+v", r.CancelledAudit)
 	}
 	if r.TriggerCallID == "" || r.TriggerRequest.WorkID != f.Original.ID || r.TriggerRequest.ExpectedRevision != f.Original.Revision || r.TriggerRequest.SubmissionID != f.Submission.ID || r.TriggerRequest.Assignee != f.Auditor {

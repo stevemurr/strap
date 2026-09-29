@@ -160,8 +160,8 @@ func (m *model) stackTargetView(t stackTarget, highlight bool) string {
 		mark = "✓"
 	}
 	name := m.streamTask(id)
-	if id == m.session.Root() {
-		name = "root"
+	if id == m.session.Manager() {
+		name = m.entry
 	}
 	label := agentIcon(id) + " " + style.Render(ansi.Truncate(name, max(1, t.width-5), "…")) + " " + markStyle.Render(mark)
 	return fitStreamCell(label, t.width)
@@ -284,7 +284,7 @@ func (m *model) stackPeek() *stackPreview {
 		if c := m.ensureStream(id).context; c != nil {
 			lines = append(lines, dimStyle.Render(ansi.Truncate(c.label(), inner, "…")))
 		}
-		if id == m.session.Root() && m.options.Model != "" {
+		if id == m.session.Manager() && m.options.Model != "" {
 			lines = append(lines, dimStyle.Render(ansi.Truncate(m.options.Model+" · "+m.options.Endpoint, inner, "…")))
 		}
 	}

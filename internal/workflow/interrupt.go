@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 
+	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 )
 
@@ -31,19 +33,27 @@ func (s *Session) SettleInterrupt(ctx context.Context) error {
 }
 
 func (s *Session) cancelInterruptedWork() error {
-	root := s.Root()
-	for _, item := range s.Store.ActorState(root).Owned {
-		// Cancel may also close children and revise the parent. Fetch each current
-		// revision rather than reusing the enumeration's pre-cancellation version.
-		w, err := s.Store.GetWork(root, item.WorkID)
-		if err != nil {
-			return err
-		}
-		if w.State.Terminal() {
-			continue
-		}
-		if _, err := s.Store.Cancel(root, work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "User interrupted execution"}); err != nil {
-			return err
+	// Only the manager owns work.
+	var coordinators []identity.ActorID
+	s.mu.Lock()
+	if id := s.graph.Find(roster.Manager); id != "" {
+		coordinators = append(coordinators, id)
+	}
+	s.mu.Unlock()
+	for _, owner := range coordinators {
+		for _, item := range s.Store.ActorState(owner).Owned {
+			// Cancel may also close children and revise the parent. Fetch each current
+			// revision rather than reusing the enumeration's pre-cancellation version.
+			w, err := s.Store.GetWork(owner, item.WorkID)
+			if err != nil {
+				return err
+			}
+			if w.State.Terminal() {
+				continue
+			}
+			if _, err := s.Store.Cancel(owner, work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "User interrupted execution"}); err != nil {
+				return err
+			}
 		}
 	}
 	for _, event := range s.Store.PendingEvents(0) {

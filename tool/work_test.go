@@ -95,7 +95,7 @@ func TestSubmitAuditDoesNotAcceptAuthorityFields(t *testing.T) {
 
 func TestWorkToolSchemasHaveValidRequiredArrays(t *testing.T) {
 	definitions := append(PlanTools(func(context.Context, Call, work.PlanUpdate) (Result, error) { return Result{}, nil }),
-		SubmitWork(nil), SubmitAudit(nil), GetWork(nil), GetPlan(nil), GetAudit(nil), CancelWork(nil), ReassignWork(nil))
+		SubmitWork(nil), SubmitAudit(nil), GetWork(nil), GetPlan(nil), GetAudit(nil), CancelWork(nil))
 	definitions = append(definitions, AssignmentTools(nil)...)
 	var check func(any)
 	check = func(v any) {

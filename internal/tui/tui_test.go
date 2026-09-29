@@ -24,7 +24,7 @@ type fakeSession struct {
 	managed string
 }
 
-func (s *fakeSession) Root() message.ActorID { return "root" }
+func (s *fakeSession) Manager() message.ActorID { return "root" }
 func (s *fakeSession) Send(to message.ActorID, text string) (message.Receipt, error) {
 	if s.err != nil {
 		return message.Receipt{}, s.err
@@ -245,7 +245,7 @@ func TestManagementCommandsAndPausedStatus(t *testing.T) {
 		t.Fatal(s.managed)
 	}
 	m.observe(conversation.AgentStateChanged{Agent: "root", State: agent.Paused})
-	if !strings.Contains(m.status(), "Root paused") {
+	if !strings.Contains(m.status(), "Manager paused") {
 		t.Fatal(m.status())
 	}
 }

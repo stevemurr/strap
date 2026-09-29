@@ -213,6 +213,9 @@ func (a *Agent) generate(ctx context.Context, request provider.Request, revision
 			if err != nil {
 				return response, id, err
 			} // Keep committed history; no invented terminal.
+			if a.config.Sequence != nil {
+				a.config.Sequence.Appended(*position)
+			}
 			status = OutputComplete
 		}
 	}

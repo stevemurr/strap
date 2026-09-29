@@ -67,7 +67,7 @@ func (m *model) rosterGroup(id message.ActorID) string {
 func (m *model) groupedAgents(group string) []message.ActorID {
 	var ids []message.ActorID
 	for _, id := range m.streamUI.order {
-		if id != m.session.Root() && m.rosterGroup(id) == group {
+		if id != m.session.Manager() && m.rosterGroup(id) == group {
 			ids = append(ids, id)
 		}
 	}
@@ -75,7 +75,7 @@ func (m *model) groupedAgents(group string) []message.ActorID {
 }
 
 func (m *model) rosterChoices() []rosterChoice {
-	choices := []rosterChoice{{id: ""}, {id: m.session.Root()}}
+	choices := []rosterChoice{{id: ""}, {id: m.session.Manager()}}
 	for _, group := range rosterGroups {
 		ids := m.groupedAgents(group)
 		if group == "Completed" && len(ids) > 0 {
@@ -114,7 +114,7 @@ func (m *model) syncRosterFocus() {
 }
 
 func (m *model) streamTask(id message.ActorID) string {
-	if id == m.session.Root() {
+	if id == m.session.Manager() {
 		return "Conversation & coordination"
 	}
 	if w, ok := m.streamWork(id); ok && strings.TrimSpace(w.Task) != "" {
@@ -209,7 +209,7 @@ func (m *model) rosterLines(height, width int) []rosterLine {
 		}
 	}
 	addAgent("")
-	addAgent(m.session.Root())
+	addAgent(m.session.Manager())
 	for _, group := range rosterGroups {
 		ids := m.groupedAgents(group)
 		if len(ids) == 0 {

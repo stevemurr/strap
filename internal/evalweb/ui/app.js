@@ -620,7 +620,7 @@ function summary(kind, p) {
     }
     case 'agent_state': return line(`${p.agent?.agent_id || ''} ${p.agent?.state || p.state || ''}`);
     case 'agent_started': return line(`${p.agent?.agent_id || ''} started with ${(p.tools || []).length} tools`);
-    case 'work': case 'implementation': case 'audit': case 'plan': case 'research': return line(p.event || p.kind || '', h('pre', {}, JSON.stringify(p.change || p.work || p, null, 0).slice(0, 400)));
+    case 'work': case 'implementation': case 'audit': case 'plan': case 'research': case 'experiment': return line(p.event || p.kind || '', h('pre', {}, JSON.stringify(p.change || p.work || p, null, 0).slice(0, 400)));
     default: return line(h('pre', {}, JSON.stringify(p).slice(0, 300)));
   }
 }

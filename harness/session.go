@@ -1,4 +1,4 @@
-// Package harness assembles one independently running root and its audited work.
+// Package harness assembles one independently running manager and its audited work.
 // Terminal and transport adapters do not select execution policy.
 package harness
 
@@ -45,17 +45,9 @@ type AgentConfig struct {
 
 type WorkProgressReportingConfig = workflow.WorkProgressReportingConfig
 
-type ResearchExecutionConfig struct {
-	Enabled     bool          `json:"enabled"`
-	Timeout     time.Duration `json:"timeout"`
-	MaxTimeout  time.Duration `json:"max_timeout"`
-	OutputLimit int           `json:"output_limit"`
-	Env         []string      `json:"env"`
-}
 type Config struct {
 	DeepResearch          DeepResearchConfig          `json:"deep_research"`
 	LSP                   *lsp.Config                 `json:"lsp,omitempty"` // Nil disables experimental language tools.
-	ResearchExecution     ResearchExecutionConfig     `json:"research_execution"`
 	WorkProgressReporting WorkProgressReportingConfig `json:"work_progress_reporting"`
 	Telemetry             TelemetryConfig             `json:"telemetry"`
 	Events                EventConfig                 `json:"events"`
@@ -65,18 +57,51 @@ type Config struct {
 	LocalTools            bool                        `json:"local_tools"`
 	FileEdits             tool.EditMode               `json:"file_edits,omitempty"` // Empty is tool.EditText.
 	Web                   *tool.WebConfig             `json:"web"`                  // Nil disables browser/search tools.
-	Root                  AgentConfig                 `json:"root"`
-	Implementor           AgentConfig                 `json:"implementor"`
-	Auditor               AgentConfig                 `json:"auditor"`
-	Researcher            AgentConfig                 `json:"researcher"`
+	// Solo runs one agent with every tool, which the user talks to and which
+	// does the work itself, in place of the manager and its workers.
+	Solo  bool        `json:"solo,omitempty"`
+	Agent AgentConfig `json:"agent"` // Used only in a solo session.
+	// Tester runs an adversarial tester, with the agent's model, before a solo
+	// agent's reply to a code change; the failures it reports that the
+	// harness reproduces go back to the agent. Experimental.
+	Tester bool `json:"tester,omitempty"`
+	// TesterBudget bounds one tester run's wall clock; zero is DefaultTesterBudget.
+	TesterBudget time.Duration `json:"tester_budget_ns,omitempty"`
+	// TesterReportAll has the tester report every failing test and leave
+	// judging it against the requirements to the agent. Experimental.
+	TesterReportAll bool        `json:"tester_report_all,omitempty"`
+	Manager         AgentConfig `json:"manager"`
+	Debugger        AgentConfig `json:"debugger"`
+	DebugToolkit    bool        `json:"debug_toolkit,omitempty"` // Start a debugger beside the manager.
+	// ManualAudits gives the manager assign_audit and auditors to create,
+	// instead of the harness assigning every submission's audit itself. The
+	// interaction suite's audit scenarios measure that older protocol.
+	ManualAudits bool `json:"manual_audits,omitempty"`
+	// AuditBrief hands each auditor the requirements, the submission's
+	// summary and the changed files' contents with its assignment.
+	AuditBrief bool `json:"audit_brief,omitempty"`
+	// AuditRuns lists the implementor's final build, vet and test runs, as the
+	// harness recorded them, in each audit's context, so the auditor does not
+	// run them again.
+	AuditRuns      bool        `json:"audit_runs,omitempty"`
+	Implementor    AgentConfig `json:"implementor"`
+	Auditor        AgentConfig `json:"auditor"`
+	WebResearcher  AgentConfig `json:"web_researcher"`
+	DeepResearcher AgentConfig `json:"deep_researcher"` // Used only when deep research is enabled.
+	Experimenter   AgentConfig `json:"experimenter"`    // Used only with local tools.
+	Reviewer       AgentConfig `json:"reviewer"`        // Used only with local tools.
+	// Seed makes the engine deterministic: every work-store id and derived
+	// secret is a function of it. Empty draws a random seed. The trace records
+	// it in session_started, so a replay reuses the recorded one.
+	Seed []byte `json:"seed,omitempty"`
 }
 
 // DefaultConfig returns independent library defaults without acquiring resources.
 // The CLI selects its model from its own model catalog.
 func DefaultConfig() Config {
 	languages := lsp.DefaultConfig()
-	return Config{DeepResearch: DeepResearchConfig{Enabled: true}, ResearchExecution: ResearchExecutionConfig{Enabled: true, Timeout: 30 * time.Second, MaxTimeout: 60 * time.Second, OutputLimit: 16 * 1024}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://127.0.0.1:8000", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, Web: &tool.WebConfig{}, LSP: &languages,
-		Root: AgentConfig{Prompt: rootPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, Researcher: AgentConfig{Prompt: researcherPrompt.Clone()}}
+	return Config{DeepResearch: DeepResearchConfig{Enabled: true}, WorkProgressReporting: workflow.DefaultWorkProgressReporting(), Telemetry: TelemetryConfig{ContextTokens: true, Concurrency: 2, Queue: 128, Timeout: 10 * time.Second, ServerMetricsInterval: 5 * time.Second}, Events: EventConfig{Queue: eventlog.Limits{Entries: 1024, Bytes: 8 << 20}}, Dir: ".", ReasoningLimit: 192 << 10, Model: ModelConfig{Backend: "vllm", BaseURL: "http://127.0.0.1:8000", Model: "qwen3.6", Timeout: 60 * time.Minute}, LocalTools: true, AuditRuns: true, Web: &tool.WebConfig{}, LSP: &languages,
+		Agent: AgentConfig{Prompt: agentPrompt.Clone()}, Manager: AgentConfig{Prompt: managerPrompt.Clone()}, Debugger: AgentConfig{Prompt: debuggerPrompt.Clone()}, Implementor: AgentConfig{Prompt: executionPrompt.Clone()}, Auditor: AgentConfig{Prompt: auditorPrompt.Clone()}, WebResearcher: AgentConfig{Prompt: webResearcherPrompt.Clone()}, DeepResearcher: AgentConfig{Prompt: deepResearcherPrompt.Clone()}, Experimenter: AgentConfig{Prompt: experimenterPrompt.Clone()}, Reviewer: AgentConfig{Prompt: reviewerPrompt.Clone()}}
 }
 
 type EventConfig struct {
@@ -95,18 +120,50 @@ type OwnedResource struct {
 	Resource Resource
 }
 
+// Clock is the time the harness schedules progress notices by; see
+// Dependencies.Clock.
+type Clock interface {
+	Now() time.Time
+	Timer(at time.Time) (fired <-chan time.Time, stop func())
+}
+
 // Dependencies are executable collaborators. Providers/tools are borrowed unless
 // also registered in Resources. Resource ownership transfers when New is called,
 // including when construction fails and returns a cleanup handle.
 type Dependencies struct {
-	DeepResearchProvider                   provider.Provider
-	ResearchWeb                            research.Retrieval
-	LSP                                    lsp.Dependencies
-	CaptureFailure                         func(error)       // Optional independent diagnostic sink; must return promptly.
-	Provider                               provider.Provider // Shared fallback for all roles, useful for eval fakes.
-	Root, Implementor, Auditor, Researcher AgentDependencies
-	EventStore                             func(sessionID string) (eventlog.Store, error) // Factory transfers storage ownership; called once.
-	Resources                              []OwnedResource
+	DeepResearchProvider                                   provider.Provider
+	ResearchWeb                                            research.Retrieval
+	LSP                                                    lsp.Dependencies
+	CaptureFailure                                         func(error)       // Optional independent diagnostic sink; must return promptly.
+	Provider                                               provider.Provider // Shared fallback for all roles, useful for eval fakes.
+	Agent, Tester, Manager, Debugger, Implementor, Auditor AgentDependencies
+	WebResearcher, DeepResearcher, Experimenter, Reviewer  AgentDependencies
+	EventStore                                             func(sessionID string) (eventlog.Store, error) // Factory transfers storage ownership; called once.
+	Resources                                              []OwnedResource
+	// TesterRuns serves adversarial tester runs in place of running them: a
+	// replay answers each with the run its recording made, which is all the
+	// agent ever saw of it. It reports false when none is left to serve.
+	TesterRuns func(identity.ActorID) (conversation.TesterEvent, bool)
+	// Environment wraps every tool that reaches outside the session: files,
+	// shell, language servers and the web. Coordination and ledger tools are
+	// the harness itself and are never wrapped. Replays use it to serve
+	// recorded results.
+	Environment func(tool.Tool) tool.Tool
+	// Workspace lists the workspace an agent sees on its first wake, the one
+	// environment read outside a tool. Nil lists the directory.
+	Workspace func(actor identity.ActorID, dir string) *message.Workspace
+	// Intake decides which queued messages each agent takes when it reads its
+	// inbox; see agent.Intake. Replays use it to settle message races the way
+	// the recording settled them.
+	Intake func(identity.ActorID) agent.Intake
+	// SendOrder orders message admission; see conversation.SendOrder.
+	SendOrder conversation.SendOrder
+	// Sequence orders each agent's tool starts and message consumption; see
+	// agent.Sequence.
+	Sequence func(identity.ActorID) agent.Sequence
+	// Clock schedules progress notices; nil is the wall clock. A replay runs
+	// a virtual clock so notices fall where they fell when recorded.
+	Clock Clock
 }
 
 type Session struct {
@@ -125,7 +182,12 @@ type Session struct {
 	outcome          *eventlog.Outcome
 	startupError     string
 	effective        EffectiveConfig
+	listWorkspace    func(identity.ActorID, string) *message.Workspace
+	finish           *finishFacts // A solo session's finish check; nil otherwise.
 	telemetry        *telemetry
+	changes          changeLog
+	briefFiles       tool.Tool
+	serverMetrics    *serverMetrics
 	id               string
 	log              *eventlog.Log
 	legacyOnce       sync.Once
@@ -140,6 +202,7 @@ type Session struct {
 	admission        *admission.Gate
 	cancelExecution  context.CancelFunc
 	stopOwner        func() bool
+	manager          identity.ActorID
 }
 
 // StartupError retains cleanup ownership if rollback could not complete.
@@ -159,16 +222,14 @@ func (e *StartupError) Close(ctx context.Context) error { return e.cleanup.Close
 
 func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err error) {
 	cfg = cloneConfig(cfg)
-	for _, role := range []*AgentConfig{&cfg.Root, &cfg.Implementor, &cfg.Auditor, &cfg.Researcher} {
-		files, language := fileInstruction, languageInstruction
-		if role == &cfg.Root {
-			files, language = rootFileInstruction, rootLanguageInstruction
+	// The manager and the web and deep researchers read no files; a question
+	// about the workspace goes to a reviewer.
+	for _, role := range []*AgentConfig{&cfg.Implementor, &cfg.Auditor, &cfg.Experimenter, &cfg.Reviewer} {
+		if !slices.Contains(role.Prompt.Instructions, fileInstruction) {
+			role.Prompt.Instructions = append(role.Prompt.Instructions, fileInstruction)
 		}
-		if !slices.Contains(role.Prompt.Instructions, files) {
-			role.Prompt.Instructions = append(role.Prompt.Instructions, files)
-		}
-		if cfg.LSP != nil && !slices.Contains(role.Prompt.Instructions, language) {
-			role.Prompt.Instructions = append(role.Prompt.Instructions, language)
+		if cfg.LSP != nil && !slices.Contains(role.Prompt.Instructions, languageInstruction) {
+			role.Prompt.Instructions = append(role.Prompt.Instructions, languageInstruction)
 		}
 	}
 	execution, cancelExecution := context.WithCancel(context.WithoutCancel(ctx))
@@ -199,9 +260,6 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	if cfg.ResearchExecution.Enabled && (cfg.ResearchExecution.Timeout < time.Millisecond || cfg.ResearchExecution.MaxTimeout < cfg.ResearchExecution.Timeout || cfg.ResearchExecution.OutputLimit < 2) {
-		return nil, errors.New("invalid research execution limits")
-	}
 	if err = cfg.WorkProgressReporting.Validate(); err != nil {
 		return nil, err
 	}
@@ -217,17 +275,42 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		if err != nil {
 			return nil, err
 		}
-		cfg.Researcher.Prompt.Instructions = append(cfg.Researcher.Prompt.Instructions, "For a multi-source investigation, use deep_research with your active work_id and explicit success criteria. Read its claims and source evidence with get_research_run. Record each claim you deliver with report_work_progress, then cite the finding IDs it returns in submit_research. State partial outcomes and remaining gaps.")
-		cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Researchers have a deep_research tool for bounded multi-source web investigations. Assign a researcher a clear question and acceptance criteria. Its results reach you as a delivered brief. You remain available while research executes; send_message does not steer an in-flight investigation.")
+		if !slices.Contains(cfg.Manager.Prompt.Instructions, deepResearchManagerInstruction) {
+			cfg.Manager.Prompt.Instructions = append(cfg.Manager.Prompt.Instructions, deepResearchManagerInstruction)
+		}
+	}
+	if cfg.AuditBrief && !slices.Contains(cfg.Auditor.Prompt.Instructions, auditBriefInstruction) {
+		cfg.Auditor.Prompt.Instructions = append(cfg.Auditor.Prompt.Instructions, auditBriefInstruction)
+	}
+	if cfg.AuditRuns && !slices.Contains(cfg.Auditor.Prompt.Instructions, auditRunsInstruction) {
+		cfg.Auditor.Prompt.Instructions = append(cfg.Auditor.Prompt.Instructions, auditRunsInstruction)
+	}
+	if cfg.Solo && cfg.Web != nil && !slices.Contains(cfg.Agent.Prompt.Instructions, agentWebInstruction) {
+		cfg.Agent.Prompt.Instructions = append(cfg.Agent.Prompt.Instructions, agentWebInstruction)
 	}
 	s.config.DeepResearch = cfg.DeepResearch
-	s.config.Root = cfg.Root
-	s.config.Researcher = cfg.Researcher
-	var id [16]byte
-	if _, err = rand.Read(id[:]); err != nil {
-		return nil, err
+	s.config.Agent = cfg.Agent
+	s.config.Manager = cfg.Manager
+	s.config.Auditor = cfg.Auditor
+	s.config.Debugger = cfg.Debugger
+	s.config.WebResearcher = cfg.WebResearcher
+	s.config.DeepResearcher = cfg.DeepResearcher
+	s.config.Experimenter = cfg.Experimenter
+	s.config.Reviewer = cfg.Reviewer
+	if len(s.config.Seed) == 0 {
+		s.config.Seed = make([]byte, 32)
+		if _, err = rand.Read(s.config.Seed); err != nil {
+			return nil, err
+		}
 	}
-	s.id = hex.EncodeToString(id[:])
+	// The session id derives from the seed like every other id, so a replay
+	// of a recording reads under the same id the recording did.
+	key := work.DeriveKey(s.config.Seed, "session")
+	s.id = hex.EncodeToString(key[:16])
+	s.listWorkspace = deps.Workspace
+	if s.listWorkspace == nil {
+		s.listWorkspace = func(_ identity.ActorID, dir string) *message.Workspace { return workspaceListing(dir) }
+	}
 	s.projection = projection.New(identity.SessionID(s.id))
 	if err = s.config.Telemetry.defaults(); err != nil {
 		return nil, err
@@ -285,8 +368,9 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	}
 	s.encoder = eventcodec.NewPublisher(s.log, s.config.Events.Queue.Bytes)
 	data, _ := json.Marshal(struct {
-		ID string `json:"id"`
-	}{s.id})
+		ID   string `json:"id"`
+		Seed []byte `json:"seed"`
+	}{s.id, s.config.Seed})
 	if err = s.log.Publish(eventlog.Data{Kind: "session_started", Payload: data}); err != nil {
 		return nil, err
 	}
@@ -305,11 +389,29 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		if model.Timeout <= 0 {
 			return nil, errors.New("model timeout must be positive")
 		}
-		return model.NewProvider(&http.Client{Transport: pool, Timeout: model.Timeout})
+		p, err := model.NewProvider(&http.Client{Transport: pool, Timeout: model.Timeout})
+		if err != nil {
+			return nil, err
+		}
+		// A retried call is made again unchanged; injected providers, such as
+		// a replay's recorded outputs, answer as recorded.
+		return provider.WithRetries(p, modelRetries), nil
 	}
-	root, err := makeProvider(cfg.Root, deps.Root)
+	manager, err := makeProvider(cfg.Manager, deps.Manager)
 	if err != nil {
 		return nil, err
+	}
+	var solo provider.Provider
+	if cfg.Solo {
+		if solo, err = makeProvider(cfg.Agent, deps.Agent); err != nil {
+			return nil, err
+		}
+	}
+	var debugger provider.Provider
+	if cfg.DebugToolkit {
+		if debugger, err = makeProvider(cfg.Debugger, deps.Debugger); err != nil {
+			return nil, err
+		}
 	}
 	implementor, err := makeProvider(cfg.Implementor, deps.Implementor)
 	if err != nil {
@@ -319,7 +421,19 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err != nil {
 		return nil, err
 	}
-	researcher, err := makeProvider(cfg.Researcher, deps.Researcher)
+	webResearcher, err := makeProvider(cfg.WebResearcher, deps.WebResearcher)
+	if err != nil {
+		return nil, err
+	}
+	deepResearcher, err := makeProvider(cfg.DeepResearcher, deps.DeepResearcher)
+	if err != nil {
+		return nil, err
+	}
+	experimenter, err := makeProvider(cfg.Experimenter, deps.Experimenter)
+	if err != nil {
+		return nil, err
+	}
+	reviewer, err := makeProvider(cfg.Reviewer, deps.Reviewer)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +441,15 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	var languageTools []tool.Tool
 	var changed func(string)
 	var afterRun func()
+	// startLanguages starts a language manager rooted at dir: a workspace
+	// copy's, or a scratch project's outside the workspace.
+	var startLanguages func(dir string) (*lsp.Manager, error)
 	if cfg.LSP != nil {
+		startLanguages = func(dir string) (*lsp.Manager, error) {
+			c := cfg.LSP.Clone()
+			c.Dir = dir
+			return lsp.New(c, deps.LSP)
+		}
 		languageConfig := cfg.LSP.Clone()
 		languageConfig.Dir = cfg.Dir
 		languages, err = lsp.New(languageConfig, deps.LSP)
@@ -343,7 +465,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		afterRun = func() { languages.Changed("") }
 	}
 	var webRuntime *tool.Web
-	var local []tool.Tool
+	var local, webTools []tool.Tool
 	if cfg.LocalTools {
 		local, err = localToolsWithChanges(cfg.Dir, cfg.FileEdits, changed, afterRun)
 		if err != nil {
@@ -358,16 +480,36 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		}
 		webRuntime = web
 		s.resources.Add("web", web)
-		local = append(local, web.Tools()...)
+		// The web belongs to the web researcher alone: what the session learns
+		// from it arrives as research with recorded claims and sources. The
+		// deep researcher reaches it only through the deep research engine.
+		webTools = web.Tools()
 	}
-	var feedback *languageFeedback
+	var scratch *scratchLanguages
 	if languages != nil {
-		feedback = &languageFeedback{manager: languages, seen: map[identity.ActorID]string{}}
+		// Writes come back with the errors the language server then reports.
+		scratch = newScratchLanguages(startLanguages)
+		s.resources.Add("scratch lsp", scratch)
+		checkWrites(local, languages, scratch, cfg.Dir)
+		checkShell(local, languages, scratch, cfg.Dir)
 		for i, t := range local {
-			local[i] = feedback.wrap(t)
+			switch t.Definition().Name {
+			case "write_file", "edit_file":
+				local[i] = describedTool{Tool: t, note: writeCheckNote}
+			case "shell":
+				local[i] = describedTool{Tool: t, note: shellCheckNote}
+			}
 		}
 	}
-	c := conversation.New(execution, conversation.WithInboxAdmission(s.inboxAdmission), conversation.WithWakeContext(s.wakeContext), conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
+	for _, tools := range [][]tool.Tool{local, webTools} {
+		for i, t := range tools {
+			if deps.Environment != nil {
+				t = deps.Environment(t)
+			}
+			tools[i] = s.recordEnvironment(t)
+		}
+	}
+	c := conversation.New(execution, conversation.WithRoute(s.route), conversation.WithInboxAdmission(s.inboxAdmission), conversation.WithWakeContext(s.wakeContext), conversation.WithIntake(deps.Intake), conversation.WithSendOrder(deps.SendOrder), conversation.WithSequence(deps.Sequence), conversation.WithReporting(conversation.ReporterFunc(func(_ context.Context, e conversation.Event) error { return s.publish(e) }), s.readWorkflow))
 	s.controller = c
 	var stopReads context.CancelFunc
 	s.workflowReadLife, stopReads = context.WithCancel(context.Background())
@@ -382,6 +524,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 	if err != nil {
 		return nil, err
 	}
+	s.progressReads.UseKey(work.DeriveKey(cfg.Seed, "progress-cursor"))
 	s.progressReads.Evidence = inspection.ReadExecutionEvidence
 	s.progressReads.Authorize = func(ctx context.Context, actor identity.ActorID, id work.ID) error {
 		_, err := s.GetWork(ctx, actor, id)
@@ -394,23 +537,69 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		}
 		return view.CanReadExecution(actor, id)
 	}
-	messaging := []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}
-	// Auditors and the root read and inspect; only implementors change files.
-	withoutWrites := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool { n := t.Definition().Name; return n == "write_file" || n == "edit_file" })
-	researchReads := slices.DeleteFunc(slices.Clone(withoutWrites), func(t tool.Tool) bool { return t.Definition().Name == "shell" })
-	var researchShell tool.Tool
-	if cfg.LocalTools && cfg.ResearchExecution.Enabled {
-		researchShell, err = tool.NewShell(tool.ShellConfig{Dir: cfg.Dir, AfterRun: afterRun, Timeout: cfg.ResearchExecution.Timeout, MaxTimeout: cfg.ResearchExecution.MaxTimeout, OutputLimit: cfg.ResearchExecution.OutputLimit, Env: cfg.ResearchExecution.Env})
+	messaging := []tool.Tool{tool.SendMessage(s.resolveRole), tool.MessageStatus(c.Receipt)}
+	// Implementors alone change the workspace; auditors and experimenters
+	// change their own copies of it. Reviewers read it without a shell, which
+	// writes as easily as write_file. The manager reads nothing: a question
+	// about the workspace goes to a reviewer.
+	reads := slices.DeleteFunc(slices.Clone(local), func(t tool.Tool) bool {
+		n := t.Definition().Name
+		return n == "write_file" || n == "edit_file" || n == "shell"
+	})
+	// Auditors and experimenters work in their own copy of the workspace, with
+	// language servers of its own; see isolation.
+	var auditorLocal, experimenterLocal []tool.Tool
+	var methodFiles workflow.MethodFiles
+	if cfg.LocalTools {
+		iso, err := newIsolation(cfg.Dir, cfg.FileEdits, shellMaxTimeout, func(actor identity.ActorID) (work.Work, bool, error) {
+			return s.workflow.Store.AdmitExecution(actor)
+		}, func(id work.ID, at work.Revision) bool { return s.workflow.Store.Holds(id, at) }, startLanguages)
 		if err != nil {
 			return nil, err
 		}
-	}
-	if feedback != nil && researchShell != nil {
-		researchShell = feedback.wrap(researchShell)
+		s.resources.Add("workspace copies", iso)
+		templates, err := localToolsWithChanges(cfg.Dir, cfg.FileEdits, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range templates {
+			if t.Definition().Name == "shell" {
+				templates = append(templates, trialsTool(t, iso.maxTimeout))
+				break
+			}
+		}
+		// The session's language tools supply the definitions; calls go to the
+		// caller's copy and its own servers.
+		templates = append(templates, languageTools...)
+		// Experimenters write only in their copy; auditors may also write
+		// outside it, such as scratch programs in /tmp.
+		isolated := func(outside bool, note string) []tool.Tool {
+			tools := iso.tools(templates, outside)
+			for i, t := range tools {
+				n := t.Definition().Name
+				if n == "shell" || n == "write_file" || n == "run_trials" {
+					t = describedTool{Tool: t, note: note}
+				}
+				if languages != nil && (n == "write_file" || n == "edit_file") {
+					t = describedTool{Tool: t, note: writeCheckNote}
+				}
+				if languages != nil && n == "shell" {
+					t = describedTool{Tool: t, note: shellCheckNote}
+				}
+				if deps.Environment != nil {
+					t = deps.Environment(t)
+				}
+				tools[i] = s.recordEnvironment(t)
+			}
+			return tools
+		}
+		experimenterLocal = isolated(false, isolatedDescription)
+		auditorLocal = slices.DeleteFunc(isolated(true, auditorIsolatedDescription), func(t tool.Tool) bool { return t.Definition().Name == "run_trials" })
+		methodFiles = iso.methodFiles
 	}
 	var deepOption workflow.Option = func(*workflow.Session) {}
 	if cfg.DeepResearch.Enabled {
-		model := researcher
+		model := deepResearcher
 		if deps.DeepResearchProvider != nil {
 			model = deps.DeepResearchProvider
 		} else if cfg.DeepResearch.Model != nil {
@@ -423,6 +612,7 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		if e != nil {
 			return nil, e
 		}
+		engine.UseIDs(work.SeededIDs(append(slices.Clone(cfg.Seed), "research"...)))
 		s.researchReads, err = inspection.NewResearchReader(readSource)
 		if err != nil {
 			return nil, err
@@ -437,41 +627,85 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		deepOption = workflow.WithDeepResearch(engine, factory, s.recordResearch, s.researchReadTool())
 	}
 	s.workflow = workflow.New(context.WithoutCancel(ctx), c,
-		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)},
-		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, withoutWrites, deps.Auditor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}, deepOption, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), workflow.WithResearchDiagnostic(researchShell, cfg.ResearchExecution.MaxTimeout), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
+		agent.Spec{Provider: implementor, Prompt: cfg.Implementor.Prompt, Tools: slices.Concat(local, messaging, deps.Implementor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit), Concurrent: readTools(local)},
+		agent.Spec{Provider: auditor, Prompt: cfg.Auditor.Prompt, Tools: slices.Concat(messaging, auditorLocal, deps.Auditor.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit), Concurrent: readTools(auditorLocal)}, deepOption, workflow.WithEvidenceLookup(s.lookupExecutionEvidence), autoAudit(cfg), auditBriefs(s, cfg, deps), workflow.WithProgressCurrent(func(actor identity.ActorID, id work.ID) (work.Work, error) {
 			return s.GetWork(context.Background(), actor, id)
-		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.progressReadTool(false)), tool.GetResearchBrief(s.progressReadTool(true))}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithResearcher(agent.Spec{Provider: researcher, Prompt: cfg.Researcher.Prompt, Tools: slices.Concat(researchReads, messaging, deps.Researcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}))
-	rootTools := s.workflow.RootTools()
-	for i, t := range rootTools {
+		}), workflow.WithProgressReporting(cfg.WorkProgressReporting), workflow.WithProgressTools([]tool.Tool{tool.GetWorkProgress(s.progressReadTool(false)), tool.GetBrief(s.progressReadTool(true)), tool.GetConclusion(s.conclusionReadTool)}), workflow.WithAdmission(s.admission), workflow.WithPublisher(s.publish), workflow.WithIDs(work.SeededIDs(cfg.Seed)), workflow.WithClock(deps.Clock), workflow.WithWebResearcher(agent.Spec{Provider: webResearcher, Prompt: cfg.WebResearcher.Prompt, Tools: slices.Concat(webTools, messaging, deps.WebResearcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit), Concurrent: []string{"web_search", "open_url"}}),
+		workflow.WithDeepResearcher(agent.Spec{Provider: deepResearcher, Prompt: cfg.DeepResearcher.Prompt, Tools: slices.Concat(messaging, deps.DeepResearcher.Tools), ReasoningLimit: uint64(cfg.ReasoningLimit)}),
+		workflow.WithExperimenter(experimenterSpec(cfg, experimenter, slices.Concat(experimenterLocal, messaging, deps.Experimenter.Tools)), methodFiles),
+		workflow.WithReviewer(reviewerSpec(cfg, reviewer, slices.Concat(reads, messaging, deps.Reviewer.Tools))))
+	// The harness assigns audits itself (workflow.WithAutoAudit), so the
+	// manager holds no tool to assign one.
+	coordination := slices.DeleteFunc(s.workflow.CoordinationTools(), func(t tool.Tool) bool { return !cfg.ManualAudits && t.Definition().Name == "assign_audit" })
+	for i, t := range coordination {
 		if t.Definition().Name == "wait_for_input" {
-			rootTools[i] = tool.WaitForInputWhen(s.rootMayWait)
+			coordination[i] = tool.WaitForInputWhen(s.managerMayWait)
 		}
 	}
-	rootSpec := agent.Spec{Provider: root, Prompt: cfg.Root.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), ReplyCheck: s.rootReplyCheck, Tools: slices.Concat(withoutWrites, rootTools, []tool.Tool{tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
+	listWork := tool.ListWork(func(ctx context.Context, c tool.Call, q work.ListQuery) (tool.Result, error) {
 		v, e := s.ListWork(ctx, c.Actor, q)
 		if e != nil {
 			return tool.Result{}, e
 		}
-		return tool.JSON(v)
-	})}, messaging, managementTools(s), deps.Root.Tools)}
-	_, err = c.CreateAgent(message.User, rootSpec)
-	if err != nil {
-		return nil, err
+		return modelJSON(v)
+	})
+	s.workflow.UseManager(agent.Spec{Provider: manager, Prompt: cfg.Manager.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), ReplyCheck: s.managerReplyCheck, Tools: slices.Concat(coordination, []tool.Tool{listWork}, messaging, agentControls(s, s.graph), agentReads(s, s.graph), deps.Manager.Tools)})
+	// A solo session's one agent holds every tool itself; the finish check
+	// reads the facts its writes and commands leave behind.
+	var soloSpec agent.Spec
+	if cfg.Solo {
+		s.finish = newFinishFacts(cfg.Dir, languages, scratch)
+		// The tester runs for a request that asks for it, or for every
+		// request with cfg.Tester; the finish check bounds its own holds.
+		testerModel, err := makeProvider(cfg.Agent, deps.Tester)
+		if err != nil {
+			return nil, err
+		}
+		s.finish.tester = &tester{provider: testerModel, dir: s.finish.dir, edits: cfg.FileEdits, limit: uint64(cfg.ReasoningLimit), budget: cfg.TesterBudgetOrDefault(), reportAll: cfg.TesterReportAll, publish: s.publish, recorded: deps.TesterRuns}
+		s.finish.always = cfg.Tester
+		// An unchecked change, the tester's failures, then the fix unchecked.
+		checks := 3
+		var tools []tool.Tool
+		for _, t := range slices.Concat(local, webTools, deps.Agent.Tools) {
+			tools = append(tools, factTool{Tool: t, facts: s.finish})
+		}
+		tools = append(tools, tool.UpdateTodos(s.updateTodos))
+		soloSpec = agent.Spec{Provider: solo, Prompt: cfg.Agent.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), ReplyCheck: s.finish.check, ReplyChecks: checks, Tools: tools, Concurrent: append(readTools(local), "web_search", "open_url")}
 	}
-	if err = s.workflow.RegisterRoot(); err != nil {
+	var debuggerSpec agent.Spec
+	if cfg.DebugToolkit {
+		debuggerSpec = agent.Spec{Provider: debugger, Prompt: cfg.Debugger.Prompt, ReasoningLimit: uint64(cfg.ReasoningLimit), Tools: slices.Concat(messaging, s.supervisorReads(), agentReads(s, s.graph), agentControls(s, s.graph), deps.Debugger.Tools)}
+	}
+	if err = s.bootstrap(ctx, soloSpec, debuggerSpec); err != nil {
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
 	implSpec, auditSpec := s.workflow.Specs()
-	s.effective = EffectiveConfig{DeepResearch: cfg.DeepResearch, LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, ResearchExecution: cfg.ResearchExecution, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Root: describeRole(cfg.roleModel(cfg.Root), rootSpec, injected(deps.Root)), Implementor: describeRole(cfg.roleModel(cfg.Implementor), implSpec, injected(deps.Implementor)), Auditor: describeRole(cfg.roleModel(cfg.Auditor), auditSpec, injected(deps.Auditor)), Researcher: describeRole(cfg.roleModel(cfg.Researcher), s.workflow.ResearcherSpec(), injected(deps.Researcher))}
+	s.effective = EffectiveConfig{DeepResearch: cfg.DeepResearch, LSP: describeLSP(cfg.LSP), ToolContractVersion: tool.InputContractVersion, WorkProgressReporting: cfg.WorkProgressReporting, Dir: cfg.Dir, LocalTools: cfg.LocalTools, FileEdits: cfg.FileEdits, Web: cfg.Web, DebugToolkit: cfg.DebugToolkit, ReasoningLimit: cfg.ReasoningLimit, Telemetry: cfg.Telemetry, Events: cfg.Events, Manager: describeRole(cfg.roleModel(cfg.Manager), s.workflow.ManagerSpec(), injected(deps.Manager)), Implementor: describeRole(cfg.roleModel(cfg.Implementor), implSpec, injected(deps.Implementor)), Auditor: describeRole(cfg.roleModel(cfg.Auditor), auditSpec, injected(deps.Auditor)), WebResearcher: describeRole(cfg.roleModel(cfg.WebResearcher), s.workflow.WebResearcherSpec(), injected(deps.WebResearcher))}
+	if cfg.LocalTools {
+		e := describeRole(cfg.roleModel(cfg.Experimenter), s.workflow.ExperimenterSpec(), injected(deps.Experimenter))
+		s.effective.Experimenter = &e
+		r := describeRole(cfg.roleModel(cfg.Reviewer), s.workflow.ReviewerSpec(), injected(deps.Reviewer))
+		s.effective.Reviewer = &r
+	}
+	if cfg.Solo {
+		a := describeRole(cfg.roleModel(cfg.Agent), soloSpec, injected(deps.Agent))
+		s.effective.Agent, s.effective.Tester = &a, cfg.Tester
+	}
+	if cfg.DebugToolkit {
+		d := describeRole(cfg.roleModel(cfg.Debugger), debuggerSpec, injected(deps.Debugger))
+		s.effective.Debugger = &d
+	}
 	if cfg.DeepResearch.Enabled {
-		deepModel := cfg.roleModel(cfg.Researcher)
+		d := describeRole(cfg.roleModel(cfg.DeepResearcher), s.workflow.DeepResearcherSpec(), injected(deps.DeepResearcher))
+		s.effective.DeepResearcher = &d
+		deepModel := cfg.roleModel(cfg.DeepResearcher)
 		if cfg.DeepResearch.Model != nil {
 			deepModel = *cfg.DeepResearch.Model
 		}
-		injectedDeep := deps.DeepResearchProvider != nil || cfg.DeepResearch.Model == nil && (deps.Researcher.Provider != nil || deps.Provider != nil) || cfg.DeepResearch.Model != nil && deps.Provider != nil
+		injectedDeep := deps.DeepResearchProvider != nil || cfg.DeepResearch.Model == nil && (deps.DeepResearcher.Provider != nil || deps.Provider != nil) || cfg.DeepResearch.Model != nil && deps.Provider != nil
 		s.effective.DeepResearch.Model = describeRole(deepModel, agent.Spec{}, injectedDeep).Model
 	} else {
 		// Unused configuration must not expose credentials either.
@@ -481,14 +715,101 @@ func New(ctx context.Context, cfg Config, deps Dependencies) (_ *Session, err er
 		s.log.Fail(err)
 		return nil, err
 	}
+	s.serverMetrics = startServerMetrics(s, cfg, deps)
 	s.mu.Lock()
 	s.stopOwner = context.AfterFunc(ctx, func() { s.startCloseReason("owner_cancelled") })
 	s.mu.Unlock()
 	return s, nil
 }
 
-func (s *Session) Config() Config         { return cloneConfig(s.config) }
-func (s *Session) Root() identity.ActorID { return s.controller.Root() }
+func (s *Session) Config() Config { return cloneConfig(s.config) }
+
+// bootstrap brings up a session's permanent agents, like a boot loader: the
+// manager, which the user talks to and which does everything that touches the
+// project, and in a debug session a debugger beside it. It is a deterministic
+// function, not an agent; it runs once, before any message, and is the only
+// code that creates either. Registering each one adds it to the topology graph
+// with the edges its role derives, and no agent can create, stop, pause or
+// resume them.
+func (s *Session) bootstrap(ctx context.Context, solo, debugger agent.Spec) error {
+	create := s.workflow.CreateManager
+	if solo.Provider != nil {
+		create = func(ctx context.Context) (identity.ActorID, error) { return s.workflow.CreateSolo(ctx, solo) }
+	}
+	manager, err := create(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.manager = manager
+	s.mu.Unlock()
+	if debugger.Provider != nil {
+		if _, err := s.workflow.CreateDebugger(ctx, debugger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// graph is the session's agent topology, owned by the workflow's registry.
+func (s *Session) graph() *roster.Graph {
+	if s.workflow == nil {
+		return nil
+	}
+	return s.workflow.Graph()
+}
+
+// Graph exposes the topology for inspection and tests.
+func (s *Session) Graph() *roster.Graph { return s.graph() }
+
+// route is the controller's delivery policy: a message needs the edge its kind
+// needs, and the user hears only replies. An agent once asked the user a
+// question with send_message in the middle of its turn, a second channel
+// alongside its reply.
+func (s *Session) route(from, to identity.ActorID, kind message.MessageKind) error {
+	g := s.graph()
+	if g == nil {
+		return nil
+	}
+	if to == message.User && kind != message.Reply {
+		return fmt.Errorf("%s cannot send the user a message; answer the user with a text reply", g.Describe(from))
+	}
+	// A final reply or failure answers whoever the agent works for; anything
+	// it starts is a message. The manager holds only a reply edge to the user,
+	// so it answers by replying and cannot also message the answer.
+	return g.Check(from, to, roster.EdgeFor(kind))
+}
+
+// resolveRole turns the role names send_message accepts into agent ids.
+func (s *Session) resolveRole(to identity.ActorID) identity.ActorID {
+	g := s.graph()
+	if g == nil {
+		return to
+	}
+	switch to {
+	case "manager":
+		return g.Find(roster.Manager)
+	case "debugger":
+		return g.Find(roster.Debugger)
+	}
+	return to
+}
+
+// Debugger returns the session's debugger, which the user talks to beside the
+// manager in a debug session, or "".
+func (s *Session) Debugger() identity.ActorID {
+	if g := s.graph(); g != nil {
+		return g.Find(roster.Debugger)
+	}
+	return ""
+}
+
+// Manager returns the session's manager, the agent the user talks to.
+func (s *Session) Manager() identity.ActorID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.manager
+}
 func (s *Session) Send(to identity.ActorID, text string) (message.Receipt, error) {
 	s.interactionMu.Lock()
 	defer s.interactionMu.Unlock()
@@ -576,11 +897,11 @@ func (s *Session) CountAgentTokens(ctx context.Context, id identity.ActorID, rev
 	return s.controller.CountAgentTokens(run, id, revision)
 }
 
-// rootMayWait rejects wait_for_input while the root owns no live work. Nothing
-// would arrive, and in ladder runs a root that ended a finished task this way
-// sat idle until the session budget expired. Listing problems never block a
-// wait; only a definite absence of live work does.
-func (s *Session) rootMayWait(ctx context.Context, c tool.Call) error {
+// managerMayWait rejects wait_for_input while the manager owns no live work.
+// Nothing would arrive, and in ladder runs a coordinator that ended a finished
+// task this way sat idle until the session budget expired. Listing problems
+// never block a wait; only a definite absence of live work does.
+func (s *Session) managerMayWait(ctx context.Context, c tool.Call) error {
 	page, err := s.ListWork(ctx, c.Actor, work.ListQuery{Limit: 100})
 	if err != nil {
 		return nil
@@ -618,13 +939,13 @@ func cloneConfig(c Config) Config {
 		m := cloneModel(*c.DeepResearch.Model)
 		c.DeepResearch.Model = &m
 	}
-	c.ResearchExecution.Env = slices.Clone(c.ResearchExecution.Env)
 	c.Model = cloneModel(c.Model)
+	c.Seed = slices.Clone(c.Seed)
 	if c.Web != nil {
 		v := *c.Web
 		c.Web = &v
 	}
-	for _, r := range []*AgentConfig{&c.Root, &c.Implementor, &c.Auditor, &c.Researcher} {
+	for _, r := range []*AgentConfig{&c.Agent, &c.Manager, &c.Debugger, &c.Implementor, &c.Auditor, &c.WebResearcher, &c.DeepResearcher, &c.Experimenter, &c.Reviewer} {
 		r.Prompt = r.Prompt.Clone()
 		if r.Model != nil {
 			v := cloneModel(*r.Model)

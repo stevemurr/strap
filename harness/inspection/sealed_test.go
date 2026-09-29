@@ -41,8 +41,8 @@ func sealedTrace(t *testing.T) (http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := string(s.Root())
-	if _, err := s.Send(s.Root(), "answer at length"); err != nil {
+	manager := string(s.Manager())
+	if _, err := s.Send(s.Manager(), "answer at length"); err != nil {
 		t.Fatal(err)
 	}
 	// Let the turn finish so the trace holds its tool call and full answer.
@@ -58,7 +58,7 @@ func sealedTrace(t *testing.T) (http.Handler, string) {
 		_ = reader.Close(ctx)
 		_ = s.Dispose(ctx)
 	})
-	return inspection.Handler(reader), root
+	return inspection.Handler(reader), manager
 }
 
 func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
@@ -71,7 +71,7 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 // A sealed session reports its outcome, and its recorded tool failures and
 // chunked output text are all readable from the archive.
 func TestSealedTraceReportsOutcomeFailuresAndChunkedText(t *testing.T) {
-	h, root := sealedTrace(t)
+	h, manager := sealedTrace(t)
 
 	session := decode[inspection.SessionView](t, get(t, h, "/"))
 	if session.Outcome == nil {
@@ -149,8 +149,8 @@ func TestSealedTraceReportsOutcomeFailuresAndChunkedText(t *testing.T) {
 	if w := get(t, h, fmt.Sprintf("%s?offset=%d", base, long.TextBytes+1<<20)); w.Code < 400 {
 		t.Fatal("read past the end of the recorded text", w.Code, w.Body.String())
 	}
-	// The root agent's own inspection still resolves from the archive.
-	if w := get(t, h, "/agents/"+root); w.Code != 200 {
+	// The manager's own inspection still resolves from the archive.
+	if w := get(t, h, "/agents/"+manager); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

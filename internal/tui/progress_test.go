@@ -80,9 +80,9 @@ func TestResearchDeliveryRendersMarkdown(t *testing.T) {
 	m.resize(120, 60)
 	m.entries = nil
 	m.observe(conversation.WorkEvent{Event: work.Event{
-		Kind: work.ResearchDelivered,
+		Kind: work.BriefDelivered,
 		Work: work.Work{ID: "research", Owner: "root", Assignee: "worker", State: work.Delivered},
-		Change: &work.Change{ResearchBriefs: []work.ResearchBrief{{
+		Change: &work.Change{Briefs: []work.Brief{{
 			ID: "brief", Summary: "## Findings\n\nThe behavior is **documented**.",
 			Recommendation: "Use the **supported API**.",
 			OpenQuestions:  []string{"- Check compatibility\n- Confirm performance"},
@@ -120,7 +120,7 @@ func TestResearchProgressShowsAttributedFindingsAndDistinctDelivery(t *testing.T
 	m, s := setup(t)
 	m.resize(140, 80)
 	m.entries = nil
-	e := work.Event{Kind: work.WorkProgressReported, Work: work.Work{ID: "w", Kind: work.Research, State: work.Active, Owner: "root", Assignee: "worker"}, Change: &work.Change{ProgressReports: []work.WorkProgressReport{{ID: "r", WorkID: "w", Position: &work.WorkPosition{Objective: "inspect", Uncertainty: "unverified"}, Findings: []work.ProgressFinding{{ID: "f", Basis: work.Inferred, Claim: "may fail", Limitation: "not tested"}}}}}}
+	e := work.Event{Kind: work.WorkProgressReported, Work: work.Work{ID: "w", Kind: work.WebResearch, State: work.Active, Owner: "root", Assignee: "worker"}, Change: &work.Change{ProgressReports: []work.WorkProgressReport{{ID: "r", WorkID: "w", Position: &work.WorkPosition{Objective: "inspect", Uncertainty: "unverified"}, Findings: []work.ProgressFinding{{ID: "f", Basis: work.Inferred, Claim: "may fail", Limitation: "not tested"}}}}}}
 	m.observe(conversation.WorkEvent{Event: e})
 	all := ansi.Strip(m.viewport.View())
 	if !strings.Contains(all, "inferred:") || !strings.Contains(all, "may fail") || !strings.Contains(all, "Limitation:") || !strings.Contains(all, "not tested") || !strings.Contains(all, "Uncertainty:") || !strings.Contains(all, "unverified") {

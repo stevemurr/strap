@@ -269,7 +269,7 @@ require tested versions and documented limitations.
 | --- | --- |
 | Call hierarchy | After navigation is qualified, add `lsp_calls` with incoming/outgoing directions, internal preparation, and retained opaque server data. |
 | Additional supported presets | Promote TypeScript and add Python after full workspace/routing/diagnostic fixtures pass; reuse the shared tools. |
-| Rename | Extend shared file mutation coordination, then add `lsp_rename` preview and `lsp_apply_edit` with retained patches and stale-base checks. Root/implementor only. |
+| Rename | Extend shared file mutation coordination, then add `lsp_rename` preview and `lsp_apply_edit` with retained patches and stale-base checks. Implementor only. |
 | Code actions | List/resolve edit-producing actions through the same preview/apply path; support command-backed actions only with explicit tested handling. |
 
 Do not delay read-only navigation for semantic mutation machinery. Conversely,

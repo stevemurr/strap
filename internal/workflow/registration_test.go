@@ -3,15 +3,16 @@ package workflow
 import (
 	"context"
 	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 type countingIdle struct{ calls atomic.Int32 }
@@ -24,7 +25,7 @@ func TestCreateAgentIdleRolesAndAssignmentHasNoRuntimeSideEffects(t *testing.T) 
 	ctx, s := recoverySession(t)
 	p := &countingIdle{}
 	s.implementor.Provider = p
-	impl, e := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Implementor})
+	impl, e := s.CreateAgent(ctx, coord(s), roster.CreateRequest{Role: roster.Implementor})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -32,32 +33,32 @@ func TestCreateAgentIdleRolesAndAssignmentHasNoRuntimeSideEffects(t *testing.T) 
 	if e != nil || info.State != agent.Idle || p.calls.Load() != 0 || len(s.Store.PendingEvents(0)) != 0 {
 		t.Fatal(info, e, p.calls.Load())
 	}
-	for _, role := range []roster.Role{"", roster.Root, "writer"} {
-		if _, e = s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: role}); !errors.Is(e, work.ErrInvalid) {
+	for _, role := range []roster.Role{"", roster.Manager, roster.Debugger, "writer"} {
+		if _, e = s.CreateAgent(ctx, coord(s), roster.CreateRequest{Role: role}); !errors.Is(e, work.ErrInvalid) {
 			t.Fatal(e)
 		}
 	}
 	if _, e = s.CreateAgent(ctx, impl.AgentID, roster.CreateRequest{Role: roster.Auditor}); !errors.Is(e, work.ErrForbidden) {
 		t.Fatal(e)
 	}
-	for _, assignee := range []identity.ActorID{"", s.Root(), "missing"} {
-		if _, e = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: assignee, Task: "task"}); !errors.Is(e, work.ErrInvalid) {
+	for _, assignee := range []identity.ActorID{"", coord(s), "missing"} {
+		if _, e = s.AssignWork(ctx, coord(s), work.AssignmentRequest{Kind: work.Implementation, Assignee: assignee, Task: "task"}); !errors.Is(e, work.ErrInvalid) {
 			t.Fatal(e)
 		}
 	}
-	if len(s.Agents()) != 2 {
+	if len(s.Agents()) != 2 { // Manager, the implementor.
 		t.Fatal("invalid operations created agents")
 	}
 	// Registration does not follow automatically from the low-level runtime API.
-	raw, e := s.Controller.CreateAgent(s.Root(), agent.Spec{Provider: idleProvider{}})
+	raw, e := s.Controller.CreateAgent(coord(s), agent.Spec{Provider: idleProvider{}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: raw.AgentID, Task: "task"}); !errors.Is(e, work.ErrInvalid) {
+	if _, e = s.AssignWork(ctx, coord(s), work.AssignmentRequest{Kind: work.Implementation, Assignee: raw.AgentID, Task: "task"}); !errors.Is(e, work.ErrInvalid) {
 		t.Fatal(e)
 	}
 	// Assignment failure must leave the already-created implementor available.
-	if _, e = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: impl.AgentID, Task: "task", Scope: &work.Scope{PlanID: "missing", StepIDs: []work.StepID{"missing"}}}); !errors.Is(e, work.ErrNotFound) {
+	if _, e = s.AssignWork(ctx, coord(s), work.AssignmentRequest{Kind: work.Implementation, Assignee: impl.AgentID, Task: "task", Scope: &work.Scope{PlanID: "missing", StepIDs: []work.StepID{"missing"}}}); !errors.Is(e, work.ErrNotFound) {
 		t.Fatal(e)
 	}
 	info, _ = s.Controller.InspectAgent(impl.AgentID, conversation.InspectOptions{})
@@ -74,7 +75,7 @@ func TestRegistrationPublicationFailureStopsUnregisteredRuntime(t *testing.T) {
 		return nil
 	}
 	ctx, s := publishedSession(t, publish)
-	if _, e := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Implementor}); !errors.Is(e, sentinel) {
+	if _, e := s.CreateAgent(ctx, coord(s), roster.CreateRequest{Role: roster.Implementor}); !errors.Is(e, sentinel) {
 		t.Fatal(e)
 	}
 	agents := s.Agents()
@@ -83,7 +84,7 @@ func TestRegistrationPublicationFailureStopsUnregisteredRuntime(t *testing.T) {
 	}
 	child := agents[1]
 	s.mu.Lock()
-	_, ok := s.roles[child.ID]
+	_, ok := s.graph.Registration(child.ID)
 	s.mu.Unlock()
 	if ok {
 		t.Fatal("failed registration became eligible")
@@ -113,7 +114,7 @@ func TestAssignmentWaitsForRegistrationPublication(t *testing.T) {
 	ctx, s := publishedSession(t, publish)
 	creation := make(chan error, 1)
 	go func() {
-		_, e := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Implementor})
+		_, e := s.CreateAgent(ctx, coord(s), roster.CreateRequest{Role: roster.Implementor})
 		creation <- e
 	}()
 	var id identity.ActorID
@@ -124,7 +125,7 @@ func TestAssignmentWaitsForRegistrationPublication(t *testing.T) {
 	}
 	assignment := make(chan error, 1)
 	go func() {
-		_, e := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: id, Task: "task"})
+		_, e := s.AssignWork(ctx, coord(s), work.AssignmentRequest{Kind: work.Implementation, Assignee: id, Task: "task"})
 		assignment <- e
 	}()
 	select {
@@ -141,15 +142,25 @@ func TestAssignmentWaitsForRegistrationPublication(t *testing.T) {
 	}
 }
 
+// publishedSession boots the manager with publish armed only after the
+// bootstrap, so the hook sees the registrations the test makes.
 func publishedSession(t *testing.T, publish func(conversation.Event) error) (context.Context, *Session) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	t.Cleanup(cancel)
 	c := conversation.New(ctx)
-	s := New(ctx, c, agent.Spec{Provider: idleProvider{}}, agent.Spec{Provider: idleProvider{}}, WithPublisher(publish))
-	if _, e := c.CreateAgent("user", agent.Spec{Provider: idleProvider{}}); e != nil {
+	var armed atomic.Bool
+	s := New(ctx, c, agent.Spec{Provider: idleProvider{}}, agent.Spec{Provider: idleProvider{}}, WithPublisher(func(e conversation.Event) error {
+		if !armed.Load() {
+			return nil
+		}
+		return publish(e)
+	}))
+	s.UseManager(agent.Spec{Provider: idleProvider{}})
+	if _, e := s.CreateManager(ctx); e != nil {
 		t.Fatal(e)
 	}
+	armed.Store(true)
 	t.Cleanup(func() {
 		if e := s.Close(context.Background()); e != nil {
 			t.Error(e)

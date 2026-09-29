@@ -11,7 +11,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 )
 
-// The shape every eval task ends in: the root has answered and every agent is
+// The shape every eval task ends in: the manager has answered and every agent is
 // parked on its inbox. Closing then is routine, so nothing in the recorded
 // stream may claim a failure. A reader that has to filter cancellation to tell
 // a finished task from a broken one cannot report either honestly.
@@ -30,7 +30,7 @@ func TestClosingIdleSessionRecordsNoCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	if _, err := s.Send(s.Root(), "hello"); err != nil {
+	if _, err := s.Send(s.Manager(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	for {

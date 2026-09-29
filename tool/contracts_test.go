@@ -106,7 +106,7 @@ func (failingSender) Send(context.Context, message.Draft) (message.Receipt, erro
 }
 func TestSenderAndLedgerToolCallbacks(t *testing.T) {
 	for _, sender := range []message.Sender{nil, failingSender{}} {
-		if _, err := SendMessage().Call(context.Background(), Call{Sender: sender, Arguments: json.RawMessage(`{"input":{"to":"agent","message":"hello"}}`)}); err == nil {
+		if _, err := SendMessage(nil).Call(context.Background(), Call{Sender: sender, Arguments: json.RawMessage(`{"input":{"to":"agent","message":"hello"}}`)}); err == nil {
 			t.Fatal("send failure lost")
 		}
 	}
@@ -117,12 +117,6 @@ func TestSenderAndLedgerToolCallbacks(t *testing.T) {
 		{GetWork(func(_ context.Context, _ Call, id work.ID) (Result, error) { return Text(string(id)), nil }), `{"input":{"work_id":"selected"}}`},
 		{GetPlan(func(_ context.Context, _ Call, id work.PlanID) (Result, error) { return Text(string(id)), nil }), `{"input":{"plan_id":"selected"}}`},
 		{GetAudit(func(_ context.Context, _ Call, id work.AuditID) (Result, error) { return Text(string(id)), nil }), `{"input":{"audit_id":"selected"}}`},
-		{ReassignWork(func(_ context.Context, _ Call, r work.ReassignRequest) (Result, error) {
-			if r.ExpectedRevision != 2 || r.Assignee != "new" {
-				t.Error(r)
-			}
-			return Text(string(r.ID)), nil
-		}), `{"input":{"work_id":"selected","expected_revision":2,"assignee":"new"}}`},
 		{assignmentTool(t, "assign_audit", func(_ context.Context, _ Call, r work.AssignmentRequest) (Result, error) {
 			if r.Kind != work.AuditWork || r.ExpectedRevision != 2 || r.SubmissionID != "sub" {
 				t.Error(r)

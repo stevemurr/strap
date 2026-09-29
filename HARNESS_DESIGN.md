@@ -27,7 +27,7 @@ The decision is recorded in
 
 ## Objective and boundaries
 
-One `harness.Session` is one independently running harness: root, delegated agents,
+One `harness.Session` is one independently running harness: its manager, delegated agents,
 history, work ledger, configuration, owned resources, and observation history.
 The same configuration and commands must follow the same runtime rules through a
 TUI, HTTP adapter, or direct Go caller. Model output, timing, and concurrent event
@@ -147,7 +147,7 @@ principals. Moving these callbacks verbatim into a public API would expose bypas
 and leave HTTP clients able to mistake request cancellation for rollback.
 
 Extract typed application operations used by both model tools and trusted host
-methods. Keep actor validation, root-only rules, provisioning, compensation,
+methods. Keep actor validation, manager-only rules, provisioning, compensation,
 revision checks, and dispatch in those shared operations. Transport authentication
 chooses an authorized host capability; an arbitrary body field does not grant one.
 Make ordinary user messaging distinct from trusted actor-attributed dispatch.
@@ -179,7 +179,7 @@ Do not hold the event-log lock while deep-copying large payloads for a reader.
 
 Scope sequences to a session identity; use agent identity plus tool/model call
 identity for correlation. Sequence order is publication order, not an atomic order
-of all state mutations. Capture the log before root creation so startup is visible.
+of all state mutations. Capture the log before the manager is created so startup is visible.
 Put common event/storage contracts below `harness` in the dependency graph, so
 storage implementations and harness assembly can share them without import cycles.
 
@@ -369,7 +369,7 @@ do not mutate or close process-global defaults.
 Session owns provider transport resource
   -> session-local connection pool
      -> provider HTTP client(s)
-        -> root / implementor / auditor providers
+        -> manager / researcher / implementor / auditor providers
         -> token counting
 ```
 
@@ -532,8 +532,8 @@ existing CLI defaults and behavior unless a correction is explicitly documented.
    domain contracts; the existing tool request name remains a compatible alias.
    [Operation tests](internal/workflow/operations_test.go) compare the complete
    audit/repair cycle through direct and tool calls, including replacement/cancel,
-   root-only restrictions, stale revisions, cancellation, and provisioning rollback.
-   Root-only plan editing is enforced at the operation boundary as well as by tool
+   manager-only restrictions, stale revisions, cancellation, and provisioning rollback.
+   Manager-only plan editing is enforced at the operation boundary as well as by tool
    selection. Empty replacement assignees serialize as omitted, matching automatic
    provisioning. Stage 3 adds session-wide admission/close coordination.
 2. **Public session assembly — implemented.** Move role prompts, provider resolution, local-tool
@@ -597,7 +597,7 @@ internal interfaces, numeric defaults, and indexing mechanics can be chosen in
 the relevant vertical slice without changing these contracts. Constructor errors
 need an explicit cleanup-handle shape; it can be a typed error implementing a
 documented cleanup interface. Successful construction still returns one fully
-assembled session with an idle root.
+assembled session with an idle manager (and, in a debug session, an idle debugger).
 
 The first version deliberately does not promise bounded total runtime memory,
 exact execution replay, automatic mutation retries, a general permission system,
@@ -676,17 +676,18 @@ encoding out of agent execution and conversation routing.
 
 ## Explicit agents and work (implemented)
 
-`Session.CreateAgent(ctx, actor, roster.CreateRequest)` is root-only and records an
+`Session.CreateAgent(ctx, actor, roster.CreateRequest)` is manager-only and records an
 idle role registration before returning. The previous raw parent/spec harness API
 and HTTP AgentProfile resolver are removed. Raw controller creation remains below
 the application boundary. Assignment and reassignment require existing eligible
 assignees; neither creates or stops agents. Failed audits record immutable findings;
-the root explicitly starts repair with `assign_repair(...)`.
+the manager explicitly starts repair with `assign_repair(...)`, and every audit
+goes to a new auditor.
 
 The application agent views live in `harness/projection`, with aliases exported by
 `harness`, so inspection does not import its parent package. Live, model, HTTP,
 archive, and terminal views use those recorded roles. `Session.ListWork` delegates
-to the read-only inspection reader: root-only, all states by default, fixed-prefix
+to the read-only inspection reader: manager-only, all states by default, fixed-prefix
 pagination, 20 default/100 maximum summaries, and 240 Unicode characters per task
 preview. Creation/assignment/reassignment use shared pure tool decoders in the HTTP
 adapter, keeping presence-sensitive validation separate from typed Go semantics.

@@ -2,7 +2,6 @@ package harness_test
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
@@ -15,41 +14,32 @@ import (
 func TestResearcherCreationAndConfiguration(t *testing.T) {
 	ctx := context.Background()
 	cfg := testConfig(t, true)
-	cfg.Researcher.Prompt.Role = "Independent research configuration"
+	cfg.WebResearcher.Prompt.Role = "Independent research configuration"
 	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(ctx)
-	id := createWorker(t, s, roster.Researcher)
+	id := createWorker(t, s, roster.WebResearcher)
 	got, err := s.InspectAgent(id, conversation.InspectOptions{})
-	if err != nil || got.Role != roster.Researcher || got.State != agent.Idle {
+	if err != nil || got.Role != roster.WebResearcher || got.State != agent.Idle {
 		t.Fatal(got, err)
 	}
-	effective := s.Configuration().Researcher
-	if effective.Prompt.Role != cfg.Researcher.Prompt.Role || !effective.InjectedProvider {
+	effective := s.Configuration().WebResearcher
+	if effective.Prompt.Role != cfg.WebResearcher.Prompt.Role || !effective.InjectedProvider {
 		t.Fatal(effective)
 	}
-	foundShell := false
+	// Researchers read: the shell writes as easily as write_file, and deep
+	// research belongs to the deep researcher.
 	for _, tool := range effective.Tools {
-		if tool.Name == "shell" {
-			foundShell = true
-			var params map[string]any
-			if err := json.Unmarshal(tool.Parameters, &params); err != nil {
-				t.Fatal(err)
-			}
-			raw := string(tool.Parameters)
-			if strings.Contains(raw, "assigned_at_revision") || !strings.Contains(raw, "work_id") || !strings.Contains(raw, "60000") {
-				t.Fatal(raw)
-			}
-		}
 		switch tool.Name {
-		case "write_file", "edit_file", "assign_implementation", "assign_audit", "assign_repair", "assign_research", "submit_work", "submit_audit":
-			t.Fatalf("researcher received %s", tool.Name)
+		case "shell", "write_file", "edit_file", "deep_research", "get_research_run", "assign_task", "assign_audit", "assign_repair", "submit_work", "submit_audit":
+			t.Fatalf("web researcher received %s", tool.Name)
 		}
 	}
-	if !foundShell {
-		t.Fatal("researcher diagnostic shell missing")
+	// Without the web there is no deep research to create a researcher for.
+	if _, err = s.CreateAgent(ctx, s.Manager(), roster.CreateRequest{Role: roster.DeepResearcher}); err == nil || !strings.Contains(err.Error(), "use a web_researcher") {
+		t.Fatal(err)
 	}
 }
 
@@ -61,32 +51,16 @@ func TestResearchAssignmentAndListing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Dispose(ctx)
-	id := createWorker(t, s, roster.Researcher)
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Research, Assignee: id, Task: "Inspect requirements"})
+	id := createWorker(t, s, roster.WebResearcher)
+	w, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.WebResearch, Assignee: id, Task: "Inspect requirements"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.ListWork(ctx, s.Root(), work.ListQuery{Kind: work.Research})
+	page, err := s.ListWork(ctx, s.Manager(), work.ListQuery{Kind: work.WebResearch})
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != w.ID {
 		t.Fatal(page, err)
 	}
-	if _, err = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: id, Task: "Change code"}); err == nil {
+	if _, err = s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: id, Task: "Change code"}); err == nil {
 		t.Fatal("researcher received implementation")
-	}
-}
-
-func TestResearchExecutionConfigurationIsDetached(t *testing.T) {
-	cfg := testConfig(t, false)
-	cfg.ResearchExecution.Env = []string{"RESEARCH_VALUE=original"}
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ready")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Dispose(context.Background())
-	cfg.ResearchExecution.Env[0] = "RESEARCH_VALUE=caller"
-	snapshot := s.Configuration()
-	snapshot.ResearchExecution.Env[0] = "RESEARCH_VALUE=reader"
-	if got := s.Configuration().ResearchExecution.Env[0]; got != "RESEARCH_VALUE=original" {
-		t.Fatal(got)
 	}
 }

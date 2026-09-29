@@ -53,7 +53,7 @@ The schema regression family now exercises wrong operation fields, missing
 required bindings, removed selectors and tool names, null-valued extra fields,
 pass/fail finding constraints, and misplaced progress objectives. Scripted cases
 force the known malformed request followed by a corrected request; live cases
-measure avoidance or recovery with one real actor in the root, auditor, or
+measure avoidance or recovery with one real actor in the manager, auditor, or
 implementor role. Each uses that role's production tool catalog and dispatcher.
 
 The schema oracle uses an independent JSON Schema validator against the captured

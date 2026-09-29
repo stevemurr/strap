@@ -20,6 +20,7 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 			defer cancel()
 			cfg := harness.DefaultConfig()
 			cfg.Dir, cfg.Web, cfg.LocalTools = t.TempDir(), nil, false
+			cfg.ManualAudits, cfg.AuditBrief = true, false // As the runner: the scenarios measure the manager assigning audits.
 			cfg.Telemetry.ContextTokens = false
 			s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: idleProvider{}})
 			if err != nil {
@@ -34,7 +35,7 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 				t.Fatalf("incomplete schema fixture: %+v", f)
 			}
 			configuration := s.Configuration()
-			catalog := configuration.Root.Tools
+			catalog := configuration.Manager.Tools
 			switch f.Schema.Role {
 			case roster.Auditor:
 				catalog = configuration.Auditor.Tools
@@ -50,8 +51,8 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 				if f.Schema.Actor != f.Implementor || f.Original.State != work.Active || f.Submission.ID != "" || f.Original.LatestProgressReportID != "" {
 					t.Fatalf("progress fixture must start with an active unreported assignment: %+v", f)
 				}
-			case roster.Root:
-				if f.Schema.Actor != f.Root || f.Original.State != work.NeedsCheck || f.Submission.ID == "" || f.PreviousSubmission == "" {
+			case roster.Manager:
+				if f.Schema.Actor != f.Coordinator || f.Original.State != work.NeedsCheck || f.Submission.ID == "" || f.PreviousSubmission == "" {
 					t.Fatalf("assignment fixture must retain its replacement submission: %+v", f)
 				}
 			}
@@ -68,7 +69,7 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 			// actual seeded state, not just syntactically valid. The runnable trials
 			// separately send both calls through the actor's production dispatcher.
 			switch f.Schema.Role {
-			case roster.Root:
+			case roster.Manager:
 				request, err := tool.DecodeAssignment(good.Name, good.Arguments)
 				if err != nil {
 					t.Fatal(err)
@@ -86,11 +87,11 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 				if err != nil || audit.WorkID != f.Schema.Target.ID || audit.SubmissionID != f.Submission.ID || audit.Verdict != f.Schema.Verdict {
 					t.Fatalf("corrected verdict must apply to assigned submission: %+v, %v", audit, err)
 				}
-				original, err := s.GetWork(ctx, f.Root, f.Original.ID)
+				original, err := s.GetWork(ctx, f.Coordinator, f.Original.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				plan, err := s.GetPlan(ctx, f.Root, f.Plan.ID)
+				plan, err := s.GetPlan(ctx, f.Coordinator, f.Plan.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -113,11 +114,11 @@ func TestSchemaFixturesProduceInvalidProbeAndExecutableCorrection(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				report, err := s.GetWorkProgressReport(ctx, f.Root, receipt.ReportID)
+				report, err := s.GetWorkProgressReport(ctx, f.Coordinator, receipt.ReportID)
 				if err != nil || report.Position == nil || !reflect.DeepEqual(*report.Position, f.Schema.ExpectedPosition) || report.WorkRevision != f.Original.Revision+1 || report.AssignedAtRevision != f.Original.AssignedAtRevision {
 					t.Fatalf("corrected progress must preserve assignment and objective: %+v, %v", report, err)
 				}
-				plan, err := s.GetPlan(ctx, f.Root, f.Plan.ID)
+				plan, err := s.GetPlan(ctx, f.Coordinator, f.Plan.ID)
 				if err != nil || !reflect.DeepEqual(plan, f.Plan) {
 					t.Fatalf("progress fixture must leave the plan unchanged: %+v, %v", plan, err)
 				}

@@ -1,8 +1,9 @@
 # Strap
 
-A small Go core for a persistent root agent, delegated agents, routed messages,
+A small Go core for a persistent manager agent, delegated agents, routed messages,
 and model interaction, with shared plans and an implementation/audit/repair cycle.
-The same agent loop serves the root and every child.
+The user talks to the manager directly; the same agent loop serves the manager
+and every worker.
 
 ## Install
 
@@ -171,7 +172,7 @@ nullable fields use explicit null rather than omission. The provider sends
 function.strict for every tool, including dynamically registered tools. There are
 no selective strictness flags. Validate the full toolset against the serving
 backend before deploying a schema or backend change. See [the input contract](docs/tool-input-contract.md).
-The same immutable provider settings apply to the root, implementors, and auditors.
+The same immutable provider settings apply to the manager and every worker role.
 
 The vLLM adapter targets the generation fields exposed by vLLM 0.25.0, including
 `chat_template_kwargs.enable_thinking`, Qwen's `chat_template_kwargs.reasoning_effort`,
@@ -181,19 +182,23 @@ output/context limits remain visible server errors, with no automatic retry or
 parameter substitution. Reasoning-history preservation is not implemented.
 
 Shell and file tools run in the current directory, or the directory selected with
-`-C /path/to/project`. The CLI enables them for the root and implementors. Auditors have a separate
-prompt and omit the write/edit-file tools; shell access still has host permissions.
+`-C /path/to/project`. Implementors get the full set. Reviewers read without a shell or write
+tools. The manager and the web and deep researchers get no file tools: a question about the
+workspace goes to a reviewer. Auditors and experimenters get the shell and file tools on their own copy
+of the workspace, made when an assignment first uses them and removed when it ends; paths naming
+the workspace are rewritten to the copy, so nothing they change reaches the workspace. Shell
+access still has host permissions.
 The CLI also provides `read_pdf`; see the PDF example below for its image-model
 and Poppler requirements.
-`web_search` and `open_url` are enabled for all four agent roles; see
+`web_search` and `open_url` are given to web and deep researchers only; see
 [Web research](#web-research) for their browser dependencies. Use `-web=false`
 to omit them. Missing backends produce a tool error when called; startup does not
 launch a browser.
 Commands run with host permissions, without a sandbox or approval prompt.
 
 Type a message and press Enter. Input stays available while agents work and always
-addresses Strap's root, regardless of which agent you are watching. The root's
-live stream opens by default. At 40 columns by 18 rows or larger, compact
+addresses Strap's manager, regardless of which agent you are watching. The
+manager's live stream opens by default. At 40 columns by 18 rows or larger, compact
 agent icons occupy a strip above the full-width conversation and composer.
 The chips form the entire header, followed by a separator and the conversation.
 The header starts at two rows and wraps when the terminal has room to show the team.
@@ -202,12 +207,12 @@ The icon configuration and accent color stay tied to the agent across chips,
 message dots, and tool calls; previews do not animate. The selected chip and
 working indicator use stronger accents, and the send button lights up for a draft.
 Agents are grouped by attention needed, working, idle, inactive, and completed,
-in discovery order within each group, without separate group headings. Root has
-its own status chip beside All activity. Completed work is
+in discovery order within each group, without separate group headings. The manager
+has its own status chip beside All activity. Completed work is
 expanded by default; idle agents with unfinished work remain visible.
 Work awaiting review or blocked work remains distinct from an agent being idle;
 `!` also flags execution errors. Agent previews show role, execution state,
-parent, and the last context measurement; the root preview includes the model
+parent, and the last context measurement; the manager preview includes the model
 and endpoint. Current activity and error/blocker details remain available there.
 Unknown counts remain explicit.
 
@@ -222,7 +227,7 @@ In smaller terminals, F6 opens a compact list in place of the transcript.
 Select the Completed heading and press Enter, or press `c` anywhere in the
 focused stacks or list, to expand or collapse it.
 Clicking its disclosure does the same. `/focus [id]` selects
-a live stream, `/focus root` returns to root, and `/focus all` shows All activity.
+a live stream, `/focus manager` returns to the manager, and `/focus all` shows All activity.
 Viewing a stream never pauses an agent, changes its context, or redirects input.
 
 Plans stay in a dock above the composer while the conversation scrolls. The dock
@@ -241,8 +246,8 @@ dock to a summary so the composer and conversation remain usable.
 Each stream remembers its own scroll position. Output arriving above the text you
 are reading preserves the current message anchor. Unread counts track changed
 message/tool rows, so a streaming paragraph counts once rather than once per token.
-Ctrl-End returns to live output and marks the selected stream read. Root's stream
-includes messages routed to or from root; a child's unaddressed live output and
+Ctrl-End returns to live output and marks the selected stream read. The manager's
+stream includes messages routed to or from the manager; a child's unaddressed live output and
 tools stay in that child's stream and All activity. `/transcript [id]` remains
 the separate model-history inspector.
 
@@ -369,7 +374,7 @@ Tab inserts four spaces outside command and file completion. Slash commands run 
 a single-line draft, so pasted multiline text beginning with `/` is sent as a
 message. Leading indentation and trailing newlines are preserved when sending.
 
-The shaded composer always sends to Strap (root), regardless of the stream being
+The shaded composer always sends to Strap's manager, regardless of the stream being
 viewed. It grows with the draft, has a clickable send arrow, and shows brief
 shortcut hints while typing. Operational status stays with the activity above.
 Type `/` to reveal commands; there is no permanent command toolbar.
@@ -383,25 +388,25 @@ Type `/` to reveal commands; there is no permanent command toolbar.
 | Tab / Escape | Complete / dismiss suggestions; Tab otherwise inserts four spaces |
 | Escape (live conversation) | Cancel in-flight work through `/stop`, keeping the conversation and draft; open menus or previews dismiss first |
 | F6 | Focus the agent stacks (compact list on small terminals) / return to the composer |
-| F7 | Focus activity folds / return to the root composer |
+| F7 | Focus activity folds / return to the manager composer |
 | Up / Down, then Enter (folds focused) | Select and expand a group or tool result |
 | Click a disclosure triangle | Expand / collapse an activity group or tool result |
 | Click ↑ in the composer | Send the draft through the same path as Enter |
 | Arrows or Tab / Shift-Tab, then Enter (agents focused) | Preview an agent, then open its stream and return to composing |
 | Hover an agent chip / click it | Preview status / open its stream |
-| `/focus [id\|root\|all]` | Watch an agent's live stream or All activity; defaults to root |
+| `/focus [id\|manager\|all]` | Watch an agent's live stream or All activity; defaults to the manager |
 | Mouse wheel / trackpad / Page Up / Page Down | Scroll the transcript |
 | Ctrl-Home / Ctrl-End | Jump to the beginning / end |
 | F2 | Freeze / resume display updates for copying |
 | Mouse drag, then release | Select and copy visible text to the clipboard |
 | F2, then mouse drag + terminal Copy | Select and copy visible text |
 | `/agents` | Show per-agent state, context tokens, last output, and output cap |
-| `/inspect [id]` | Inspect agent state; defaults to root |
-| `/transcript [id]` | Browse an agent’s actual conversation; defaults to root |
-| `/pause [id]` | Pause at an operation boundary; defaults to root |
-| `/resume [id]` | Resume a paused agent; defaults to root |
+| `/inspect [id]` | Inspect agent state; defaults to the manager |
+| `/transcript [id]` | Browse an agent’s actual conversation; defaults to the manager |
+| `/pause [id]` | Pause at an operation boundary; defaults to the manager |
+| `/resume [id]` | Resume a paused agent; defaults to the manager |
 | `/stop` | Interrupt current work across all agents; keep the conversation |
-| `/terminate [id]` | Permanently stop an agent; defaults to root |
+| `/terminate [id]` | Permanently stop an agent; defaults to the manager |
 | `/clear` | Clear the display, keeping conversation context |
 | `/help` | Show commands |
 | `/quit`, Ctrl-C, Ctrl-D | Cancel the conversation and exit |
@@ -422,7 +427,7 @@ images display metadata rather than binary data. Browsing does not send messages
 or call a model. Agents and the main conversation continue running in the background.
 The main input draft and scroll position are preserved.
 
-Sessions live in memory. If the root exits after a provider error, restart the
+Sessions live in memory. If the manager exits after a provider error, restart the
 CLI to begin a new conversation.
 
 Requires Go 1.24 or later. The terminal UI uses Bubble Tea; the conversation core
@@ -493,18 +498,18 @@ The CLI exposes tools according to each agent’s role:
 
 | Tool | Contract |
 |---|---|
-| `create_plan` | Root creates the shared plan once, with nested initial steps |
-| `add_step` / `edit_step` / `cancel_steps` / `reorder_steps` / `rename_plan` | Root changes one plan or one step per call using the plan revision; step status is never set here |
+| `create_plan` | The manager creates the shared plan once, with nested initial steps |
+| `add_step` / `edit_step` / `cancel_steps` / `reorder_steps` / `rename_plan` | The manager changes one plan or one step per call using the plan revision; step status is never set here |
 | `report_work_progress` | Current worker reports a full position, findings, or eligible scoped steps using an explicit work ID |
-| `create_agent` | Root creates an idle registered `researcher`, `implementor`, or `auditor`; no task starts |
-| `assign_implementation` / `assign_research` | Assign a bounded task to an existing eligible `assignee`; only implementation accepts optional plan scope |
+| `create_agent` | The manager creates an idle registered `reviewer`, `web_researcher`, `deep_researcher`, `experimenter`, `implementor`, or `auditor`; no task starts; every audit needs a new auditor |
+| `assign_task` | Assign new work; `kind` (`implementation`, `review`, `web_research`, `deep_research`, `experiment`) names the work and the role that does it; `assignee` is an idle agent of that role, or null to create one; nullable plan scope |
 | `assign_audit` / `assign_repair` | Assign review using the original work/revision/submission, or repair using the original work/revision/failed audit |
-| `list_work` | Root discovers work in all states; optional assignee/kind/state filters, default 20 results, max 100, fixed-prefix continuation cursor |
+| `list_work` | The manager discovers work in all states; optional assignee/kind/state filters, default 20 results, max 100, fixed-prefix continuation cursor |
 | `get_plan` / `get_work` | Read current authorized snapshots, scoped steps, and available submission/repair findings |
 | `get_audit` | Read an immutable verdict, summary, and findings using the event's `audit_id` |
 | `submit_work` | Implementor or repair actor submits an outcome for review |
 | `submit_audit` | Auditor records immutable pass/fail; failure requests changes and waits for explicit repair assignment |
-| `reassign_work` / `cancel_work` | Owner recovery; reassignment requires an existing eligible assignee and never creates or stops agents |
+| `cancel_work` | Owner recovery: cancel the work, then assign it again to a new or existing eligible agent |
 
 Implementors receive progress/read tools and `submit_work`. Auditors receive
 work reporting/read tools and `submit_audit`. They cannot provision arbitrary agents or
@@ -514,7 +519,7 @@ verification; it does not produce a failing verdict.
 Steps move through `pending`, `in_progress`, `blocked`, `ready_for_review`,
 `completed`, or `cancelled`. The implementor reports readiness; only an audit can
 complete delegated steps. Text replies and delivery receipts do not imply submission
-or acceptance. The root receives actionable review/blocker events; ordinary progress
+or acceptance. The manager receives actionable review/blocker events; ordinary progress
 updates its context without initiating a model call by itself.
 
 ## Library setup
@@ -531,7 +536,7 @@ if err != nil {
     return err
 }
 defer session.Close(context.Background())
-_, err = session.Send(session.Root(), "Inspect this project.")
+_, err = session.Send(session.Manager(), "Inspect this project.")
 ```
 
 Import `github.com/stevemurr/strap/harness`. `Dependencies` accepts borrowed
@@ -551,7 +556,7 @@ default 192 KB) cancels a model call that streams more reasoning than that
 without acting and retries it once with a notice; a second overrun ends the
 agent. Zero disables the limit. `Inspect()` includes capture coverage and health.
 
-For evals, choose a completion rule explicitly: a root reply, idle agent, consumed
+For evals, choose a completion rule explicitly: a manager reply, idle agent, consumed
 receipt, accepted work, and closed session are different facts. Grade the domain
 result, call `Close` to finalize evidence, inspect capture health and
 the accepted head, then `Dispose` after reading. Current capture includes
@@ -581,14 +586,14 @@ The public `work` package can be used independently of agents and transport:
 ```go
 store := work.New()
 title, stepTitle := "Storage", "Propagate write errors"
-plan, err := store.UpdatePlan("root", work.PlanUpdate{
+plan, err := store.UpdatePlan("manager", work.PlanUpdate{
     Title: &title,
     Steps: []work.StepEdit{{Title: &stepTitle}},
 })
 if err != nil {
     return err
 }
-assigned, err := store.AssignWork("root", work.AssignRequest{
+assigned, err := store.AssignWork("manager", work.AssignRequest{
     Assignee: "implementor",
     Task: "Implement and verify storage error handling.",
     Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}},
@@ -619,7 +624,7 @@ accepted session log for delivery observations, so work continues without a UI r
 uses the runtime-bound `Sender`.
 
 Tracked delegation uses `create_agent({input:{role:"implementor"}})`, followed by
-`assign_implementation({input:{assignee:agent_id,task:"...",context:null,expected_output:null,scope:null}})`. Choose `auditor`
+`assign_task({input:{kind:"implementation",assignee:agent_id,task:"...",context:null,expected_output:null,scope:null}})`; a null assignee creates the kind's agent in the same call. Choose `auditor`
 for independent review; implementors also handle repairs. Roles are immutable.
 `harness.Session.CreateAgent(ctx, actor, roster.CreateRequest)` uses the same path.
 The controller's raw `CreateAgent(parent, spec)` remains a work-independent runtime
@@ -670,8 +675,9 @@ The underlying transcript remains intact, including prior inspection results.
 
 `ListAgents` accepts `func(context.Context, tool.Call) (tool.Result, error)`.
 See [harness/agents.go](harness/agents.go) for application wiring. These tools
-are selected only for the CLI root. Execution agents still have local and messaging
-tools. Host controls are available for every agent, including a paused root.
+are selected for the manager (over its workers) and, in debug sessions, the debugger.
+Workers still have local and messaging tools. Host controls are available for every
+agent, including a paused manager.
 
 The controller's `PauseAgent`, `ResumeAgent`, and `StopAgent` return
 `(AgentInfo, error)`. `AgentInfo` contains `agent_id`, `parent`, and `state`.
@@ -748,14 +754,16 @@ does not stop its children; conversation close cancels and joins every agent.
 
 ## Web research
 
-Multi-source investigations are enabled by default with `go run ./cmd/strap`.
-The root assigns a researcher, which calls `deep_research` to plan, search, read,
-verify claims and retain a run. The root remains available during the run and
-reads the researcher's delivered brief; only the researcher reads runs, through
-`get_research_run` bounded run/source pages. Cancellation and reassignment
-retain a partial run under the original assignment. This uses
-the web dependencies below. Disable it with `-deep-research=false`; `-web=false`
-also disables deep research. See
+External questions go to a `web_researcher`, which answers them with
+`web_search` and `open_url`. Deep research runs only when the user explicitly
+asks for it: the manager then creates a `deep_researcher`, the only role with
+`deep_research`, which plans, searches, reads, verifies claims and retains a
+run. The manager remains available during the run and reads the delivered
+brief; only the deep researcher reads runs, through `get_research_run` bounded
+run/source pages. Cancellation and reassignment retain a partial run under the
+original assignment. The `deep_researcher` role is offered by default with
+`go run ./cmd/strap`; `-deep-research=false` or `-web=false` withdraws it. See
+[investigation roles](docs/architecture/INVESTIGATION_ROLES_DESIGN.md) and
 [deep research configuration and evaluation](docs/architecture/DEEP_RESEARCH_IMPLEMENTATION.md).
 
 `web_search` queries the [Tavily](https://tavily.com) search API and returns
@@ -1038,7 +1046,7 @@ are deferred. There is no behavior framework, permission stack, workspace
 model, or configurable workflow engine. Work revisions validate ledger mutations;
 they do not gate general model responses or local-tool execution.
 
-The root's delegation role is expressed through its instructions and supplied
+The manager's delegation role is expressed through its instructions and supplied
 tools. Publication and storage read buffers are bounded; agent histories and
 outstanding domain work remain in memory. Models and tools must
 honor cancellation and be safe for concurrent use if shared between agents.
@@ -1065,23 +1073,35 @@ keep their own formats.
 
 ## Research and recorded progress
 
-`create_agent` supports `researcher`, `implementor`, and `auditor`. Creation is
-idle; the appropriate `assign_implementation`, `assign_research`, `assign_audit`,
-or `assign_repair` tool starts an assignment. Research takes a bounded question,
-context and expected output without plan scope. `submit_research` stores an
-immutable brief and moves research to `delivered`. Implementation and repair
+`create_agent` supports `reviewer`, `web_researcher`, `deep_researcher`, `experimenter`, `implementor`, and `auditor`. Creation is
+idle; `assign_task`, `assign_audit` or `assign_repair` starts an assignment. `assign_task`'s
+`kind` names the work and its role: `review` (reviewer, files on this machine), `web_research`
+(web researcher), `deep_research` (deep researcher), `experiment` (experimenter) or
+`implementation` (implementor). Review and research take a bounded question, context, expected
+output and an optional plan scope. Delivering a scoped brief or experiment completes its
+plan steps, as audit acceptance completes implementation's. `submit_brief` stores an
+immutable brief and moves the review or research to `delivered`. An experiment takes a problem
+about how the code behaves: the experimenter pre-registers hypotheses with
+`record_hypothesis`, measures in its copy of the workspace (`run_trials` repeats a
+command and times it), records each verdict with `record_result` citing runs made
+after the hypothesis, and delivers with `submit_experiment`, which stores an immutable
+conclusion with the method's files and moves the experiment to `delivered`; any agent
+reads it with `get_conclusion`. See [investigation roles](docs/architecture/INVESTIGATION_ROLES_DESIGN.md). Implementation and repair
 still use `submit_work` and require independent audit for acceptance.
 
-| Surface | Root | Researcher | Implementor | Auditor |
-| --- | --- | --- | --- | --- |
-| `get_work`, `get_plan`, `get_audit`, `get_work_progress`, `get_research_brief` | Yes | Yes | Yes | Yes |
-| `report_work_progress` | — | Yes | Yes | Yes |
-| `update_plan`, create/assign/reassign/cancel work | Yes | — | — | — |
-| `submit_research` / `submit_work` / `submit_audit` | — | Research | Work | Audit |
-| `wait_for_input` | Yes | Yes | — | — |
-| Local shell | Standard | Assignment-bound diagnostic | Standard | Standard |
-| File editing | Yes | — | Yes | — |
-| Messaging and configured file/PDF/web reads | Yes | Yes | Yes | Yes |
+| Surface | Manager | Reviewer, web/deep researcher | Experimenter | Implementor | Auditor |
+| --- | --- | --- | --- | --- | --- |
+| `get_work`, `get_plan`, `get_audit`, `get_work_progress`, `get_brief`, `get_conclusion` | Yes | Yes | Yes | Yes | Yes |
+| `report_work_progress` | — | Yes | Yes | Yes | Yes |
+| `update_plan`, create/assign/cancel work | Yes | — | — | — | — |
+| `submit_brief` / `submit_experiment` / `submit_work` / `submit_audit` | — | Brief | Experiment | Work | Audit |
+| `record_hypothesis`, `record_result`, `run_trials` | — | — | Yes | — | — |
+| `wait_for_input` | Yes | Yes | Yes | — | — |
+| Local shell | — | — | Own copy | Workspace | Own copy |
+| File editing | — | — | Own copy | Workspace | Own copy |
+| Messaging | Yes | Yes | Yes | Yes | Yes |
+| File/PDF and language reads | — | Reviewer only | Own copy | Workspace | Own copy |
+| `web_search`, `open_url` | — | Web researcher only | — | — | — |
 
 Worker progress requires explicit `work_id`; its assignment binding is read from
 the work. Other work mutations also require the current `expected_revision`. A supplied `position` replaces the entire prior position;
@@ -1099,17 +1119,15 @@ ordinary tool continuations. Runtime waiting and reported blockers remain distin
 
 Every new exchange begins with a harness-computed state block, appended to the
 agent's history after the queued inputs and before the first model call. The
-root sees its plans with live steps, statuses and reservations, plus its owned
+manager sees its plans with live steps, statuses and reservations, plus its owned
 work with assignees and latest submission, audit and brief ids; a worker sees its
 assignments with work and assignment revisions and scoped step statuses. The
 block is read from the accepted log at wake time, so it is never stale, and the
 model cannot write a guessed id into it. Agents with nothing owned or assigned
 receive no block.
 
-Research diagnostics use a separate shell configured by `ResearchExecution`
-(default 30 seconds, maximum 60 seconds, 16 KiB retained output). Every command
-requires an explicit work/assignment binding; a later reassignment cannot relabel
-its evidence. These are execution bounds, not a read-only sandbox. Host-issued
+An implementor's or auditor's shell run is bound to the worker's sole active
+assignment; a later reassignment cannot relabel its evidence. Host-issued
 `evidence_ref` receipts follow accepted finish records, including failed/cancelled
 outcomes and partial captures. Findings may cite prior-assignment evidence from
 the same work, preserving attribution; unknown and cross-work execution references
@@ -1117,13 +1135,13 @@ are rejected. Large model receipts direct the reader to the complete retained
 capture; bytes discarded by the shell are not recoverable.
 
 `get_work_progress` reads current progress, reports, findings or execution evidence.
-`get_research_brief` reads brief records. Both use bounded fixed-prefix pages and
+`get_brief` reads brief records. Both use bounded fixed-prefix pages and
 signed cursors, with current live authorization checked on every continuation.
 The live HTTP equivalents are `/sessions/{id}/progress-view` and `brief-view`.
 Passive archive readers reconstruct the same records without starting agents.
 
 `wait_for_input` must be the sole call in a batch. It settles the tool history
-and waits without a final reply or extra generation. A root answer to a waiting
+and waits without a final reply or extra generation. A manager answer to a waiting
 researcher must be sent explicitly to that researcher through `send_message`.
 
 Implementation checkpoints and validation are tracked in

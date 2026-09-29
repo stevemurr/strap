@@ -103,3 +103,25 @@ type Observer interface{ OnDelta(Delta) error }
 type ObserverFunc func(Delta) error
 
 func (f ObserverFunc) OnDelta(d Delta) error { return f(d) }
+
+type rawStreamKey struct{}
+
+// RawTap sees a model call exactly as it crossed the wire: the request body
+// sent and every raw stream frame received, before any parsing. It is a
+// diagnostic for what a model actually emitted when the parsed response is
+// empty or malformed; it never changes the request or the response.
+type RawTap struct {
+	Request func(body []byte)
+	Frame   func(frame string)
+}
+
+// WithRawTap returns a context whose model calls report to tap.
+func WithRawTap(ctx context.Context, tap RawTap) context.Context {
+	return context.WithValue(ctx, rawStreamKey{}, tap)
+}
+
+// RawTapFrom returns the context's tap; its functions are nil when unset.
+func RawTapFrom(ctx context.Context) RawTap {
+	tap, _ := ctx.Value(rawStreamKey{}).(RawTap)
+	return tap
+}

@@ -17,6 +17,7 @@ func TestAuditFixtureUsesRealSupersededSubmission(t *testing.T) {
 	defer cancel()
 	cfg := harness.DefaultConfig()
 	cfg.Dir, cfg.Web, cfg.LocalTools = t.TempDir(), nil, false
+	cfg.ManualAudits, cfg.AuditBrief = true, false // As the runner: the scenarios measure the manager assigning audits.
 	cfg.Telemetry.ContextTokens = false
 	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: &fixtureScript{}})
 	if err != nil {
@@ -36,7 +37,7 @@ func TestAuditFixtureUsesRealSupersededSubmission(t *testing.T) {
 	if len(f.Plan.Steps) != 1 || f.Plan.Steps[0].Status != work.ReadyForReview {
 		t.Fatalf("fixture step should be awaiting review: %+v", f.Plan.Steps)
 	}
-	previous, err := s.GetSubmission(ctx, f.Root, f.PreviousSubmission)
+	previous, err := s.GetSubmission(ctx, f.Coordinator, f.PreviousSubmission)
 	if err != nil || previous.WorkID != f.Original.ID {
 		t.Fatalf("superseded submission must be readable on same work: %+v, %v", previous, err)
 	}

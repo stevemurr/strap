@@ -11,7 +11,7 @@ type ProgressReadArgs struct {
 	WorkID      work.ID
 	ReportID    work.ProgressReportID
 	FindingID   work.ProgressFindingID
-	BriefID     work.ResearchBriefID
+	BriefID     work.BriefID
 	EvidenceRef string
 	Cursor      string
 	Limit       int
@@ -73,15 +73,15 @@ func GetWorkProgress(h Handler[ProgressReadArgs]) Tool {
 		}, Enum("mode", "continue"), MinLength("cursor", 1)),
 	)
 }
-func GetResearchBrief(h Handler[ProgressReadArgs]) Tool {
+func GetBrief(h Handler[ProgressReadArgs]) Tool {
 	type first struct {
-		ID       work.ResearchBriefID `json:"brief_id"`
-		MaxBytes *int                 `json:"max_bytes"`
+		ID       work.BriefID `json:"brief_id"`
+		MaxBytes *int         `json:"max_bytes"`
 	}
 	type next struct {
 		Cursor string `json:"cursor"`
 	}
-	return compose(provider.ToolDefinition{Name: "get_research_brief", Description: "Read an immutable delivered research brief by brief_id. Continue with cursor alone. Finding IDs resolve through get_work_progress. Oversized records return bounded JSON fragments; delivery does not mean independent verification."},
+	return compose(provider.ToolDefinition{Name: "get_brief", Description: "Read an immutable delivered brief by brief_id. The brief comes first, followed by each finding it cites. Continue with cursor alone. Oversized records return bounded JSON fragments; delivery does not mean independent verification."},
 		builtin("brief", "", func(ctx context.Context, c Call, a first) (Result, error) {
 			return h(ctx, c, ProgressReadArgs{Mode: "brief", BriefID: a.ID, MaxBytes: valueOrZero(a.MaxBytes)})
 		}, append(pageBudget, MinLength("brief_id", 1))...),

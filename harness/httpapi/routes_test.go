@@ -41,8 +41,8 @@ func TestHTTPSessionCollectionRoutes(t *testing.T) {
 	if err := json.Unmarshal(view.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Root != s.Root() {
-		t.Fatal("session view named a different root", got)
+	if got.Manager != s.Manager() {
+		t.Fatal("session view named a different manager", got)
 	}
 	cases := []struct {
 		method, path string
@@ -121,7 +121,7 @@ func TestHTTPEventQueryValidation(t *testing.T) {
 // rather than ignored.
 func TestHTTPRequestBodyMustBeOneJSONValue(t *testing.T) {
 	_, s := recoverySession(t, true)
-	r := httptest.NewRequest("POST", "/sessions/"+s.ID()+"/messages", strings.NewReader(`{"to":"root","content":"a"}{"to":"root","content":"b"}`))
+	r := httptest.NewRequest("POST", "/sessions/"+s.ID()+"/messages", strings.NewReader(`{"to":"agent-1","content":"a"}{"to":"agent-1","content":"b"}`))
 	r.Header.Set("Authorization", "Bearer test-token")
 	w := httptest.NewRecorder()
 	s.http.ServeHTTP(w, r)
@@ -129,7 +129,7 @@ func TestHTTPRequestBodyMustBeOneJSONValue(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	// An idempotency key would imply automatic retry, which the API never does.
-	r = httptest.NewRequest("POST", "/sessions/"+s.ID()+"/messages", bytes.NewReader([]byte(`{"to":"root","content":"a"}`)))
+	r = httptest.NewRequest("POST", "/sessions/"+s.ID()+"/messages", bytes.NewReader([]byte(`{"to":"agent-1","content":"a"}`)))
 	r.Header.Set("Authorization", "Bearer test-token")
 	r.Header.Set("Idempotency-Key", "key")
 	w = httptest.NewRecorder()
@@ -143,13 +143,13 @@ func TestHTTPRequestBodyMustBeOneJSONValue(t *testing.T) {
 // of the query.
 func TestHTTPAgentTranscriptQuery(t *testing.T) {
 	_, s := recoverySession(t, true)
-	base := "/sessions/" + s.ID() + "/agents/" + string(s.Root())
+	base := "/sessions/" + s.ID() + "/agents/" + string(s.Manager())
 
-	// Drive one turn so the root has a transcript to page through.
-	if w := request(t, s.http, "POST", "/sessions/"+s.ID()+"/messages", httpapi.SendRequest{To: s.Root(), Content: "hello"}); w.Code != 200 {
+	// Drive one turn so the manager has a transcript to page through.
+	if w := request(t, s.http, "POST", "/sessions/"+s.ID()+"/messages", httpapi.SendRequest{To: s.Manager(), Content: "hello"}); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	awaitIdle(t, s.Session, "the root never finished its turn")
+	awaitIdle(t, s.Session, "the manager never finished its turn")
 
 	w := request(t, s.http, "GET", base+"?transcript=true", nil)
 	if w.Code != 200 {
@@ -182,8 +182,10 @@ func TestHTTPAgentTranscriptQuery(t *testing.T) {
 			t.Fatal(path, w.Code, w.Body.String())
 		}
 	}
-	// A cursor past the end of the log is refused rather than clamped.
-	if w := request(t, s.http, "GET", base+"?transcript=true&before=999999", nil); w.Code != 400 {
+	// A transcript position past the end reads the latest page, as
+	// inspect_agent does: a model with no earlier page asked for before=100
+	// meaning "the latest" and was refused with an error it could not act on.
+	if w := request(t, s.http, "GET", base+"?transcript=true&before=999999", nil); w.Code != 200 || !strings.Contains(w.Body.String(), `"position":3`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
@@ -193,7 +195,7 @@ func TestHTTPWorkArtifactRoutes(t *testing.T) {
 	_, s := recoverySession(t, true)
 	base := "/sessions/" + s.ID()
 	worker := createHTTPWorker(t, s)
-	w := request(t, s.http, "POST", base+"/work/assign_implementation", wireRequest(s.Root(), tool.AssignImplementationArgs{Assignee: worker, Task: "task"}))
+	w := request(t, s.http, "POST", base+"/work/assign_task", wireRequest(s.Manager(), tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(worker), Task: "task"}))
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -209,7 +211,7 @@ func TestHTTPWorkArtifactRoutes(t *testing.T) {
 	if err := json.Unmarshal(submitted.Body.Bytes(), &event); err != nil {
 		t.Fatal(err)
 	}
-	got := request(t, s.http, "GET", base+"/submissions/"+string(event.SubmissionID)+"?actor="+string(s.Root()), nil)
+	got := request(t, s.http, "GET", base+"/submissions/"+string(event.SubmissionID)+"?actor="+string(s.Manager()), nil)
 	if got.Code != 200 {
 		t.Fatal(got.Code, got.Body.String())
 	}
@@ -221,7 +223,7 @@ func TestHTTPWorkArtifactRoutes(t *testing.T) {
 		t.Fatal("submission route returned a different artifact", submission)
 	}
 	for _, path := range []string{"/submissions/missing", "/plans/missing", "/audits/missing", "/work/missing"} {
-		if w := request(t, s.http, "GET", base+path+"?actor="+string(s.Root()), nil); w.Code != 404 {
+		if w := request(t, s.http, "GET", base+path+"?actor="+string(s.Manager()), nil); w.Code != 404 {
 			t.Fatal(path, w.Code, w.Body.String())
 		}
 	}
@@ -343,12 +345,12 @@ func TestServiceAuthorizesPerCapability(t *testing.T) {
 	if code := serve("POST", base+"/dispose"); code != 403 {
 		t.Fatal("dispose was not refused", code)
 	}
-	if code := serve("POST", base+"/agents/"+string(session.Root())+"/tokens"); code != 501 {
+	if code := serve("POST", base+"/agents/"+string(session.Manager())+"/tokens"); code != 501 {
 		t.Fatal(code)
 	}
 	// Sending a message is an ordinary command.
 	w := httptest.NewRecorder()
-	service.ServeHTTP(w, httptest.NewRequest("POST", base+"/messages", strings.NewReader(`{"to":"`+string(session.Root())+`","content":"hi"}`)))
+	service.ServeHTTP(w, httptest.NewRequest("POST", base+"/messages", strings.NewReader(`{"to":"`+string(session.Manager())+`","content":"hi"}`)))
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

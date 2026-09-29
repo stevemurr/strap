@@ -118,16 +118,6 @@ func TestFreshRepairContextAndDerivedReadAccess(t *testing.T) {
 	if _, e = s.GetSubmission("fresh", unrelated.ID); !errors.Is(e, ErrForbidden) {
 		t.Fatal("repair granted unrelated submission", e)
 	}
-	repair, e = s.Reassign("root", ReassignRequest{WorkTarget: target(repair), Assignee: "replacement"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	for _, get := range []func() error{func() error { _, e := s.GetSubmission("fresh", sub.ID); return e }, func() error { _, e := s.GetAudit("fresh", a.ID); return e }} {
-		if !errors.Is(get(), ErrForbidden) {
-			t.Fatal("displaced repair retained derived access")
-		}
-	}
-	check("replacement")
 	// Passive replay follows the same visibility rules.
 	view := NewReadModel()
 	for _, event := range s.PendingEvents(0) {
@@ -135,8 +125,8 @@ func TestFreshRepairContextAndDerivedReadAccess(t *testing.T) {
 			view.Apply(*event.Change)
 		}
 	}
-	got, e := view.InspectWork("replacement", repair.ID)
-	live, _ := s.InspectWork("replacement", repair.ID)
+	got, e := view.InspectWork("fresh", repair.ID)
+	live, _ := s.InspectWork("fresh", repair.ID)
 	if e != nil || !reflect.DeepEqual(got, live) {
 		t.Fatal("passive repair view differs", e)
 	}
@@ -147,7 +137,7 @@ func TestFreshRepairContextAndDerivedReadAccess(t *testing.T) {
 	if current.State != Cancelled || current.ActiveRepairID != "" {
 		t.Fatal(current)
 	}
-	if _, e = s.GetSubmission("replacement", sub.ID); !errors.Is(e, ErrForbidden) {
+	if _, e = s.GetSubmission("fresh", sub.ID); !errors.Is(e, ErrForbidden) {
 		t.Fatal("cancelled repair retained access", e)
 	}
 	if _, e = s.GetSubmission("impl", sub.ID); e != nil {

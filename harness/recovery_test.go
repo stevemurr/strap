@@ -15,17 +15,23 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-type streamingModel struct{ ready, release chan struct{} }
+// streamingModel streams a prefix and waits for release. The manager's text
+// answer may be held back once by its reply check, so it may be asked again.
+type streamingModel struct {
+	ready, release chan struct{}
+	once           sync.Once
+}
 
 func (p *streamingModel) Submit(ctx context.Context, _ provider.Request, o provider.Observer) (provider.Response, error) {
 	if err := o.OnDelta(provider.Delta{Text: "hello 🌎"}); err != nil {
 		return provider.Response{}, err
 	}
-	close(p.ready)
+	p.once.Do(func() { close(p.ready) })
 	select {
 	case <-p.release:
 		return provider.Response{Content: "hello 🌎!"}, nil
@@ -36,13 +42,13 @@ func (p *streamingModel) Submit(ctx context.Context, _ provider.Request, o provi
 func TestReplayRecoversActiveOutputAndFixedTextPrefix(t *testing.T) {
 	p := &streamingModel{ready: make(chan struct{}), release: make(chan struct{})}
 	s := newLifecycleSession(t, context.Background(), p)
-	if _, err := s.Send(s.Root(), "go"); err != nil {
+	if _, err := s.Send(s.Manager(), "go"); err != nil {
 		t.Fatal(err)
 	}
 	<-p.ready
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	id := identity.OutputID{Agent: s.Root(), Call: 1}
+	id := identity.OutputID{Agent: s.Manager(), Call: 1}
 	var inspection harness.OutputInspection
 	for {
 		var err error
@@ -104,7 +110,7 @@ func TestReplayRecoversActiveOutputAndFixedTextPrefix(t *testing.T) {
 func TestLargeMessageFramingRetainsCompleteContent(t *testing.T) {
 	s := newLifecycleSession(t, context.Background(), textResponse("ready"))
 	body := strings.Repeat("large ✓ ", 50000)
-	if _, err := s.Send(s.Root(), body); err != nil {
+	if _, err := s.Send(s.Manager(), body); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(context.Background()); err != nil {
@@ -174,7 +180,7 @@ func TestHistoryCommitSurvivesMissingOutputFinish(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err = s.Send(s.Root(), "go"); err != nil {
+	if _, err = s.Send(s.Manager(), "go"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -182,11 +188,11 @@ func TestHistoryCommitSurvivesMissingOutputFinish(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("missing capture failure")
 	}
-	v, err := s.InspectOutput(context.Background(), identity.OutputID{Agent: s.Root(), Call: 1})
+	v, err := s.InspectOutput(context.Background(), identity.OutputID{Agent: s.Manager(), Call: 1})
 	if err != nil || v.Source.State != eventlog.Failed || v.Output.Status != agent.OutputActive {
 		t.Fatal(v, err)
 	}
-	info, err := s.InspectAgent(s.Root(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
+	info, err := s.InspectAgent(s.Manager(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
 	if err != nil || len(info.Transcript.Entries) != 3 || info.Transcript.Entries[2].Message.Content.Text() != "committed text" {
 		t.Fatal(info, err)
 	}
@@ -203,12 +209,12 @@ func TestEscapedOutputStreamsWithinSmallQueueBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err = s.Send(s.Root(), "go"); err != nil {
+	if _, err = s.Send(s.Manager(), "go"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	id := identity.OutputID{Agent: s.Root(), Call: 1}
+	id := identity.OutputID{Agent: s.Manager(), Call: 1}
 	sub, err := s.Subscribe(ctx, harness.SubscribeOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +256,7 @@ func TestDiskReplayMatchesClosedSessionProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	if _, err = s.Send(s.Root(), strings.Repeat("large input ✓ ", 12000)); err != nil {
+	if _, err = s.Send(s.Manager(), strings.Repeat("large input ✓ ", 12000)); err != nil {
 		t.Fatal(err)
 	}
 	live := projection.New(identity.SessionID(s.ID()))
@@ -303,17 +309,17 @@ func TestDiskReplayMatchesClosedSessionProjection(t *testing.T) {
 			break
 		}
 	}
-	id := identity.OutputID{Agent: s.Root(), Call: 1}
+	id := identity.OutputID{Agent: s.Manager(), Call: 1}
 	a, _ := live.Output(id)
 	b, _ := fresh.Output(id)
 	if !reflect.DeepEqual(a, b) || a.Status != agent.OutputComplete || a.Through != fresh.Cursor() {
 		t.Fatal(a, b)
 	}
-	ah, err := live.History(s.Root(), 0, 100)
+	ah, err := live.History(s.Manager(), 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bh, err := fresh.History(s.Root(), 0, 100)
+	bh, err := fresh.History(s.Manager(), 0, 100)
 	if err != nil || !reflect.DeepEqual(ah, bh) {
 		t.Fatal(ah, bh, err)
 	}

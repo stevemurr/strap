@@ -20,10 +20,10 @@ import (
 func focusedSetup(t *testing.T) (*model, *fakeSession) {
 	t.Helper()
 	m, s := setup(t)
-	m.selectStream(s.Root())
+	m.selectStream(s.Manager())
 	m.resize(124, 34)
 	for _, id := range []message.ActorID{"agent-2", "agent-3"} {
-		m.observe(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: id, Parent: s.Root(), State: agent.Idle}})
+		m.observe(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: id, Parent: s.Manager(), State: agent.Idle}})
 	}
 	return m, s
 }
@@ -145,7 +145,7 @@ func TestRosterKeyboardPreservesDraftAndAlwaysSendsToRoot(t *testing.T) {
 		t.Fatal("Enter in the roster should focus the composer, not send")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if len(s.sent) != 1 || m.pending["1"] != s.Root() {
+	if len(s.sent) != 1 || m.pending["1"] != s.Manager() {
 		t.Fatal("view selection changed the message recipient")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})

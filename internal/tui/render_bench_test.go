@@ -29,7 +29,7 @@ func renderBenchEval(b *testing.B) *evalModel {
 	now := time.Now()
 	for problem := 0; problem < 4; problem++ {
 		task := eval.Task{ID: fmt.Sprintf("medium-%02d-fixture", problem), Title: "Rendering benchmark", Tier: "medium"}
-		m.observe(eval.Progress{Task: task, Phase: eval.Running, Root: "root", At: now})
+		m.observe(eval.Progress{Task: task, Phase: eval.Running, Manager: "root", At: now})
 		a := m.problems[problem].activity
 		for i := 0; i < 80; i++ {
 			actor := message.ActorID("root")

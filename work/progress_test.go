@@ -127,28 +127,15 @@ func TestProgressCorrectionAndAtomicRejection(t *testing.T) {
 	}
 }
 
-func TestProgressReassignmentAndTerminalScopedRead(t *testing.T) {
+func TestProgressTerminalScopedRead(t *testing.T) {
 	s, _, w := fixture(t)
 	r := reportRequest(w)
-	r.Position = &WorkPosition{Objective: "investigate", Blocker: "need help", Note: "old worker"}
-	r.Findings = []ProgressFindingDraft{observed("inherited finding")}
-	first := mustReport(t, s, w, r)
+	r.Position = &WorkPosition{Objective: "investigate", Blocker: "need help", Note: "first pass"}
+	r.Findings = []ProgressFindingDraft{observed("first finding")}
+	mustReport(t, s, w, r)
 	w = current(t, s, w.ID)
-	w, err := s.Reassign("root", ReassignRequest{WorkTarget: target(w), Assignee: "replacement"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, _ := s.GetWorkProgress("replacement", w.ID)
-	if got.LastReportedPosition != nil || got.LatestReportedAt != nil || got.Current.ActiveBlocker != "" || got.Current.CurrentNote != "" || len(got.Findings) != 1 {
-		t.Fatalf("reassignment snapshot: %+v", got)
-	}
-	if _, err = s.GetWorkProgressReport("impl", first.ReportID); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("former assignee read: %v", err)
-	}
-	w, err = s.Reassign("root", ReassignRequest{WorkTarget: target(w), Assignee: "impl"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	var err error
+	var got WorkProgress
 	r = reportRequest(w)
 	r.Position = &WorkPosition{Objective: "new investigation", Blocker: "still blocked"}
 	mustReport(t, s, w, r)

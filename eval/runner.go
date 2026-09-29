@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/stevemurr/strap/agent"
@@ -28,10 +29,10 @@ type Options struct {
 	Problem string
 	Log     io.Writer
 	Observe func(Progress) // Optional live observer; see Progress for concurrency contract.
-	Quiet   time.Duration  // Silence required after the root's final reply; default 3s.
+	Quiet   time.Duration  // Silence required after the manager's final reply; default 3s.
 	// Idle finishes a task whose agents are all idle with nothing queued and no
-	// root reply after this much silence, flagged NoReply; default 3m. Without
-	// it a root that ends on wait_for_input costs the whole session budget.
+	// manager reply after this much silence, flagged NoReply; default 3m. Without
+	// it a manager that ends on wait_for_input costs the whole session budget.
 	Idle time.Duration
 	// Commit and Profile are recorded in run.json so a run can be traced to
 	// the harness build and the model profile that produced it.
@@ -185,7 +186,13 @@ func runTask(ctx context.Context, opts Options, task Task) (r Result) {
 	cfg.Web = nil
 	cfg.LocalTools = true
 	cfg.Events.JSONLPath = r.Trace
-	fmt.Fprintf(opts.Log, "[%s] starting %q (budget %s)\n", task.ID, task.Title, task.SessionTimeout())
+	// The task's budget is the agent's; a tester run on every request gets its
+	// own on top, so a slow tester does not cut the agent's time short.
+	budget := task.SessionTimeout()
+	if cfg.Solo && cfg.Tester {
+		budget += cfg.TesterBudgetOrDefault()
+	}
+	fmt.Fprintf(opts.Log, "[%s] starting %q (budget %s)\n", task.ID, task.Title, budget)
 	session, err := harness.New(ctx, cfg, opts.Deps)
 	if err != nil {
 		var startup *harness.StartupError
@@ -213,11 +220,11 @@ func runTask(ctx context.Context, opts Options, task Task) (r Result) {
 	if err != nil {
 		return fail(errors.Join(err, cleanup()))
 	}
-	if _, err := session.Send(session.Root(), task.Prompt); err != nil {
+	if _, err := session.Send(session.Manager(), task.Prompt); err != nil {
 		return fail(errors.Join(err, cleanup()))
 	}
-	w := watcher{root: session.Root(), states: map[identity.ActorID]agent.State{}, working: map[identity.ActorID]bool{}, tools: map[string]bool{}, pending: map[message.MessageID]identity.ActorID{}}
-	waitErr := w.wait(ctx, session, sub, task.SessionTimeout(), opts.Quiet, opts.Idle, func(format string, args ...any) {
+	w := watcher{manager: session.Manager(), states: map[identity.ActorID]agent.State{}, working: map[identity.ActorID]bool{}, tools: map[string]bool{}, pending: map[message.MessageID]identity.ActorID{}}
+	waitErr := w.wait(ctx, session, sub, budget, opts.Quiet, opts.Idle, func(format string, args ...any) {
 		fmt.Fprintf(opts.Log, "[%s] %s\n", task.ID, fmt.Sprintf(format, args...))
 	})
 	r.TimedOut = errors.Is(waitErr, errBudget)
@@ -243,19 +250,29 @@ func runTask(ctx context.Context, opts Options, task Task) (r Result) {
 
 var errBudget = errors.New("session budget exhausted")
 
-var errNoReply = errors.New("session idle without a root reply")
+// answersUser reports whether msg is an agent's own answer to the user: its
+// reply, or the controller's notice that it failed. The workflow's host
+// notices to the user, such as work needing recovery at shutdown, name the
+// manager as their owner but are not its answer (host-N ids).
+func answersUser(msg message.Message) bool {
+	return msg.To == message.User && (msg.Kind == message.Reply || msg.Kind == message.Failure) && !strings.HasPrefix(string(msg.ID), "host-")
+}
 
-// watcher decides when a task attempt is finished: the root has replied to the
-// user and no agent is running, no tool call is open, and no message is still
-// queued for a live agent. Those signals are the same ones the TUI uses for
-// its activity indicator.
+var errNoReply = errors.New("session idle without a final manager reply")
+
+// watcher decides when a task attempt is finished: the manager has answered
+// the user, and no agent is running, no tool call is open, and no message is
+// still queued for a live agent. Those signals are the same ones the TUI uses
+// for its activity indicator. Each user message reopens the question until
+// the manager replies to it.
 type watcher struct {
-	root      identity.ActorID
+	manager   identity.ActorID
 	states    map[identity.ActorID]agent.State
 	working   map[identity.ActorID]bool
 	tools     map[string]bool
 	pending   map[message.MessageID]identity.ActorID
-	replied   bool
+	holding   map[identity.ActorID]bool // Agents given a user message they have not answered yet.
+	replied   bool                      // The manager has replied since the latest user message.
 	replies   int
 	lastReply string
 	completed int // Model calls that produced a response.
@@ -274,7 +291,8 @@ func (w *watcher) busy() bool {
 	return false
 }
 
-func (w *watcher) done() bool { return w.replied && !w.busy() }
+func (w *watcher) answered() bool { return w.replied && len(w.holding) == 0 }
+func (w *watcher) done() bool     { return w.answered() && !w.busy() }
 
 func (w *watcher) observe(e conversation.Event, logf func(string, ...any)) {
 	switch e := e.(type) {
@@ -324,11 +342,19 @@ func (w *watcher) observe(e conversation.Event, logf func(string, ...any)) {
 		if m.Kind == message.Reply || m.Kind == message.Failure {
 			delete(w.working, m.From)
 		}
-		if m.From == w.root && m.To == message.User && (m.Kind == message.Reply || m.Kind == message.Failure) {
+		if m.From == message.User {
+			if w.holding == nil {
+				w.holding = map[identity.ActorID]bool{}
+			}
+			w.holding[m.To] = true
+			w.replied = false
+		}
+		if m.From == w.manager && answersUser(m) {
+			delete(w.holding, m.From)
 			w.replied = true
 			w.replies++
 			w.lastReply = m.Content
-			logf("root %s #%d (%d bytes)", m.Kind, w.replies, len(m.Content))
+			logf("manager %s #%d (%d bytes)", m.Kind, w.replies, len(m.Content))
 		}
 	}
 }
@@ -344,7 +370,7 @@ func (w *watcher) wait(ctx context.Context, session *harness.Session, sub *event
 		switch {
 		case w.done():
 			limit = time.Now().Add(quiet)
-		case !w.busy() && !w.replied:
+		case !w.busy() && !w.answered():
 			if silent := last.Add(idle); silent.Before(limit) {
 				limit = silent
 			}
@@ -360,15 +386,20 @@ func (w *watcher) wait(ctx context.Context, session *harness.Session, sub *event
 				switch {
 				case w.done():
 					return nil
-				case !w.busy() && !w.replied && time.Since(last) >= idle:
-					logf("idle for %s without a root reply", idle)
+				case !w.busy() && !w.answered() && time.Since(last) >= idle:
+					logf("idle for %s without a final manager reply", idle)
 					return errNoReply
 				}
 				return errBudget
 			}
 			return fmt.Errorf("read session events: %w", err)
 		}
-		last = time.Now()
+		// The vLLM sampler records a snapshot every few seconds whatever the
+		// agents do; counting it as activity kept a stalled hard-04 session
+		// running to its 40m budget.
+		if e.Kind != "server_metrics" {
+			last = time.Now()
+		}
 		if !watchedKinds[e.Kind] {
 			continue
 		}

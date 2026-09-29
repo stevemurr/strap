@@ -1,5 +1,7 @@
 # Deep research tool
 
+> Terminology note (2026-09-25): in this document "root" is the coordinating agent. That role is now the **manager**, which the user talks to directly: the separate root/user agent was removed on 2026-09-25, and the manager is the session's entry agent (see the [README](../../README.md)).
+
 Status: proposal, 2026-09-17. Nothing here is implemented. Records the deadline
 audit, the external survey, and the proposed contract so the implementation can
 be split into independently testable checkpoints the way

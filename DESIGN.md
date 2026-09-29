@@ -2,7 +2,8 @@
 
 This implements the narrowed design: communication and model interaction first.
 One controller owns one conversation. The application establishes its persistent
-root and configures the tools that can create other agents. Agents own their
+entry agent (the controller's root; in the harness, the manager) and configures
+the tools that can create other agents. Agents own their
 sequential execution loops.
 
 The implemented work ledger, shared plans, and implementation/audit/repair flow
@@ -12,7 +13,7 @@ with the conversation core; the controller does not own work policy.
 The application now exposes typed operations in
 [`internal/workflow/operations.go`](internal/workflow/operations.go). Model tool
 handlers adapt arguments and results around those same operations. They share
-provisioning, revision checks, root-only plan/assignment policy, and compensation
+provisioning, revision checks, manager-only plan/assignment policy, and compensation
 when a newly created agent's ledger registration fails. Registration
 success is a ledger outcome; actual dispatch and receipt processing remain
 asynchronous. The future public session API is tracked in
@@ -24,11 +25,11 @@ asynchronous. The future public session API is tracked in
 Application setup
     ├── conversation.New(ctx)
     ├── agent.Spec { provider, prompt, tools }
-    └── CreateAgent(user, rootSpec) → establish root
+    └── CreateAgent(user, managerSpec) → establish the root (entry agent)
     │
 Host / user
     │
-    ├── Send(root, text) → queued receipt
+    ├── Send(manager, text) → queued receipt
     └── NextEvent → messages, acknowledgments, creation, exit
     │
 Conversation controller
@@ -38,7 +39,7 @@ Conversation controller
     ├── Host event inbox
     └── Agent goroutines and cancellation
             │
-            └── Agent (same type for root and children)
+            └── Agent (same type for the manager and its workers)
                 ├── prompt.Prompt → system message
                 ├── Local model history with ordered text/image content
                 ├── Inbox[message.Message]
@@ -46,7 +47,7 @@ Conversation controller
                 ├── provider.Provider
                 └── tool.Tool instances
                     ├── create_agent → application registration + controller (if supplied)
-                    ├── assign_implementation / assign_audit / assign_repair / assign_research
+                    ├── assign_task / assign_audit / assign_repair
                     │               → application callback → work store (if supplied)
                     ├── send_message → bound sender (if supplied)
                     ├── message_status → receipt lookup (if supplied)
@@ -62,7 +63,7 @@ fills it in. The controller does not hold its lock while calling a model or tool
 | Package | Public boundary | Meaning |
 |---|---|---|
 | `conversation` | `New(ctx)` | Construct an empty conversation |
-| `conversation` | `CreateAgent(parent, spec)` | Start an idle agent; first user-parented creation establishes root; return `Creation{AgentID}` |
+| `conversation` | `CreateAgent(parent, spec)` | Start an idle agent; the first user-parented creation establishes the root (entry agent); return `Creation{AgentID}` |
 | `conversation` | `Send(to, text)` | Route user input and return a queued `message.Receipt` |
 | `conversation` | `Receipt(id)`, `Agents()`, `InspectAgent(id)` | Return delivery and lifecycle snapshots |
 | `conversation` | `NextEvent(ctx)` | Single-consumer host event stream |
@@ -92,7 +93,7 @@ and execution cleanup. `internal/tui` owns only terminal state: the
 input draft, input history, displayed transcript, scroll position, and activity
 indicators derived from events.
 
-Its `Session` interface exposes `Root`, `Send`, `Agents`, `NextEvent`, and
+Its `Session` interface exposes `Manager`, `Send`, `Agents`, `NextEvent`, and
 inspection, pause, resume, and stop operations. Terminal commands request those
 operations without implementing lifecycle behavior in the UI.
 The application workflow session consumes controller events and relays them to
@@ -131,7 +132,7 @@ not token streaming, and its frequency depends on the model following the
 application prompts' milestone guidance.
 
 The UI derives a spinner and elapsed timer from pending input, agent state, and
-active tool calls. Delegated work stays visible when the root is idle. It retains
+active tool calls. Delegated work stays visible when the manager is idle. It retains
 the duration of the last active period when idle; active tools show individual
 durations. All remote text, including tool metadata, is stripped of terminal
 control sequences. Raw image results remain in the core event stream only.
@@ -309,7 +310,7 @@ hints or provider schema rewrites. `AtLeastOneNonNull` emits complete `anyOf`
 branches; all fields remain required. All chat tool definitions carry `strict:true`.
 See [the input contract](docs/tool-input-contract.md) for migration and null semantics.
 
-The workflow exposes creation/editing to the root, scoped progress to implementors,
+The workflow exposes creation/editing to the manager, scoped progress to implementors,
 and work-level reporting to auditors. The work store still enforces ownership,
 scope, revisions and legal transitions under its lock. Tool contracts do not confer
 authority or replace those checks.
@@ -317,7 +318,7 @@ authority or replace those checks.
 ## Web tool ownership
 
 `tool.Web` owns web research resources for one host session. It exposes two typed
-tools shared across root, implementation, and audit agents. Browser resources
+tools given to researchers. Browser resources
 are lazy; unavailable executables fail only their respective tool calls. The CLI
 owns construction and closes Web after stopping the conversation. Tool results
 use the existing content/history path and ToolEvent/OnCommentary presentation.
@@ -384,7 +385,8 @@ Send → controller assigns message ID and orders delivery
 - `Undelivered` identifies queued input left unconsumed when an agent exits.
 - Receipts are observable through host events and `Receipt`/`message_status`.
   They do not enter model inboxes and cannot cause acknowledgment ping-pong.
-- Text responses go to the creating parent; the root's parent is the user.
+- Text responses go to the creating parent; the manager's parent is the user, so its
+  final reply is what the user reads.
   `ReplyTo` identifies the latest consumed message for that exchange. When input
   was batched, that does not assert the response individually resolves every input.
 - Replying ends an exchange, not the agent. Children can receive follow-up work.
@@ -393,21 +395,22 @@ Send → controller assigns message ID and orders delivery
 
 ## Delegation and review
 
-The CLI root calls `create_agent` with role `researcher`, `implementor`, or
+The manager calls `create_agent` with role `researcher`, `implementor`, or
 `auditor` to create an idle registered agent from a snapshotted spec. It then calls the operation-specific
 assignment tool with an existing eligible assignee. Assignment never creates, stops, or resumes agents;
-failed assignment leaves the selected agent available. Root bootstrap is the only
-root registration path. Only root receives creation, assignment, and recovery tools.
+failed assignment leaves the selected agent available. The bootstrap is the only
+manager registration path. Only the manager receives creation, assignment, and recovery tools.
 
 Implementors call `report_work_progress` with an explicit work ID to report progress, then
 `submit_work` to capture an immutable outcome. Submission suspends writes and
-emits a review request. The root assigns an auditor through `assign_audit`
-with an existing auditor assignee, original work ID/revision, and exact submission ID.
+emits a review request. The manager assigns an auditor through `assign_audit`
+with a new auditor assignee (one that has held no work), original work ID/revision,
+and exact submission ID.
 
 The application owns distinct auditor specifications and role membership. Auditors
 cannot implement or repair. `submit_audit` records pass/fail atomically; a fail
 records immutable findings and moves the original work to `changes_requested`.
-The root explicitly assigns repair work to an existing implementor, referencing
+The manager explicitly assigns repair work to an existing implementor, referencing
 the original work/revision and failing audit ID. Repair reassignment does not transfer the original work's
 broader scope. Submission views for narrow repair actors are filtered, while the
 canonical outcome remains complete for the owner and auditor.
@@ -442,7 +445,7 @@ bound sender come from the runtime; only arguments come from the model.
 
 `create_agent` accepts only a role. The old task-only callback is removed. Raw
 `conversation.Controller.CreateAgent(parent, spec)` stays a runtime primitive with
-no workflow registration. The harness public method takes context, root actor, and
+no workflow registration. The harness public method takes context, the manager actor, and
 `roster.CreateRequest`. Model tools and HTTP use the same pure typed wire decoders;
 normalized Go commands share semantic validation. Role registration is recorded
 before it becomes eligible for assignment and appears in live and archived views.
@@ -450,12 +453,13 @@ before it becomes eligible for assignment and appears in live and archived views
 ## Lifecycle ownership
 
 `New(ctx)` creates an empty controller. Its `Root()` is empty until the first
-successful `CreateAgent(message.User, spec)` establishes the single root. A failed
-creation leaves that slot available. The application can therefore construct
-callbacks that capture the controller before assembling the root spec.
-Every later `CreateAgent` call must name an existing active agent as its parent;
-using the user as a parent cannot create another root, even after the root stops.
-The root identity remains stable for the lifetime of the conversation. This is a
+successful `CreateAgent(message.User, spec)` establishes the root, the entry agent
+(the harness's manager). A failed creation leaves that slot available. The
+application can therefore construct callbacks that capture the controller before
+assembling the entry agent's spec. Later agents may also have the user as parent
+(the harness's debugger, in debug sessions); every other `CreateAgent` call must
+name an existing active agent as its parent. The root identity remains stable for
+the lifetime of the conversation, even after that agent stops. This is a
 creation tree: messages can cross branches, and the controller owns all lifecycles.
 
 The controller registers an agent before starting its goroutine. The agent waits
@@ -497,7 +501,7 @@ Chat Completions adapter. The receiving server checks the exact system prompt,
 structured assignment, and absence of `create_agent` from delegated requests.
 
 Boundary tests also cover empty-controller shutdown, failed root initialization,
-concurrent root creation, creation during shutdown, absent tool injection, and a
+concurrent user-parented creation (the first becomes the root), creation during shutdown, absent tool injection, and a
 shared creation adapter invoked by both root and nonroot agents. They verify the
 configured provider and prompt, caller attribution, and correlated delivery receipts.
 
@@ -540,10 +544,11 @@ and paused waits, and is passed to in-flight model/tool calls. A noncooperating
 operation can delay pause or stop completion; neither operation kills arbitrary Go
 code or rolls back side effects. Terminal states cannot resume.
 
-Management tools accept callbacks in the same way as creation. The CLI root gets
-stop, pause, resume, inspect, and list tools. Application wiring chooses their
+Management tools accept callbacks in the same way as creation. The manager gets
+stop, pause, resume, inspect, and list tools over its workers (the debugger, in
+debug sessions, reads every agent and controls workers). Application wiring chooses their
 controller operations. The tool package does not import agent/controller types.
-Host terminal commands provide recovery when the root itself is paused.
+Host terminal commands provide recovery when the manager itself is paused.
 
 ## PDF data flow
 

@@ -15,7 +15,8 @@ curl -H "Authorization: Bearer $STRAP_API_TOKEN" \
   http://127.0.0.1:8080/sessions
 ```
 
-The response contains `id` and `root`. Use them for subsequent calls:
+The response contains `id` and `manager`, the agent the user talks to (plus
+`debugger` in a debug session). Use them for subsequent calls:
 
 ```sh
 curl -H "Authorization: Bearer $STRAP_API_TOKEN" \
@@ -38,16 +39,16 @@ All paths below are relative to `/sessions/{id}` unless shown in full.
 |---|---|
 | `GET /sessions` | List registered session IDs |
 | `POST /sessions` | Create; `{}` uses host defaults, `{"config": ...}` supplies a complete `harness.Config` |
-| `GET /sessions/{id}` | State, root ID, capture health/coverage and effective configuration |
+| `GET /sessions/{id}` | State, manager ID (and debugger ID in a debug session), capture health/coverage and effective configuration |
 | `GET /agents` | Agent state, lifecycle revision, role, registration, eligible work kinds, and active work IDs |
-| `POST /agents` | `{ "actor": "agent-1", "request": {"role":"implementor"} }`; root only; `implementor` or `auditor`, returns idle registration |
+| `POST /agents` | `{ "actor": "agent-1", "request": {"role":"implementor"} }`; manager only; `implementor` or `auditor`, returns idle registration |
 | `GET /agents/{agent}` | Inspect; `?transcript=true&before=N&limit=N` requests history |
 | `POST /agents/{agent}/pause`, `/resume`, `/stop` | Agent lifecycle controls; `/stop` permanently terminates the agent |
 | `POST /agents/{agent}/tokens` | `{ "revision": N }`; explicit provider I/O (`measure` capability) |
 | `POST /messages` | `{ "to": "agent-1", "content": "..." }` |
 | `GET /receipts/{message}` | Delivery receipt |
-| `POST /work/assign_implementation`, `/assign_audit`, `/assign_repair`, `/assign_research`, `/reassign`, `/cancel`, `/progress`, `/plan`, `/submit`, `/audit` | `{ "actor": "agent-1", "request": ... }`; assignment request is the corresponding `tool.Assign*Args` type; other requests use the corresponding public `work` type |
-| `GET /work?actor=...` | Root-only work discovery across all states; optional assignee/kind/state, limit 1–100 (default 20), or cursor plus optional limit |
+| `POST /work/assign_task`, `/assign_audit`, `/assign_repair`, `/reassign`, `/cancel`, `/progress`, `/plan`, `/submit`, `/brief`, `/audit` | `{ "actor": "agent-1", "request": ... }`; assignment request is the corresponding `tool.Assign*Args` type; other requests use the corresponding public `work` type |
+| `GET /work?actor=...` | Manager-only work discovery across all states; optional assignee/kind/state, limit 1–100 (default 20), or cursor plus optional limit |
 | `GET /work/{work}?actor=...` | Work inspection, including related submission/audit evidence |
 | `GET /plans/{plan}?actor=...` | Plan snapshot |
 | `GET /submissions/{submission}?actor=...` | Submission snapshot |
@@ -140,7 +141,7 @@ from another branch are rejected even when empty or null. Creation, assignment,
 and reassignment retain raw request JSON for the same pure decoder used by tools.
 The old parent/profile creation envelope and AgentProfile callback are removed.
 
-`submit_audit` records a verdict without creating repairs. On failure the root
+`submit_audit` records a verdict without creating repairs. On failure the manager
 explicitly assigns repair work. `GET /trace/work?actor=...` and the standalone
 inspection handler offer the same fixed-prefix listing. Continuations must use
 only cursor and optional limit (plus actor); filters are preserved by the cursor.

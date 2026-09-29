@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -52,16 +53,19 @@ func (m EditMode) Validate() error {
 	return fmt.Errorf("unknown file edit mode %q (want text, anchors or merge)", string(m))
 }
 
-// Files serializes its own operations across agents, including read-modify-write
-// edits. Shell commands and external editors do not participate in this lock.
+// Files serializes its own writes and edits across agents, including
+// read-modify-write edits; reads share the lock and run together. Shell commands and external editors do not participate in this lock.
 // Paths may be absolute or relative to Dir. Symlinks resolve to their targets
 // before atomic replacement. These checks do not prevent another process from
 // concurrently replacing filesystem entries.
 type Files struct {
 	config FilesConfig
-	gate   chan struct{}
+	gate   rwGate
 	tools  []Tool
-	labels map[string]*lineLabels // EditAnchors only, by resolved path; guarded by gate
+	// EditAnchors only, by resolved path. Writers hold the gate exclusively;
+	// readers, who share it, also hold labelMu.
+	labels  map[string]*lineLabels
+	labelMu sync.Mutex
 }
 
 func NewFiles(config FilesConfig) (*Files, error) {
@@ -79,7 +83,7 @@ func NewFiles(config FilesConfig) (*Files, error) {
 		return nil, err
 	}
 	config.Edits = cmp.Or(config.Edits, EditText)
-	f := &Files{config: config, gate: make(chan struct{}, 1)}
+	f := &Files{config: config}
 	switch config.Edits {
 	case EditAnchors:
 		f.labels = map[string]*lineLabels{}
@@ -147,20 +151,77 @@ func (f *Files) buildTools() []Tool {
 	}
 }
 
-func (f *Files) lock(ctx context.Context) error {
-	select {
-	case f.gate <- struct{}{}:
+func (f *Files) lock(ctx context.Context) error  { return f.gate.acquire(ctx, true) }
+func (f *Files) unlock()                         { f.gate.release(true) }
+func (f *Files) rlock(ctx context.Context) error { return f.gate.acquire(ctx, false) }
+func (f *Files) runlock()                        { f.gate.release(false) }
+
+// rwGate is a reader/writer lock whose waits end with their context. A
+// waiting writer holds back new readers, so reads cannot starve an edit.
+type rwGate struct {
+	mu      sync.Mutex
+	readers int
+	writing bool
+	queued  int           // writers waiting
+	changed chan struct{} // closed and replaced whenever the state changes
+}
+
+func (g *rwGate) acquire(ctx context.Context, write bool) error {
+	g.mu.Lock()
+	if write {
+		g.queued++
+	}
+	for {
 		if err := ctx.Err(); err != nil {
-			f.unlock()
+			if write {
+				g.queued--
+				g.signal()
+			}
+			g.mu.Unlock()
 			return err
 		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+		if write && !g.writing && g.readers == 0 {
+			g.queued--
+			g.writing = true
+			g.mu.Unlock()
+			return nil
+		}
+		if !write && !g.writing && g.queued == 0 {
+			g.readers++
+			g.mu.Unlock()
+			return nil
+		}
+		if g.changed == nil {
+			g.changed = make(chan struct{})
+		}
+		wait := g.changed
+		g.mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+		}
+		g.mu.Lock()
 	}
 }
 
-func (f *Files) unlock() { <-f.gate }
+func (g *rwGate) release(write bool) {
+	g.mu.Lock()
+	if write {
+		g.writing = false
+	} else {
+		g.readers--
+	}
+	g.signal()
+	g.mu.Unlock()
+}
+
+// signal wakes every waiter to recheck; the caller holds mu.
+func (g *rwGate) signal() {
+	if g.changed != nil {
+		close(g.changed)
+		g.changed = nil
+	}
+}
 
 // missing replaces an OS not-found error for a read with one that names the
 // path and the tool that finds files.
@@ -179,10 +240,10 @@ func (f *Files) read(ctx context.Context, _ Call, args readArgs) (Result, error)
 	if args.Limit != nil {
 		limit = *args.Limit
 	}
-	if err := f.lock(ctx); err != nil {
+	if err := f.rlock(ctx); err != nil {
 		return Result{}, err
 	}
-	defer f.unlock()
+	defer f.runlock()
 	path, err := f.resolve(args.Path)
 	if err != nil {
 		return Result{}, missing(err, args.Path)
@@ -194,7 +255,9 @@ func (f *Files) read(ctx context.Context, _ Call, args readArgs) (Result, error)
 	lines, _ := splitLines(text)
 	prefix := func(i int) string { return fmt.Sprintf("%d\t", i+1) }
 	if f.labels != nil {
-		tags := f.labelsFor(path, text).tags
+		f.labelMu.Lock()
+		tags := f.labelsFor(path, text).tags // labelsFor replaces the slice, never edits it
+		f.labelMu.Unlock()
 		prefix = func(i int) string { return labelPrefix(i, tags[i]) }
 	}
 	start := min(offset-1, len(lines))
@@ -315,6 +378,7 @@ func directory(dir string) (string, error) {
 // The content is checked before anything is created, so a rejected write
 // leaves no empty directories.
 func (f *Files) resolveForWrite(requested, content string) (string, error) {
+	requested = ExpandHome(requested)
 	path, err := f.resolve(requested)
 	if !errors.Is(err, fs.ErrNotExist) {
 		return path, err
@@ -332,8 +396,22 @@ func (f *Files) resolveForWrite(requested, content string) (string, error) {
 	return f.resolve(requested)
 }
 
+// ExpandHome replaces a leading ~ with the user's home directory, as a shell
+// would: users name folders like ~/Downloads, and models pass them through.
+func ExpandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~"))
+}
+
 func (f *Files) resolve(path string) (string, error) {
 	dir := f.config.Dir
+	path = ExpandHome(path)
 	if strings.TrimSpace(path) == "" {
 		return "", errors.New("path must name a file")
 	}

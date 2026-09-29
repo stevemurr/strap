@@ -1,12 +1,13 @@
 package workflow
 
 import (
-	"github.com/stevemurr/strap/identity"
-	"github.com/stevemurr/strap/message"
-	"github.com/stevemurr/strap/work"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stevemurr/strap/identity"
+	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/work"
 )
 
 func reportEvent(id string) work.Event {

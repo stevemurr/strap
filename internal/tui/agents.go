@@ -35,8 +35,8 @@ func (m *model) showAgents() tea.Cmd {
 	for _, info := range m.session.Agents() {
 		m.ensureStream(info.ID).parent = info.Parent
 		name := string(info.ID)
-		if info.ID == m.session.Root() {
-			name += " (root)"
+		if info.ID == m.session.Manager() {
+			name += " (" + m.entry + ")"
 		}
 		role := string(info.Role)
 		if role == "" {

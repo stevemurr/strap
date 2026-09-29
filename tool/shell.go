@@ -99,8 +99,8 @@ func NewShell(config ShellConfig) (*Shell, error) {
 		config.Env = append([]string{}, config.Env...)
 	}
 	s := &Shell{config: config, stop: stopProcessGroup, rg: onPath(config.Env, "rg")}
-	// The researcher's diagnostic shell binds its run to an assignment, so
-	// models reach for the same fields here, where nothing records execution.
+	// Work tools bind calls to an assignment, so models reach for the same
+	// fields here; the harness binds a run to the worker's assignment itself.
 	params, err := NewParameters[shellArgs](Nullable("timeout_ms", "use the configured timeout"), MinLength("command", 1), Minimum("timeout_ms", 1), Maximum("timeout_ms", config.MaxTimeout.Milliseconds()),
 		Reject("", "work_id", "this shell is not bound to work; it takes command and nullable timeout_ms"),
 		Reject("", "assigned_at_revision", "this shell is not bound to work; it takes command and nullable timeout_ms"),

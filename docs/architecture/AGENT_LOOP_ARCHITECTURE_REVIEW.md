@@ -1,5 +1,7 @@
 # Agent loop architecture review
 
+> Terminology note (2026-09-25): in this document "root" is the coordinating agent. That role is now the **manager**, which the user talks to directly: the separate root/user agent was removed on 2026-09-25, and the manager is the session's entry agent (see the [README](../../README.md)).
+
 Reviewed September 17, 2026 against the current working tree, including the
 schema changes and the newer session-interruption implementation. This is an
 audit and proposed remediation order, not an accepted redesign. No runtime code

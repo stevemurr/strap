@@ -14,33 +14,35 @@ import (
 	"github.com/stevemurr/strap/work"
 )
 
-// rootReplyCheck holds back a root's reply once while the task is not actually
+// managerReplyCheck holds back a manager's reply once while the task is not actually
 // finished: work it owns is still live, or a plan it owns has open steps that
 // no work covers. Steps complete only when an audit accepts work that scoped
 // them. In ladder runs roots planned a separate "verify build" step, assigned
 // only the implementation, then told the user every step was complete; one
 // root assigned that step to a busy implementor, whose assignment was then
-// lost, and replied while it was still active. Research-only tasks are exempt
-// from the step check, since research never completes plan steps.
-func (s *Session) rootReplyCheck(ctx context.Context, root message.ActorID) string {
+// lost, and replied while it was still active. The step check applies once the
+// manager has assigned implementation or scoped work; unscoped research alone
+// answers a question without a plan to finish.
+func (s *Session) managerReplyCheck(ctx context.Context, manager message.ActorID) string {
 	view, err := s.workView(ctx)
 	if err != nil {
 		return ""
 	}
 	var unfinished []work.Work
-	implemented := false
+	implemented, scoped := false, false
 	for _, w := range view.Works() {
-		if w.Owner != root {
+		if w.Owner != manager {
 			continue
 		}
 		implemented = implemented || w.Kind == work.Implementation || w.Kind == work.Repair
+		scoped = scoped || w.Scope != nil
 		if !w.State.Terminal() {
 			unfinished = append(unfinished, w)
 		}
 	}
 	// Waiting only helps when someone is working: submitted work needs the
-	// root's audit, failed audits need its repair, and a stopped assignee will
-	// never report. Advising a wait there would stall the root.
+	// manager's audit, failed audits need its repair, and a stopped assignee
+	// will never report. Advising a wait there would stall the manager.
 	stopped := map[message.ActorID]bool{}
 	if len(unfinished) > 0 {
 		for _, a := range s.Agents() {
@@ -51,20 +53,22 @@ func (s *Session) rootReplyCheck(ctx context.Context, root message.ActorID) stri
 	for _, w := range unfinished {
 		next := fmt.Sprintf("%s is working on it; wait with wait_for_input", w.Assignee)
 		switch {
-		case w.State == work.NeedsCheck:
+		case w.State == work.NeedsCheck && s.config.ManualAudits:
 			next = "it is submitted and needs an independent audit; assign one with assign_audit"
+		case w.State == work.NeedsCheck:
+			next = "it is submitted and the harness is assigning its audit; wait with wait_for_input"
 		case w.State == work.ChangesRequested:
 			next = "its audit requested changes; assign a repair with assign_repair"
 		case stopped[w.Assignee]:
-			next = fmt.Sprintf("its assignee %s has stopped; reassign it with reassign_work or cancel it with cancel_work", w.Assignee)
+			next = fmt.Sprintf("its assignee %s has stopped; cancel it with cancel_work and assign it again", w.Assignee)
 		case w.State == work.Checking:
 			next = "it is being audited; wait with wait_for_input"
 		}
 		live = append(live, fmt.Sprintf("%s (%s, %s): %s", w.ID, w.Kind, w.State, next))
 	}
 	var open []string
-	if implemented {
-		for _, o := range view.UncoveredSteps(root) {
+	if implemented || scoped {
+		for _, o := range view.UncoveredSteps(manager) {
 			open = append(open, fmt.Sprintf("%s in %s %q (%s)", o.Step.ID, o.PlanID, o.Step.Title, o.Step.Status))
 		}
 	}

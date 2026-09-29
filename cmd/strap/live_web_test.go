@@ -52,7 +52,7 @@ func TestLiveWebResearch(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: harness.DefaultConfig().Root.Prompt, Tools: w.Tools()})
+	_, err = c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: harness.DefaultConfig().WebResearcher.Prompt, Tools: w.Tools()})
 	if err != nil {
 		t.Fatal(err)
 	}

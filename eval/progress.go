@@ -26,12 +26,12 @@ const (
 // ordered; different workers may call Observe concurrently. Observers must
 // return promptly and must not mutate the event or result.
 type Progress struct {
-	Task   Task
-	Phase  Phase
-	At     time.Time
-	Root   message.ActorID
-	Event  conversation.Event
-	Result *Result
+	Task    Task
+	Phase   Phase
+	At      time.Time
+	Manager message.ActorID
+	Event   conversation.Event
+	Result  *Result
 }
 
 func (o Options) notify(p Progress) {
@@ -48,9 +48,9 @@ func (o Options) observeSession(session *harness.Session, task Task) func(contex
 		return func(context.Context) {}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	root := session.Root()
+	manager := session.Manager()
 	notice := func(err error) {
-		o.notify(Progress{Task: task, Root: root, Event: conversation.DiagnosticEvent{Level: "warn", Message: "Live observation: " + err.Error()}})
+		o.notify(Progress{Task: task, Manager: manager, Event: conversation.DiagnosticEvent{Level: "warn", Message: "Live observation: " + err.Error()}})
 	}
 	sub, err := session.Subscribe(ctx, harness.SubscribeOptions{})
 	if err != nil {
@@ -58,7 +58,7 @@ func (o Options) observeSession(session *harness.Session, task Task) func(contex
 		notice(err)
 		return func(context.Context) {}
 	}
-	o.notify(Progress{Task: task, Phase: Running, Root: root})
+	o.notify(Progress{Task: task, Phase: Running, Manager: manager})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -87,7 +87,7 @@ func (o Options) observeSession(session *harness.Session, task Task) func(contex
 				continue
 			}
 			if v != nil {
-				o.notify(Progress{Task: task, Root: root, Event: v})
+				o.notify(Progress{Task: task, Manager: manager, Event: v})
 			}
 		}
 	}()

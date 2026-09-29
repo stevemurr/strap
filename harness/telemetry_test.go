@@ -11,6 +11,7 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/tool"
+	"github.com/stevemurr/strap/work"
 )
 
 type telemetryScript struct {
@@ -50,7 +51,7 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 		cfg := harness.DefaultConfig()
 		cfg.Web = nil
 		cfg.LocalTools = false
-		s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Root: harness.AgentDependencies{Tools: []tool.Tool{pingTool{}}}})
+		s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Manager: harness.AgentDependencies{Tools: []tool.Tool{pingTool{}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +69,7 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 				}
 			}()
 		}
-		if _, err = s.Send(s.Root(), "run"); err != nil {
+		if _, err = s.Send(s.Manager(), "run"); err != nil {
 			t.Fatal(err)
 		}
 		for _, done := range []chan struct{}{p.finished, p.measured} {
@@ -84,7 +85,7 @@ func TestAutomaticTelemetryDoesNotDependOnObserver(t *testing.T) {
 			t.Fatal(attached, p.submits.Load(), p.counts.Load())
 		}
 		inspection := s.Inspect()
-		if !inspection.Coverage.ToolDiagnostics || !inspection.Config.Root.InjectedProvider || inspection.Config.Root.Model != nil {
+		if !inspection.Coverage.ToolDiagnostics || !inspection.Config.Manager.InjectedProvider || inspection.Config.Manager.Model != nil {
 			t.Fatal(inspection)
 		}
 		if err = s.Dispose(context.Background()); err != nil {
@@ -108,19 +109,19 @@ func TestEffectiveModelConfigCopiesGenerationWithoutAliasing(t *testing.T) {
 	if info.ToolContractVersion != tool.InputContractVersion {
 		t.Fatal("missing contract version")
 	}
-	for _, role := range []harness.RoleConfiguration{info.Root, info.Implementor, info.Auditor, info.Researcher} {
+	for _, role := range []harness.RoleConfiguration{info.Manager, info.Implementor, info.Auditor, info.WebResearcher} {
 		if len(role.SchemaHash) != 64 {
 			t.Fatal("missing schema hash")
 		}
 	}
-	m := info.Root.Model
+	m := info.Manager.Model
 	if m == nil || m.Generation.MaxTokens == nil || *m.Generation.MaxTokens != 131072 || m.BaseURL != "http://localhost:9999/v1" {
 		t.Fatal(m)
 	}
 	*m.Generation.MaxTokens = 1
-	info.Root.Tools[0].Parameters[0] = '!'
+	info.Manager.Tools[0].Parameters[0] = '!'
 	again := s.Configuration()
-	if *again.Root.Model.Generation.MaxTokens != 131072 || again.Root.Tools[0].Parameters[0] == '!' {
+	if *again.Manager.Model.Generation.MaxTokens != 131072 || again.Manager.Tools[0].Parameters[0] == '!' {
 		t.Fatal("configuration aliases reader")
 	}
 }
@@ -171,11 +172,12 @@ func TestAutomaticTelemetryBoundsConcurrentProviderIO(t *testing.T) {
 	}
 	defer s.Dispose(context.Background())
 	for i := 0; i < 6; i++ {
-		created, err := s.CreateAgent(context.Background(), s.Root(), roster.CreateRequest{Role: roster.Implementor})
+		created, err := s.CreateAgent(context.Background(), s.Manager(), roster.CreateRequest{Role: roster.Implementor})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = s.Send(created.AgentID, "run"); err != nil {
+		// A worker wakes for an assignment from its manager, its one way in.
+		if _, err = s.AssignWork(context.Background(), s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: created.AgentID, Task: "run"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -202,12 +204,12 @@ func TestAutomaticTelemetryCanBeDisabled(t *testing.T) {
 	cfg.Web = nil
 	cfg.LocalTools = false
 	cfg.Telemetry.ContextTokens = false
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Root: harness.AgentDependencies{Tools: []tool.Tool{pingTool{}}}})
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Manager: harness.AgentDependencies{Tools: []tool.Tool{pingTool{}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err = s.Send(s.Root(), "run"); err != nil {
+	if _, err = s.Send(s.Manager(), "run"); err != nil {
 		t.Fatal(err)
 	}
 	await(t, p.finished, "script stalled")

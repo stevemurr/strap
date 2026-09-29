@@ -30,7 +30,7 @@ import (
 // conversation and agent loop implement them.
 type Session interface {
 	Interrupt(context.Context) error
-	Root() message.ActorID
+	Manager() message.ActorID
 	Send(message.ActorID, string) (message.Receipt, error)
 	Agents() []harness.AgentInfo
 	InspectAgent(message.ActorID, conversation.InspectOptions) (harness.AgentInspection, error)
@@ -102,6 +102,7 @@ type entry struct {
 }
 
 type model struct {
+	entry             string // The role of the agent the user talks to: manager, or a solo session's agent.
 	plans             planDock
 	embedded          bool
 	interrupting      bool
@@ -162,11 +163,17 @@ func newModel(ctx context.Context, cancel context.CancelFunc, session Session, o
 		now:     time.Now, activeTools: make(map[toolKey]agent.ToolActivity),
 		copyText: clipboard.WriteAll,
 	}
+	m.entry = "manager"
+	for _, a := range session.Agents() {
+		if a.ID == session.Manager() && a.Role != "" {
+			m.entry = string(a.Role)
+		}
+	}
 	// Trackpads can emit many wheel events; keep each step to one text row.
 	m.viewport.MouseWheelDelta = 1
 	m.initStreams()
 	m.resize(80, 24)
-	m.addAttributed("Welcome", "", "Send a message to get started. You can keep typing while agents work.\nF6 agents · F7 activity folds · /help for commands", true, session.Root())
+	m.addAttributed("Welcome", "", "Send a message to get started. You can keep typing while agents work.\nF6 agents · F7 activity folds · /help for commands", true, session.Manager())
 	return m
 }
 
@@ -426,7 +433,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		case "/quit", "/exit":
 			return m.quit()
 		case "/help":
-			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the root composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default root)\n/plan [id]    Focus the persistent plan; Ctrl+P toggles the complete outline and current work item, F8 focuses steps. Up/down selects steps; Enter opens updates and criteria; PgUp/PgDn scrolls the outline or details; c returns to the outline; [/] switches plans; Esc returns to input.\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the root.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType @ for text files/folders (quoted paths support spaces). Tab completes or opens folders; Enter sends exact paths. Attachments: UTF-8 text, 256 KiB/file, 1 MiB/message; folders honor Git ignores and report skips. Esc cancels loading.\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Shift+Enter (enhanced terminals) / Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside command/file completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages and progress reports render Markdown. Report details keeps objectives, IDs, and source evidence available through its disclosure. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
+			m.add("Help", "F6 focuses the agent stacks; arrows or Tab preview an agent; Enter opens its stream and returns to the manager composer. Hover to preview, click to open. Select Completed and press Enter, or press c in the stacks, to expand/collapse completed work. Small terminals use a compact agent list.\n/focus [id|all]  Watch a live agent stream (default manager)\n/plan [id]    Focus the persistent plan; Ctrl+P toggles the complete outline and current work item, F8 focuses steps. Up/down selects steps; Enter opens updates and criteria; PgUp/PgDn scrolls the outline or details; c returns to the outline; [/] switches plans; Esc returns to input.\n\n/agents  Show agent state, context tokens, last output, and per-call cap\n/inspect [id]  Inspect agent state\n/transcript [id]  Browse an agent conversation\n/pause [id]    Pause at an operation boundary\n/resume [id]   Resume a paused agent\n/stop          Stop current work; keep the conversation (Esc while working)\n/terminate [id] Permanently stop an agent\nIDs default to the manager.\n/clear   Clear the screen; keep the conversation\n/quit    Cancel all agents and exit\n\nType @ for text files/folders (quoted paths support spaces). Tab completes or opens folders; Enter sends exact paths. Attachments: UTF-8 text, 256 KiB/file, 1 MiB/message; folders honor Git ignores and report skips. Esc cancels loading.\nType / for commands · ↑/↓ select · Tab complete · Esc dismiss. Enter completes partial commands; Enter again runs them.\nEnter or the composer ↑ sends · Shift+Enter (enhanced terminals) / Alt+Enter / Ctrl+J newline · ↑/↓ move within multiline input · Alt+↑/↓ input history · Tab indents outside command/file completion · PgUp/PgDn scroll · Ctrl+C or Ctrl+D exits\nCommands show their arguments and a short output preview. Ctrl+T expands or collapses output. Click a status marker or disclosure hint, or F7 then ↑/↓ and Enter, to inspect individual results. Hover or click a glider icon for agent identity and status. Esc returns to composing. Progress updates, replies, and errors stay visible. /activity agent-id/response-number toggles that response’s tool results; chronological order is preserved. Context counts are inside individual tool details. Messages and progress reports render Markdown. Report details keeps objectives, IDs, and source evidence available through its disclosure. Idle means agents are waiting; queued counts refer to pending messages.\nScroll with the mouse, trackpad, or PgUp/PgDn. Ctrl+End returns to the latest output.\nDrag to select text; release to copy to the clipboard. Esc, scrolling, or typing resumes the live view. Ctrl+C copies while text is selected.\nF2 freezes the display and releases the mouse for native terminal selection; use your terminal Copy shortcut. F2 resumes scrolling. Ctrl+T expands or collapses command output; Cmd+T requires terminal-level forwarding; /transcript then t inspects recorded reasoning.", true)
 		case "/activity":
 			if len(fields) != 2 {
 				m.add("Help", "Use /activity agent-id/response-number", true)
@@ -485,7 +492,7 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.closed || m.rootStopped {
-		m.add("System", "The root has stopped. Exit and restart strap to begin a new conversation.", true)
+		m.add("System", "The manager has stopped. Exit and restart strap to begin a new conversation.", true)
 		return m, nil
 	}
 	if m.attachmentJob != nil {
@@ -502,10 +509,10 @@ func (m *model) submit() (tea.Model, tea.Cmd) {
 
 func (m *model) sendDraft(draft, payload string) bool {
 	if m.closed || m.rootStopped {
-		m.add("Error", "The root has stopped; draft preserved.", true)
+		m.add("Error", "The manager has stopped; draft preserved.", true)
 		return false
 	}
-	receipt, err := m.session.Send(m.session.Root(), payload)
+	receipt, err := m.session.Send(m.session.Manager(), payload)
 	if err != nil {
 		m.add("Error", err.Error(), true)
 		return false
@@ -515,7 +522,7 @@ func (m *model) sendDraft(draft, payload string) bool {
 	m.historyIndex = len(m.history)
 	m.draft = ""
 	m.input.Reset()
-	m.addAttributed("You", fmt.Sprintf("user → %s · %s", m.session.Root(), receipt.MessageID), draft, true, m.session.Root())
+	m.addAttributed("You", fmt.Sprintf("user → %s · %s", m.session.Manager(), receipt.MessageID), draft, true, m.session.Manager())
 	m.entries[len(m.entries)-1].message = receipt.MessageID
 	m.entries[len(m.entries)-1].hasAttachments = payload != draft
 	return true
@@ -533,6 +540,10 @@ func (m *model) observe(event conversation.Event) {
 		m.observeToolBatch(e)
 	case conversation.ContextTokensEvent:
 		m.observeContextTokens(e)
+	case conversation.TodosEvent:
+		m.observeTodos(e)
+	case conversation.TesterEvent:
+		m.observeTester(e)
 	case conversation.DiagnosticEvent:
 		if e.Level == "error" || e.Level == "warn" {
 			m.add("Diagnostic", e.Message, false)
@@ -549,7 +560,7 @@ func (m *model) observe(event conversation.Event) {
 			}
 		}
 		label := "Message"
-		if e.Agent == m.session.Root() {
+		if e.Agent == m.session.Manager() {
 			label = "Strap"
 		}
 		m.addAttributed(label, string(e.Agent)+" · progress", e.Content, false, e.Agent)
@@ -561,8 +572,12 @@ func (m *model) observe(event conversation.Event) {
 			m.addProgress(e.Event)
 			return
 		}
-		if e.Event.Kind == work.ResearchDelivered {
-			m.addAttributed("Research", string(e.Event.Work.ID), progressBody(e.Event), false, e.Event.Work.Owner, e.Event.Work.Assignee)
+		if e.Event.Kind == work.BriefDelivered {
+			label := "Research"
+			if e.Event.Work.Kind == work.Review {
+				label = "Review"
+			}
+			m.addAttributed(label, string(e.Event.Work.ID), progressBody(e.Event), false, e.Event.Work.Owner, e.Event.Work.Assignee)
 			return
 		}
 		change := e.Event
@@ -607,7 +622,7 @@ func (m *model) observe(event conversation.Event) {
 		}
 	case conversation.AgentStarted:
 		label := "Delegation"
-		if e.Agent.ID == m.session.Root() {
+		if e.Agent.ID == m.session.Manager() {
 			label = "Agent"
 		}
 		m.addAttributed(label, fmt.Sprintf("%s → %s", e.Agent.Parent, e.Agent.ID), "Agent created · "+string(e.Agent.State), false, e.Agent.Parent, e.Agent.ID)
@@ -688,7 +703,7 @@ func (m *model) observe(event conversation.Event) {
 			}
 		} else if msg.Kind == message.Failure {
 			label = "Error"
-		} else if msg.To == message.User && msg.From == m.session.Root() {
+		} else if msg.To == message.User && msg.From == m.session.Manager() {
 			label = "Strap"
 		}
 		m.addAttributed(label, meta, body, false, msg.From, msg.To)
@@ -703,7 +718,7 @@ func (m *model) observe(event conversation.Event) {
 				delete(m.activeTools, key)
 			}
 		}
-		if e.Agent == m.session.Root() {
+		if e.Agent == m.session.Manager() {
 			m.rootStopped = true
 		}
 		if e.Err != nil && !errors.Is(e.Err, context.Canceled) {
@@ -759,13 +774,13 @@ func (m *model) resize(width, height int) {
 	}
 }
 
-// agentArg reads the optional agent argument of a slash command; "root" and
-// no argument both name the root agent.
+// agentArg reads the optional agent argument of a slash command; "manager"
+// (or the older "root") and no argument all name the manager.
 func (m *model) agentArg(fields []string) message.ActorID {
-	if len(fields) == 2 && fields[1] != "root" {
+	if len(fields) == 2 && fields[1] != "manager" && fields[1] != "root" {
 		return message.ActorID(fields[1])
 	}
-	return m.session.Root()
+	return m.session.Manager()
 }
 
 func (m *model) add(label, body string, follow bool) {
@@ -825,24 +840,24 @@ func (m *model) status() string {
 		return "Conversation closed · /quit to exit"
 	}
 	if m.rootStopped {
-		return "Root stopped · /quit and restart to begin again"
+		return "Manager stopped · /quit and restart to begin again"
 	}
 	if m.interrupting {
 		return "Stopping current work…"
 	}
 	status := "Idle"
-	if m.states[m.session.Root()] == agent.Interrupted {
+	if m.states[m.session.Manager()] == agent.Interrupted {
 		status = "Stopped · send a new instruction to continue"
-	} else if m.states[m.session.Root()] == agent.Paused {
-		status = "Root paused · /resume to continue"
-	} else if m.states[m.session.Root()] == agent.PauseRequested {
-		status = "Root pause requested…"
+	} else if m.states[m.session.Manager()] == agent.Paused {
+		status = "Manager paused · /resume to continue"
+	} else if m.states[m.session.Manager()] == agent.PauseRequested {
+		status = "Manager pause requested…"
 	}
-	if m.working[m.session.Root()] && m.states[m.session.Root()] != agent.PauseRequested {
-		status = "Root processing…"
+	if m.working[m.session.Manager()] && m.states[m.session.Manager()] != agent.PauseRequested {
+		status = "Manager processing…"
 	}
 	children := len(m.working)
-	if m.working[m.session.Root()] {
+	if m.working[m.session.Manager()] {
 		children--
 	}
 	if children > 0 {
@@ -924,5 +939,5 @@ func (m *model) footer() string {
 	if !m.viewport.AtBottom() {
 		return fmt.Sprintf("History · %.0f%% · Ctrl+End latest · Scroll / PgUp/PgDn", m.viewport.ScrollPercent()*100)
 	}
-	return "Enter → root · F6 agents · Ctrl+T output · /help"
+	return "Enter → manager · F6 agents · Ctrl+T output · /help"
 }

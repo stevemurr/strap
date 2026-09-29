@@ -7,7 +7,7 @@ import (
 
 func TestDuplicateResearchFindingsDoNotChangeWork(t *testing.T) {
 	s := New()
-	w, err := s.AssignResearch("root", ResearchAssignRequest{Assignee: "r", Task: "Compare design"})
+	w, err := s.AssignInvestigation("root", InvestigationRequest{Kind: WebResearch, Assignee: "r", Task: "Compare design"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -16,7 +16,7 @@ func TestDuplicateResearchFindingsDoNotChangeWork(t *testing.T) {
 	report := mustReport(t, s, w, req)
 	w = current(t, s, w.ID)
 	id := report.FindingIDs[0]
-	_, err = s.SubmitResearch("r", SubmitResearchRequest{WorkTarget: target(w), Summary: "summary", FindingIDs: []ProgressFindingID{id, id}})
+	_, err = s.SubmitBrief("r", SubmitBriefRequest{WorkTarget: target(w), Summary: "summary", FindingIDs: []ProgressFindingID{id, id}})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("duplicate accepted: %v", err)
 	}

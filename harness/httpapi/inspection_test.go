@@ -47,7 +47,7 @@ func TestSessionTraceRoutesUseIndependentInspectionAndAuthorization(t *testing.T
 	if err = reader.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Send(s.Root(), "reader closure leaves execution usable"); err != nil {
+	if _, err = s.Send(s.Manager(), "reader closure leaves execution usable"); err != nil {
 		t.Fatal(err)
 	}
 }

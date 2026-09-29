@@ -398,7 +398,7 @@ edit-producing actions and report command-backed actions as unsupported; add
 tested server-specific handling later. Rename also does not substitute for
 reviewing comments, configuration strings, reflection, and runtime behavior.
 
-Register mutation tools only for root/implementor roles when semantic writes are
+Register mutation tools only for the implementor role when semantic writes are
 enabled. Read-only roles do not gain write access through server callbacks.
 
 **Implementation sequence and acceptance**

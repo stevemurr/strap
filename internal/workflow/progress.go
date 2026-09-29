@@ -14,7 +14,7 @@ func (s *Session) ReportWorkProgress(ctx context.Context, actor identity.ActorID
 			return work.ReportWorkProgressResult{}, err
 		}
 		s.mu.Lock()
-		reg, ok := s.roles[actor]
+		reg, ok := s.graph.Registration(actor)
 		s.mu.Unlock()
 		if !ok || !reg.Role.Accepts(w.Kind) {
 			return work.ReportWorkProgressResult{}, work.ErrForbidden

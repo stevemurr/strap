@@ -260,7 +260,7 @@ func TestRunRejectsInvalidOptionsBeforeCreatingArtifacts(t *testing.T) {
 }
 
 func TestProviderGateRecognizesReplyBeforeQueuedWake(t *testing.T) {
-	f := fixture{Root: "root"}
+	f := fixture{Coordinator: "root"}
 	facts := []fact{
 		{record: eventlog.Record{Session: "session", Sequence: 5, Data: eventlog.Data{Agent: "root", Kind: "message"}}, event: conversation.MessageEvent{Message: message.Message{From: "root", To: message.User, Kind: message.Reply, Content: "Finished."}}},
 		{record: eventlog.Record{Session: "session", Sequence: 6, Data: eventlog.Data{Agent: "root", Kind: "output_started"}}},

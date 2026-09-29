@@ -12,7 +12,8 @@ type Change struct {
 	Plans           []Plan               `json:"plans,omitempty"`
 	Submissions     []Submission         `json:"submissions,omitempty"`
 	Audits          []Audit              `json:"audits,omitempty"`
-	ResearchBriefs  []ResearchBrief      `json:"research_briefs,omitempty"`
+	Briefs          []Brief              `json:"briefs,omitempty"`
+	Conclusions     []Conclusion         `json:"conclusions,omitempty"`
 	ProgressReports []WorkProgressReport `json:"progress_reports,omitempty"`
 }
 
@@ -33,8 +34,11 @@ func (c Change) Clone() Change {
 	for _, x := range c.ProgressReports {
 		v.ProgressReports = append(v.ProgressReports, x.Clone())
 	}
-	for _, b := range c.ResearchBriefs {
-		v.ResearchBriefs = append(v.ResearchBriefs, b.Clone())
+	for _, b := range c.Briefs {
+		v.Briefs = append(v.Briefs, b.Clone())
+	}
+	for _, x := range c.Conclusions {
+		v.Conclusions = append(v.Conclusions, x.Clone())
 	}
 	return v
 }
@@ -49,6 +53,12 @@ func (f ReporterFunc) Publish(ctx context.Context, e Event) error { return f(ctx
 type Option func(*Store)
 
 func WithReporter(r Reporter) Option { return func(s *Store) { s.reporter = r } }
+
+// WithIDs supplies identifiers instead of random ones: next receives the
+// prefix, such as "work-" or "execution:", and returns the whole id. An empty
+// or already issued id falls back to a random one. Replays use it to issue the
+// ids a recorded session issued.
+func WithIDs(next func(prefix string) string) Option { return func(s *Store) { s.ids = next } }
 func (s *Store) beginMutation() error {
 	s.emission.Lock()
 	s.mu.Lock()

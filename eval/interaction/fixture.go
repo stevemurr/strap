@@ -16,9 +16,10 @@ import (
 // fixture is a real, unaccepted review cycle. The superseded submission is
 // created by a failed audit and repair rather than by mutating ledger state.
 type fixture struct {
-	Root               identity.ActorID
+	Coordinator        identity.ActorID // The manager that owns the plan and work.
 	Implementor        identity.ActorID
 	Auditor            identity.ActorID
+	RaceAuditor        identity.ActorID // Takes the competing audit a revision race withdraws.
 	Plan               work.Plan
 	Original           work.Work
 	Submission         work.Submission
@@ -30,33 +31,59 @@ func (f fixture) actor() identity.ActorID {
 	if f.Schema != nil {
 		return f.Schema.Actor
 	}
-	return f.Root
+	return f.Coordinator
 }
 
-// seedAudit requires the caller to gate the root and block collaborator model
+// seedManager pauses the session's manager, the coordinator the trials
+// evaluate, so that notices from seeding wait in its inbox for the gated
+// exchange.
+func seedManager(ctx context.Context, s *harness.Session) (identity.ActorID, error) {
+	m := s.Manager()
+	if err := pauseActor(ctx, s, m); err != nil {
+		return "", fmt.Errorf("pause manager: %w", err)
+	}
+	return m, nil
+}
+
+// seedAudit requires the caller to gate the manager and block collaborator model
 // providers. Public host operations seed the ledger without model-side effects.
 func seedAudit(ctx context.Context, s *harness.Session) (fixture, error) {
-	f := fixture{Root: s.Root()}
-	implementor, err := s.CreateAgent(ctx, f.Root, roster.CreateRequest{Role: roster.Implementor})
+	manager, err := seedManager(ctx, s)
+	if err != nil {
+		return fixture{}, err
+	}
+	f := fixture{Coordinator: manager}
+	implementor, err := s.CreateAgent(ctx, f.Coordinator, roster.CreateRequest{Role: roster.Implementor})
 	if err != nil {
 		return f, fmt.Errorf("create implementor: %w", err)
 	}
 	f.Implementor = implementor.AgentID
-	auditor, err := s.CreateAgent(ctx, f.Root, roster.CreateRequest{Role: roster.Auditor})
+	// The failed first audit has its own auditor; f.Auditor is a new one for
+	// the audit the scenario arranges, since every audit gets a new auditor.
+	first, err := s.CreateAgent(ctx, f.Coordinator, roster.CreateRequest{Role: roster.Auditor})
+	if err != nil {
+		return f, fmt.Errorf("create first auditor: %w", err)
+	}
+	auditor, err := s.CreateAgent(ctx, f.Coordinator, roster.CreateRequest{Role: roster.Auditor})
 	if err != nil {
 		return f, fmt.Errorf("create auditor: %w", err)
 	}
 	f.Auditor = auditor.AgentID
+	race, err := s.CreateAgent(ctx, f.Coordinator, roster.CreateRequest{Role: roster.Auditor})
+	if err != nil {
+		return f, fmt.Errorf("create race auditor: %w", err)
+	}
+	f.RaceAuditor = race.AgentID
 	title, stepTitle := "Verify arithmetic explanation", "Explain why 2 + 2 equals 4"
 	criteria := []string{"The answer is 4 and the explanation shows the addition."}
-	f.Plan, err = s.UpdatePlan(ctx, f.Root, work.PlanUpdate{
+	f.Plan, err = s.UpdatePlan(ctx, f.Coordinator, work.PlanUpdate{
 		Title: &title,
 		Steps: []work.StepEdit{{Title: &stepTitle, AcceptanceCriteria: &criteria}},
 	})
 	if err != nil {
 		return f, fmt.Errorf("create plan: %w", err)
 	}
-	f.Original, err = s.AssignWork(ctx, f.Root, work.AssignmentRequest{
+	f.Original, err = s.AssignWork(ctx, f.Coordinator, work.AssignmentRequest{
 		Kind: work.Implementation, Assignee: f.Implementor,
 		Task:           "Calculate 2 + 2 and explain the addition.",
 		ExpectedOutput: "The answer and a short explanation of the addition.",
@@ -75,24 +102,24 @@ func seedAudit(ctx context.Context, s *harness.Session) (fixture, error) {
 		return f, fmt.Errorf("prepare first submission: %w", err)
 	}
 	f.Original.Revision = progress.WorkRevision
-	first, err := s.SubmitWork(ctx, f.Implementor, work.SubmitRequest{
+	submitted, err := s.SubmitWork(ctx, f.Implementor, work.SubmitRequest{
 		WorkTarget: work.WorkTarget{ID: f.Original.ID, ExpectedRevision: f.Original.Revision},
 		Summary:    "4",
 	})
 	if err != nil {
 		return f, fmt.Errorf("submit first outcome: %w", err)
 	}
-	f.PreviousSubmission = first.ID
-	auditWork, err := s.AssignWork(ctx, f.Root, work.AssignmentRequest{
-		Kind: work.AuditWork, Assignee: f.Auditor, WorkID: f.Original.ID,
-		ExpectedRevision: first.WorkRevision, SubmissionID: first.ID,
+	f.PreviousSubmission = submitted.ID
+	auditWork, err := s.AssignWork(ctx, f.Coordinator, work.AssignmentRequest{
+		Kind: work.AuditWork, Assignee: first.AgentID, WorkID: f.Original.ID,
+		ExpectedRevision: submitted.WorkRevision, SubmissionID: submitted.ID,
 	})
 	if err != nil {
 		return f, fmt.Errorf("assign first audit: %w", err)
 	}
-	audit, err := s.SubmitAudit(ctx, f.Auditor, work.AuditRequest{
+	audit, err := s.SubmitAudit(ctx, first.AgentID, work.AuditRequest{
 		WorkTarget:   work.WorkTarget{ID: auditWork.ID, ExpectedRevision: auditWork.Revision},
-		SubmissionID: first.ID, Verdict: work.Fail, Summary: "The explanation is missing.",
+		SubmissionID: submitted.ID, Verdict: work.Fail, Summary: "The explanation is missing.",
 		Findings: []work.Finding{{
 			StepIDs:        []work.StepID{f.Plan.Steps[0].ID},
 			Description:    "The answer gives 4 without explaining the addition.",
@@ -103,11 +130,11 @@ func seedAudit(ctx context.Context, s *harness.Session) (fixture, error) {
 	if err != nil {
 		return f, fmt.Errorf("fail first audit: %w", err)
 	}
-	f.Original, err = s.GetWork(ctx, f.Root, f.Original.ID)
+	f.Original, err = s.GetWork(ctx, f.Coordinator, f.Original.ID)
 	if err != nil {
 		return f, fmt.Errorf("read failed original: %w", err)
 	}
-	repair, err := s.AssignWork(ctx, f.Root, work.AssignmentRequest{
+	repair, err := s.AssignWork(ctx, f.Coordinator, work.AssignmentRequest{
 		Kind: work.Repair, Assignee: f.Implementor, WorkID: f.Original.ID,
 		ExpectedRevision: f.Original.Revision, AuditID: audit.ID,
 	})
@@ -132,11 +159,11 @@ func seedAudit(ctx context.Context, s *harness.Session) (fixture, error) {
 		return f, fmt.Errorf("submit replacement outcome: %w", err)
 	}
 	f.Submission = latest.Submission
-	f.Original, err = s.GetWork(ctx, f.Root, f.Original.ID)
+	f.Original, err = s.GetWork(ctx, f.Coordinator, f.Original.ID)
 	if err != nil {
 		return f, fmt.Errorf("read current original: %w", err)
 	}
-	f.Plan, err = s.GetPlan(ctx, f.Root, f.Plan.ID)
+	f.Plan, err = s.GetPlan(ctx, f.Coordinator, f.Plan.ID)
 	if err != nil {
 		return f, fmt.Errorf("read current plan: %w", err)
 	}
@@ -147,7 +174,7 @@ func (f fixture) stimulus(scenarioID string) string {
 	if f.Schema != nil {
 		return f.schemaStimulus(scenarioID)
 	}
-	base := fmt.Sprintf("Arrange an independent audit of the current submitted answer for work %s. The implementor is %s; an existing independent auditor is %s. Use the current work and submission records. Finish this interaction once the audit is assigned; leave the verdict to the auditor.", f.Original.ID, f.Implementor, f.Auditor)
+	base := fmt.Sprintf("Arrange an independent audit of the current submitted answer for work %s. The implementor is %s; a new auditor for this audit is %s. Use the current work and submission records. Finish this interaction once the audit is assigned; leave the verdict to the auditor.", f.Original.ID, f.Implementor, f.Auditor)
 	switch scenarioID {
 	case "audit-wrong-assignee":
 		return base + fmt.Sprintf(" An old handoff suggested %s as the reviewer, but that actor wrote the answer. Ensure the reviewer is independent.", f.Implementor)

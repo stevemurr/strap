@@ -36,8 +36,20 @@ func describe(e conversation.Event) (eventlog.Data, any, error) {
 	case conversation.ContextTokensEvent:
 		kind = "context_tokens"
 		actor = v.Agent
+	case conversation.ServerMetricsEvent:
+		kind = "server_metrics"
+	case conversation.TodosEvent:
+		kind = "todos"
+		actor = v.Agent
+	case conversation.TesterEvent:
+		kind = "tester"
+		actor = v.Agent
 	case conversation.DiagnosticEvent:
 		kind = "diagnostic"
+	case conversation.EnvironmentEvent:
+		kind = "environment"
+		actor = v.Agent
+		correlation = v.InvocationID
 	case conversation.MessageEvent:
 		kind = "message"
 		actor = v.Message.From
@@ -115,8 +127,16 @@ func DecodeEvent(e eventlog.Event) (conversation.Event, error) {
 		return decode[conversation.ResearchEvent](e.Payload)
 	case "context_tokens":
 		return decode[conversation.ContextTokensEvent](e.Payload)
+	case "server_metrics":
+		return decode[conversation.ServerMetricsEvent](e.Payload)
+	case "todos":
+		return decode[conversation.TodosEvent](e.Payload)
+	case "tester":
+		return decode[conversation.TesterEvent](e.Payload)
 	case "diagnostic":
 		return decode[conversation.DiagnosticEvent](e.Payload)
+	case "environment":
+		return decode[conversation.EnvironmentEvent](e.Payload)
 	case "message":
 		v, err := decode[conversation.MessageEvent](e.Payload)
 		if err != nil {

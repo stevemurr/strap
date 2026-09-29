@@ -92,7 +92,7 @@ func TestResearchLivePlanComparison(t *testing.T) {
 				request += "Inspect directly without delegating."
 			}
 			start := time.Now()
-			if _, err = s.Send(s.Root(), request); err != nil {
+			if _, err = s.Send(s.Manager(), request); err != nil {
 				t.Fatal(err)
 			}
 			rootCalls, rejected := 0, 0
@@ -103,7 +103,7 @@ func TestResearchLivePlanComparison(t *testing.T) {
 				if err != nil {
 					t.Fatalf("incomplete trial: root_calls=%d total_calls=%d rejected=%d elapsed=%s trace=%s: %v", rootCalls, p.calls.Load(), rejected, time.Since(start), cfg.Events.JSONLPath, err)
 				}
-				if record.Kind == "output_started" && record.Agent == string(s.Root()) {
+				if record.Kind == "output_started" && record.Agent == string(s.Manager()) {
 					rootCalls++
 				}
 				if record.Kind != "tool" && record.Kind != "message" && record.Kind != "work" {
@@ -123,11 +123,11 @@ func TestResearchLivePlanComparison(t *testing.T) {
 						rejected++
 					}
 				case conversation.WorkEvent:
-					if e.Event.Kind == "research_delivered" {
+					if e.Event.Kind == "brief_delivered" {
 						delivered = true
 					}
 				case conversation.MessageEvent:
-					if e.Message.From == s.Root() && e.Message.To == message.User && e.Message.Kind == message.Reply {
+					if e.Message.From == s.Manager() && e.Message.To == message.User && e.Message.Kind == message.Reply {
 						answer = e.Message.Content
 					}
 				}

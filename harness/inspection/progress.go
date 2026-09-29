@@ -25,7 +25,7 @@ type ProgressQuery struct {
 	WorkID      work.ID                `json:"work_id,omitempty"`
 	ReportID    work.ProgressReportID  `json:"report_id,omitempty"`
 	FindingID   work.ProgressFindingID `json:"finding_id,omitempty"`
-	BriefID     work.ResearchBriefID   `json:"brief_id,omitempty"`
+	BriefID     work.BriefID           `json:"brief_id,omitempty"`
 	EvidenceRef string                 `json:"evidence_ref,omitempty"`
 	Cursor      string                 `json:"cursor,omitempty"`
 	Limit       int                    `json:"limit,omitempty"`
@@ -89,6 +89,11 @@ func NewProgressReader(r *Reader) (*ProgressReader, error) {
 	}
 	return p, nil
 }
+
+// UseKey replaces the random cursor-signing key, so a session's cursors are
+// reproducible from its seed.
+func (p *ProgressReader) UseKey(key [32]byte) { p.key = key }
+
 func (p *ProgressReader) encode(c progressCursor) string {
 	b, _ := json.Marshal(c)
 	m := hmac.New(sha256.New, p.key[:])
@@ -224,12 +229,21 @@ func (p *ProgressReader) records(ctx context.Context, c *progressCursor) ([]json
 		c.WorkID = x.WorkID
 		items = []json.RawMessage{rawRecord(x)}
 	case "brief":
-		x, e := v.GetResearchBrief(ctx, c.Actor, work.ResearchBriefID(c.Record))
+		x, e := v.GetBrief(ctx, c.Actor, work.BriefID(c.Record))
 		if e != nil {
 			return nil, 0, e
 		}
 		c.WorkID = x.WorkID
 		items = []json.RawMessage{rawRecord(x)}
+		// The findings the brief cites follow it, so one read delivers the
+		// research: managers otherwise spent a model turn per finding.
+		for _, id := range x.FindingIDs {
+			f, e := v.GetProgressFinding(ctx, c.Actor, id)
+			if e != nil {
+				return nil, 0, e
+			}
+			items = append(items, rawRecord(f))
+		}
 	case "reports":
 		m, _, e := v.workModel(ctx)
 		if e != nil {

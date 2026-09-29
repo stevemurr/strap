@@ -21,6 +21,9 @@ type Config struct {
 	Model      string
 	HTTPClient *http.Client
 	Generation Generation
+	// LooseTools sends tool schemas without strict, so the server does not
+	// constrain tool-call generation to them. Strict is the default.
+	LooseTools bool
 }
 
 // Client snapshots generation settings at construction and is safe to share
@@ -30,6 +33,7 @@ type Client struct {
 	wire             *chatwire.Client
 	generation       generationFields
 	tokenizeEndpoint string
+	looseTools       bool
 }
 
 var _ provider.Provider = (*Client)(nil)
@@ -61,7 +65,7 @@ func New(config Config) (*Client, error) {
 	u, _ := url.Parse(config.BaseURL)
 	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1") + "/tokenize"
 	u.RawPath = ""
-	return &Client{model: config.Model, wire: wire, generation: generation, tokenizeEndpoint: u.String()}, nil
+	return &Client{model: config.Model, wire: wire, generation: generation, tokenizeEndpoint: u.String(), looseTools: config.LooseTools}, nil
 }
 
 // HTTPError preserves rejected options and other bounded server diagnostics.
@@ -71,6 +75,9 @@ func (c *Client) Submit(ctx context.Context, input provider.Request, observer pr
 	base, err := chatwire.Encode(c.model, input)
 	if err != nil {
 		return provider.Response{}, fmt.Errorf("vllm: encode content: %w", err)
+	}
+	if c.looseTools {
+		base.LooseTools()
 	}
 	// Embed typed fields at the root. extra_body is an SDK convention, not a
 	// vLLM wire field. Only chat template options have a nested JSON object.

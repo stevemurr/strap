@@ -3,6 +3,10 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
 	"github.com/stevemurr/strap/harness"
@@ -11,12 +15,9 @@ import (
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
-	"os"
-	"testing"
-	"time"
 )
 
-// Opt-in discovery evaluation: the root uses a real model, while idle delegates
+// Opt-in discovery evaluation: the manager uses a real model, while idle delegates
 // isolate whether natural language selects the correct public operations.
 // STRAP_EVAL_URL and STRAP_EVAL_MODEL must both be set. Full real execution is
 // additionally exercised by examples/local; this test grades actual tool calls.
@@ -37,18 +38,18 @@ func TestAgentDiscoveryLive(t *testing.T) {
 			cfg.Model = harness.ModelConfig{Backend: "chatcompletions", BaseURL: url, Model: model, Timeout: 3 * time.Minute}
 			deps := harness.Dependencies{Implementor: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: textResponse("ready")}}
 			if scenario == "worker_help" {
-				deps = harness.Dependencies{Root: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: textResponse("ready")}}
+				deps = harness.Dependencies{Manager: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: textResponse("ready")}}
 			}
 			s, e := harness.New(ctx, cfg, deps)
 			if e != nil {
 				t.Fatal(e)
 			}
 			defer s.Dispose(context.Background())
-			if _, e = s.PauseAgent(s.Root()); e != nil {
+			if _, e = s.PauseAgent(s.Manager()); e != nil {
 				t.Fatal(e)
 			}
 			for {
-				in, e := s.InspectAgent(s.Root(), conversation.InspectOptions{})
+				in, e := s.InspectAgent(s.Manager(), conversation.InspectOptions{})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -67,7 +68,7 @@ func TestAgentDiscoveryLive(t *testing.T) {
 				selected = createWorker(t, s, roster.Implementor)
 			}
 			if scenario == "audit" || scenario == "repair" || scenario == "replace" {
-				original, e = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: selected, Task: "Calculate 2+2", Context: "This is a fixture for workflow discovery."})
+				original, e = s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: selected, Task: "Calculate 2+2", Context: "This is a fixture for workflow discovery."})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -76,10 +77,10 @@ func TestAgentDiscoveryLive(t *testing.T) {
 					if e != nil {
 						t.Fatal(e)
 					}
-					original, _ = s.GetWork(ctx, s.Root(), original.ID)
+					original, _ = s.GetWork(ctx, s.Manager(), original.ID)
 					if scenario == "repair" {
 						auditor := createWorker(t, s, roster.Auditor)
-						audit, e := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.AuditWork, Assignee: auditor, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: sub.ID})
+						audit, e := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.AuditWork, Assignee: auditor, WorkID: original.ID, ExpectedRevision: original.Revision, SubmissionID: sub.ID})
 						if e != nil {
 							t.Fatal(e)
 						}
@@ -108,14 +109,14 @@ func TestAgentDiscoveryLive(t *testing.T) {
 				"reuse":   "Reuse agent " + string(selected) + " to calculate 5+5. Give it a new task.",
 				"audit":   "Have another agent independently audit the submitted answer for work " + string(original.ID) + ".",
 				"repair":  "Repair the failed audit for work " + string(original.ID) + ". Start the repair now.",
-				"replace": "Replace the stopped worker " + string(selected) + " and transfer work " + string(original.ID) + " to the replacement.",
+				"replace": "Replace the stopped worker " + string(selected) + " and hand work " + string(original.ID) + " to the replacement.",
 			}
 			if scenario == "worker_help" {
-				_, e = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: selected, Task: "You need another agent to independently calculate 8+8 before you can proceed. Ask your owner to provide that help and report a blocker. Do not calculate or submit the answer yourself."})
+				_, e = s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: selected, Task: "You need another agent to independently calculate 8+8 before you can proceed. Ask your owner to provide that help and report a blocker. Do not calculate or submit the answer yourself."})
 			} else {
-				_, e = s.Send(s.Root(), prompts[scenario])
+				_, e = s.Send(s.Manager(), prompts[scenario])
 				if e == nil {
-					_, e = s.ResumeAgent(s.Root())
+					_, e = s.ResumeAgent(s.Manager())
 				}
 			}
 			if e != nil {
@@ -126,7 +127,7 @@ func TestAgentDiscoveryLive(t *testing.T) {
 				t.Fatal(e)
 			}
 			defer sub.Close()
-			created := false
+			created, cancelled := false, false
 			validationErrors := 0
 			defer func() { t.Logf("discovery rejected calls: %d", validationErrors) }()
 			for {
@@ -164,14 +165,14 @@ func TestAgentDiscoveryLive(t *testing.T) {
 							To identity.ActorID `json:"to"`
 						}]
 						json.Unmarshal(activity.Call.Arguments, &args)
-						if args.Value.To != s.Root() {
+						if args.Value.To != s.Manager() {
 							t.Fatal("help addressed to wrong actor")
 						}
 						return
 					}
 					continue
 				}
-				if record.Agent != string(s.Root()) {
+				if record.Agent != string(s.Manager()) {
 					continue
 				}
 				if activity.Call.Name == "create_agent" {
@@ -191,7 +192,7 @@ func TestAgentDiscoveryLive(t *testing.T) {
 					}
 					created = true
 				}
-				if activity.Call.Name == "assign_implementation" || activity.Call.Name == "assign_audit" || activity.Call.Name == "assign_repair" || activity.Call.Name == "assign_research" {
+				if activity.Call.Name == "assign_task" || activity.Call.Name == "assign_audit" || activity.Call.Name == "assign_repair" {
 					r, e := tool.DecodeAssignment(activity.Call.Name, activity.Call.Arguments)
 					if e != nil {
 						t.Fatal(e)
@@ -214,20 +215,20 @@ func TestAgentDiscoveryLive(t *testing.T) {
 					if scenario == "reuse" && r.Assignee != selected {
 						t.Fatal("did not reuse selected agent")
 					}
-					if scenario == "replace" {
-						t.Fatal("assigned new work instead of transferring existing work")
+					// Replacing a stopped worker cancels its work and assigns the
+					// work again to a newly created implementor.
+					if scenario == "replace" && (!created || !cancelled || r.Assignee == selected) {
+						t.Fatal("invalid replacement", r, created, cancelled)
 					}
 					return
 				}
-				if activity.Call.Name == "reassign_work" && scenario == "replace" {
-					r, err := tool.DecodeReassignment(activity.Call.Arguments)
-					if err != nil {
-						t.Fatal(err)
+				if activity.Call.Name == "cancel_work" && scenario == "replace" {
+					var in tool.Input[struct {
+						ID work.ID `json:"work_id"`
+					}]
+					if json.Unmarshal(activity.Call.Arguments, &in) == nil && in.Value.ID == original.ID {
+						cancelled = true
 					}
-					if !created || r.ID != original.ID || r.Assignee == selected || r.Assignee == "" {
-						t.Fatal("invalid replacement", r)
-					}
-					return
 				}
 			}
 		})

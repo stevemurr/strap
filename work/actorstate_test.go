@@ -64,3 +64,21 @@ func TestActorStateNamesOwnedAndAssignedRecords(t *testing.T) {
 		t.Fatalf("cancelled assignment still listed: %+v", got)
 	}
 }
+
+// An audit carries its implementation's scope; the steps stay reserved by the
+// implementation on every read, not by whichever item map order visits last
+// (ladder easy-03 replay, 2026-09-24).
+func TestActorStateReservesStepsForTheImplementationDuringAudit(t *testing.T) {
+	s, _, w := fixture(t)
+	w = ready(t, s, w)
+	audit := review(t, s, w.ID, submit(t, s, w).ID)
+	if audit.Scope == nil || len(audit.Scope.StepIDs) == 0 {
+		t.Fatalf("audit carries no scope, so it cannot contend for the steps: %+v", audit.Scope)
+	}
+	for range 100 {
+		steps := s.ActorState("root").Plans[0].Steps
+		if steps[0].ReservedBy != w.ID || steps[1].ReservedBy != w.ID || steps[2].ReservedBy != "" {
+			t.Fatalf("reservations during audit %s: %+v", audit.ID, steps)
+		}
+	}
+}

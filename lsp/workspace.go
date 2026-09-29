@@ -154,6 +154,12 @@ func (m *Manager) reconcile(ctx context.Context, s *instance) error {
 }
 
 func (m *Manager) syncDocument(ctx context.Context, s *instance, path, language string) (*document, error) {
+	return m.syncDocumentVersion(ctx, s, path, language, false)
+}
+
+// syncDocumentVersion synchronizes path; resend sends an unchanged open file
+// again as a new version.
+func (m *Manager) syncDocumentVersion(ctx context.Context, s *instance, path, language string, resend bool) (*document, error) {
 	text, err := textFile(path, m.config.MaxFileBytes)
 	if err != nil {
 		return nil, err
@@ -161,7 +167,7 @@ func (m *Manager) syncDocument(ctx context.Context, s *instance, path, language 
 	hash := digest([]byte(text))
 	c := s.client
 	d := s.documents[path]
-	if d != nil && d.hash == hash {
+	if d != nil && d.hash == hash && !resend {
 		m.sequence++
 		d.used = m.sequence
 		return d, nil

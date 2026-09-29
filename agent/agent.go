@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,8 +30,14 @@ type Spec struct {
 	ReasoningLimit uint64
 	// ReplyCheck runs before a text-only response is sent as the agent's reply.
 	// A non-empty notice is added to history instead and the model responds
-	// again. It runs at most once per exchange, so the next reply is sent.
-	ReplyCheck func(ctx context.Context, self message.ActorID) string
+	// again. It holds at most ReplyChecks replies per exchange (default one),
+	// so a reply after that is sent.
+	ReplyCheck  func(ctx context.Context, self message.ActorID) string
+	ReplyChecks int
+	// Concurrent names tools whose calls may run together: a response whose
+	// calls all name one of them runs them at once, as a web researcher's
+	// several page reads. Results still enter history in the order issued.
+	Concurrent []string
 }
 
 // ErrReasoningLimit marks a model call cancelled for streaming more reasoning
@@ -46,6 +53,7 @@ const maxReasoningRetries = 1
 func (s Spec) Clone() Spec {
 	s.Prompt = s.Prompt.Clone()
 	s.Tools = append([]tool.Tool(nil), s.Tools...)
+	s.Concurrent = append([]string(nil), s.Concurrent...)
 	return s
 }
 
@@ -60,7 +68,49 @@ type Config struct {
 	Outbox     message.Sender
 	// WakeContext attaches harness-owned state once per exchange; see WakeContext.
 	WakeContext WakeContext
+	// Intake decides which queued messages the agent takes; see Intake.
+	Intake Intake
+	// Sequence orders the steps that race other agents; see Sequence.
+	Sequence Sequence
 }
+
+// Sequence orders an agent's steps whose results depend on what other agents
+// have done by then: when each tool call starts, since a read such as a
+// message's receipt or an agent's state reports the moment it runs, and when
+// each inbox message is consumed, which such reads observe. A replay holds
+// each at its recorded place so every read sees what it saw when recorded.
+// Nil runs freely.
+type Sequence interface {
+	// ToolStart may block before the call is recorded as started; started is
+	// called once it has been.
+	ToolStart(ctx context.Context, invocation string) (started func())
+	// Consumed reports a message taken into history and acknowledged.
+	Consumed(id message.MessageID)
+	// Appended reports a message added to the agent's history at position,
+	// which reads of the agent's transcript observe.
+	Appended(position uint64)
+}
+
+// BatchSchedule is implemented by a Sequence that knows how a batch ran: a
+// replay runs concurrent tools together only where the recording did, since
+// a recording made before calls could run together interleaved each call's
+// start with the previous call's result.
+type BatchSchedule interface {
+	Together(invocations []string) bool
+}
+
+// Intake names the queued messages an agent takes when it reads its inbox,
+// given the history position the first of them will occupy. Without an
+// intake, or when it returns ok false, the agent takes what has arrived: at the
+// start of an exchange the oldest message, mid-exchange everything but
+// assignments. Which messages have arrived when a turn boundary passes is a
+// race between goroutines. A replay names what the recorded agent took there,
+// so each message lands where it landed then: the agent waits for every named
+// message, takes them in the named order, and leaves the rest queued. starting
+// is true when the agent begins an exchange and false when it takes messages
+// into one already running, so a message that began an exchange when recorded
+// is never pulled into the one before it.
+type Intake func(position uint64, starting bool) (ids []message.MessageID, ok bool)
 
 type Agent struct {
 	emission       sync.Mutex
@@ -73,6 +123,7 @@ type Agent struct {
 	config         Config
 	tools          map[string]tool.Tool
 	controls       map[string]tool.ControlKind
+	concurrent     map[string]bool
 	definitions    []provider.ToolDefinition
 	thread         thread
 	usage          usageTracker
@@ -96,7 +147,10 @@ func New(config Config) (*Agent, error) {
 		return nil, errors.New("agent requires a provider, inbox, and outbox")
 	}
 	config.Spec = config.Spec.Clone()
-	a := &Agent{config: config, tools: make(map[string]tool.Tool), controls: make(map[string]tool.ControlKind), bookkeeping: make(map[string]map[string]bool), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
+	a := &Agent{config: config, tools: make(map[string]tool.Tool), controls: make(map[string]tool.ControlKind), concurrent: make(map[string]bool), bookkeeping: make(map[string]map[string]bool), control: lifecycle{state: Idle, revision: 1, changed: make(chan struct{})}}
+	for _, name := range config.Spec.Concurrent {
+		a.concurrent[name] = true
+	}
 	for _, t := range config.Spec.Tools {
 		if t == nil {
 			return nil, errors.New("nil tool")
@@ -113,7 +167,7 @@ func New(config Config) (*Agent, error) {
 		}
 		if control, ok := t.(tool.ControlTool); ok {
 			kind := control.Control()
-			if kind != tool.YieldToInbox {
+			if kind != tool.YieldToInbox && kind != tool.FinishOnSuccess {
 				return nil, fmt.Errorf("invalid tool control: %s", kind)
 			}
 			a.controls[definition.Name] = kind
@@ -243,6 +297,9 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 	if err := a.report(HistoryAppended{Position: 1, Message: initial[0]}); err != nil {
 		return err
 	}
+	if a.config.Sequence != nil {
+		a.config.Sequence.Appended(1)
+	}
 	for {
 		run, cancel, err := a.beginExchange(ctx)
 		if err != nil {
@@ -272,7 +329,7 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 	if err := a.waitInbox(ctx); err != nil {
 		return err
 	}
-	incoming, err := a.config.Inbox.Receive(ctx)
+	incoming, err := a.receive(ctx)
 	if err != nil {
 		return err
 	}
@@ -289,7 +346,7 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 	admitted := false
 	malformed := 0
 	overrun := 0
-	replyChecked := false
+	replyChecks := 0
 	for {
 		if err := a.checkpoint(ctx); err != nil {
 			return err
@@ -298,7 +355,11 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 		// an exchange already running: it stays queued and starts the next one.
 		// Consumed mid-exchange, a second assignment to a busy worker was
 		// answered by a reply about the first and nothing woke the worker again.
-		for _, incoming := range a.config.Inbox.Take(func(m message.Message) bool { return m.Work == nil }) {
+		taken, err := a.take(ctx)
+		if err != nil {
+			return err
+		}
+		for _, incoming := range taken {
 			if !admitted {
 				inputs = append(inputs, incoming)
 			}
@@ -356,8 +417,8 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 			return err
 		}
 		if len(response.ToolCalls) == 0 {
-			if check := a.config.Spec.ReplyCheck; check != nil && !replyChecked {
-				replyChecked = true
+			if check := a.config.Spec.ReplyCheck; check != nil && replyChecks < max(1, a.config.Spec.ReplyChecks) {
+				replyChecks++
 				if notice := check(ctx, a.config.ID); notice != "" {
 					// Like the notices above, a synthetic user message not tied to the output.
 					if _, err := a.appendHistory(provider.Message{Role: "user", Content: content.Text(notice)}, nil); err != nil {
@@ -382,23 +443,55 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 		var toolRevision uint64
 		controlBatch := false
 		for _, call := range response.ToolCalls {
-			if a.controls[call.Name] != "" {
+			if a.controls[call.Name] == tool.YieldToInbox {
 				controlBatch = true
 			}
 		}
 		mixedControl := controlBatch && len(response.ToolCalls) != 1
 		yielded := false
+		finishedBy := ""
+		// A batch whose calls are all concurrent tools runs them at once;
+		// the results are settled below in the order the model issued them.
+		together := len(response.ToolCalls) > 1 && !controlBatch
 		for _, call := range response.ToolCalls {
+			together = together && a.concurrent[call.Name]
+		}
+		if together {
+			if schedule, ok := a.config.Sequence.(BatchSchedule); ok {
+				ids := make([]string, len(response.ToolCalls))
+				for i := range ids {
+					ids[i] = fmt.Sprintf("%s/tool-%d", a.config.ID, a.nextInvocation+uint64(i)+1)
+				}
+				together = schedule.Together(ids)
+			}
+		}
+		var ran []callOutcome
+		if together {
 			if err := a.checkpoint(ctx); err != nil {
 				return err
 			}
-			var rejected error
-			if mixedControl {
-				rejected = errors.New("control tool must be the sole call; no calls in this batch executed")
+			ran = a.invokeTogether(ctx, response.ToolCalls)
+		}
+		for i, call := range response.ToolCalls {
+			var result tool.Result
+			var err error
+			if together {
+				result, err = ran[i].result, ran[i].err
+			} else {
+				if err := a.checkpoint(ctx); err != nil {
+					return err
+				}
+				var rejected error
+				if mixedControl {
+					rejected = errors.New("control tool must be the sole call; no calls in this batch executed")
+				}
+				result, err = a.invokeCall(ctx, call, rejected)
 			}
-			result, err := a.invokeCall(ctx, call, rejected)
 			if err == nil && !mixedControl && a.controls[call.Name] == tool.YieldToInbox {
 				yielded = true
+			}
+			if err == nil && !mixedControl && a.controls[call.Name] == tool.FinishOnSuccess && finishedBy == "" {
+				finishedBy = call.ID
 			}
 			if ctx.Err() != nil && err == nil && len(result.Content) == 0 {
 				err = ctx.Err()
@@ -443,14 +536,71 @@ func (a *Agent) exchange(ctx context.Context, last *message.MessageID) error {
 				return err
 			}
 		}
-		if yielded {
-			if err := a.report(Yielded{Output: output, CallID: response.ToolCalls[0].ID, SettledRevision: toolRevision}); err != nil {
+		if yielded || finishedBy != "" {
+			callID := finishedBy
+			if yielded {
+				callID = response.ToolCalls[0].ID
+			}
+			if err := a.report(Yielded{Output: output, CallID: callID, SettledRevision: toolRevision}); err != nil {
 				return err
 			}
 			break
 		}
 	}
 	return nil
+}
+
+// receive takes the message that starts an exchange.
+func (a *Agent) receive(ctx context.Context) (message.Message, error) {
+	if a.config.Intake != nil {
+		if ids, ok := a.config.Intake(a.thread.length()+1, true); ok && len(ids) > 0 {
+			taken, err := a.takeNamed(ctx, ids[:1])
+			if err != nil {
+				return message.Message{}, err
+			}
+			return taken[0], nil
+		}
+	}
+	return a.config.Inbox.Receive(ctx)
+}
+
+// take takes the messages that join a running exchange.
+func (a *Agent) take(ctx context.Context) ([]message.Message, error) {
+	if a.config.Intake != nil {
+		if ids, ok := a.config.Intake(a.thread.length()+1, false); ok {
+			return a.takeNamed(ctx, ids)
+		}
+	}
+	return a.config.Inbox.Take(func(m message.Message) bool { return m.Work == nil }), nil
+}
+
+func (a *Agent) takeNamed(ctx context.Context, ids []message.MessageID) ([]message.Message, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	want := map[message.MessageID]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	err := a.config.Inbox.Await(ctx, func(queued []message.Message) bool {
+		found := 0
+		for _, m := range queued {
+			if want[m.ID] {
+				found++
+			}
+		}
+		return found == len(want)
+	})
+	if err != nil {
+		return nil, err
+	}
+	taken := a.config.Inbox.Take(func(m message.Message) bool { return want[m.ID] })
+	order := map[message.MessageID]int{}
+	for i, id := range ids {
+		order[id] = i
+	}
+	slices.SortStableFunc(taken, func(x, y message.Message) int { return order[x.ID] - order[y.ID] })
+	return taken, nil
 }
 
 func (a *Agent) consume(incoming message.Message) error {
@@ -462,7 +612,13 @@ func (a *Agent) consume(incoming message.Message) error {
 	if err != nil {
 		return err
 	}
-	return a.report(Consumed{Receipt: message.Receipt{MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed}})
+	if err := a.report(Consumed{Receipt: message.Receipt{MessageID: incoming.ID, Recipient: a.config.ID, Status: message.Consumed}}); err != nil {
+		return err
+	}
+	if a.config.Sequence != nil {
+		a.config.Sequence.Consumed(incoming.ID)
+	}
+	return nil
 }
 
 func (a *Agent) request() (provider.Request, uint64) {
@@ -470,13 +626,68 @@ func (a *Agent) request() (provider.Request, uint64) {
 	return provider.Request{Agent: a.config.ID, Messages: messages, Tools: a.Definitions()}, revision
 }
 
-func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected error) (result tool.Result, err error) {
+type callOutcome struct {
+	result tool.Result
+	err    error
+}
+
+// startedCall is a call that has its invocation and has reported its start.
+type startedCall struct {
+	call       provider.ToolCall
+	invocation string
+	started    time.Time
+	err        error
+}
+
+// invokeTogether starts calls in order, so their invocations and start
+// records follow the order issued as a replay expects, then runs them at once.
+func (a *Agent) invokeTogether(ctx context.Context, calls []provider.ToolCall) []callOutcome {
+	started := make([]startedCall, len(calls))
+	for i, call := range calls {
+		started[i] = a.startCall(ctx, call)
+	}
+	out := make([]callOutcome, len(calls))
+	var wg sync.WaitGroup
+	for i := range started {
+		if started[i].err != nil {
+			out[i].err = started[i].err
+			continue
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			out[i].result, out[i].err = a.runCall(ctx, started[i], nil)
+		}(i)
+	}
+	wg.Wait()
+	return out
+}
+
+func (a *Agent) invokeCall(ctx context.Context, call provider.ToolCall, rejected error) (tool.Result, error) {
+	s := a.startCall(ctx, call)
+	if s.err != nil {
+		return tool.Result{}, s.err
+	}
+	return a.runCall(ctx, s, rejected)
+}
+
+// startCall assigns the call's invocation and reports its start.
+func (a *Agent) startCall(ctx context.Context, call provider.ToolCall) startedCall {
 	started := time.Now()
 	a.nextInvocation++
 	invocation := fmt.Sprintf("%s/tool-%d", a.config.ID, a.nextInvocation)
-	if err := a.reportTool(ToolActivity{InvocationID: invocation, Call: call, StartedAt: started}); err != nil {
-		return tool.Result{}, err
+	begun := func() {}
+	if a.config.Sequence != nil {
+		begun = a.config.Sequence.ToolStart(ctx, invocation)
 	}
+	err := a.reportTool(ToolActivity{InvocationID: invocation, Call: call, StartedAt: started})
+	begun()
+	return startedCall{call: call, invocation: invocation, started: started, err: err}
+}
+
+// runCall executes a started call and reports its finish.
+func (a *Agent) runCall(ctx context.Context, s startedCall, rejected error) (result tool.Result, err error) {
+	call, invocation, started := s.call, s.invocation, s.started
 	defer func() {
 		observedErr := err
 		if observedErr == nil {

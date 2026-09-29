@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/stevemurr/strap/roster"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stevemurr/strap/roster"
 
 	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/conversation"
@@ -26,9 +27,10 @@ type cycleProvider struct {
 	mu          sync.Mutex
 	session     *Session
 	plan        work.Plan
-	root        message.ActorID
+	manager     message.ActorID
 	implementor message.ActorID
 	auditor     message.ActorID
+	audited     map[message.ActorID]bool // Auditors already assigned; every audit gets a new one.
 	repaired    map[work.AuditID]bool
 	assigned    bool
 	reviews     map[work.SubmissionID]bool
@@ -50,7 +52,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 			return provider.Response{}, fmt.Errorf("script tool failed: %s", m.Content.Text())
 		}
 	}
-	if r.Agent == p.root {
+	if r.Agent == p.manager {
 		for _, m := range r.Messages {
 			if m.Role == "tool" {
 				var reg roster.Registration
@@ -72,7 +74,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		}
 		if !p.assigned {
 			p.assigned = true
-			return invoke("assign_implementation", tool.AssignImplementationArgs{Assignee: p.implementor, Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
+			return invoke("assign_task", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(p.implementor), Task: "implement storage", Scope: &work.Scope{PlanID: p.plan.ID, StepIDs: []work.StepID{p.plan.Steps[0].ID, p.plan.Steps[1].ID}}})
 		}
 		for i := len(r.Messages) - 1; i >= 0; i-- {
 			m := r.Messages[i]
@@ -81,7 +83,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 			}
 			e := m.Envelope.Event
 			if e.Kind == work.AuditCompleted && e.Work.State == work.ChangesRequested && !p.repaired[e.AuditID] {
-				w, err := p.session.Store.GetWork(p.root, e.Work.ID)
+				w, err := p.session.Store.GetWork(p.manager, e.Work.ID)
 				if err != nil {
 					return provider.Response{}, err
 				}
@@ -101,13 +103,20 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 				return provider.Response{Content: "Audited outcome accepted."}, nil
 			}
 			if e.Kind == work.ReviewRequested && !p.reviews[e.SubmissionID] {
-				w, err := p.session.Store.GetWork(p.root, e.Work.ID)
+				w, err := p.session.Store.GetWork(p.manager, e.Work.ID)
 				if err != nil {
 					return provider.Response{}, err
 				}
 				if w.State != work.NeedsCheck {
 					continue
 				}
+				if p.audited[p.auditor] {
+					return invoke("create_agent", roster.CreateRequest{Role: roster.Auditor})
+				}
+				if p.audited == nil {
+					p.audited = map[message.ActorID]bool{}
+				}
+				p.audited[p.auditor] = true
 				p.reviews[e.SubmissionID] = true
 				return invoke("assign_audit", tool.AssignAuditArgs{Assignee: p.auditor, WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, SubmissionID: w.LatestSubmissionID})
 			}
@@ -128,7 +137,7 @@ func (p *cycleProvider) Submit(ctx context.Context, r provider.Request, observer
 		return provider.Response{}, err
 	}
 	for _, def := range r.Tools {
-		if def.Name == "assign_implementation" || def.Name == "create_agent" {
+		if def.Name == "assign_task" || def.Name == "create_agent" {
 			return provider.Response{}, fmt.Errorf("delegation leaked to worker")
 		}
 		if w.Kind == work.AuditWork && def.Name == "submit_work" {
@@ -193,18 +202,19 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 			t.Error(e)
 		}
 	})
-	_, err := c.CreateAgent(message.User, agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "root"}, Tools: s.RootTools()})
+	s.UseManager(agent.Spec{Provider: p, Prompt: prompt.Prompt{Role: "manager"}, Tools: s.CoordinationTools()})
+	manager, err := s.CreateManager(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.root = c.Root()
+	p.manager = manager
 	// Exercise the public creation contract, rather than constructing the plan
 	// directly in the store and bypassing the model-facing boundary.
-	for _, operation := range s.RootTools() {
+	for _, operation := range s.CoordinationTools() {
 		if operation.Definition().Name != "create_plan" {
 			continue
 		}
-		created, err := operation.Call(ctx, tool.Call{Actor: p.root, Arguments: json.RawMessage(`{"input":{"title":"Storage","steps":[{"title":"Implement","acceptance_criteria":null},{"title":"Test","acceptance_criteria":null},{"title":"Integrate","acceptance_criteria":null}]}}`)})
+		created, err := operation.Call(ctx, tool.Call{Actor: p.manager, Arguments: json.RawMessage(`{"input":{"title":"Storage","steps":[{"title":"Implement","acceptance_criteria":null},{"title":"Test","acceptance_criteria":null},{"title":"Integrate","acceptance_criteria":null}]}}`)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,7 +225,7 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 	if p.plan.ID == "" {
 		t.Fatal("plan tool did not create a plan")
 	}
-	if _, err = c.Send(c.Root(), "Begin"); err != nil {
+	if _, err = c.Send(p.manager, "Begin"); err != nil {
 		t.Fatal(err)
 	}
 	// Deliberately never call Session.NextEvent while the workflow runs.
@@ -227,7 +237,7 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("work cycle did not finish", ctx.Err())
 	}
-	plan, err := s.Store.GetPlan(p.root, p.plan.ID)
+	plan, err := s.Store.GetPlan(p.manager, p.plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,19 +250,17 @@ func TestFullCycleWithoutUIReader(t *testing.T) {
 	if reviews != 2 {
 		t.Fatal("expected audit and reaudit", reviews)
 	}
-	if len(c.Agents()) != 3 {
+	if len(c.Agents()) != 4 { // Manager, one implementor, two auditors.
 		t.Fatal("repair should reuse implementor", c.Agents())
 	}
 	// Existing implementors cannot be selected as auditors by the host adapter.
-	s.mu.Lock()
 	var impl message.ActorID
-	for id, kind := range s.roles {
-		if kind.Role == roster.Implementor {
-			impl = id
+	for _, r := range s.graph.Agents() {
+		if r.Role == roster.Implementor {
+			impl = r.AgentID
 		}
 	}
-	s.mu.Unlock()
-	if err := s.eligible(impl, work.AuditWork); err == nil {
+	if err := s.eligible(coord(s), impl, work.AuditWork); err == nil {
 		t.Fatal("role check failed")
 	}
 }
@@ -286,7 +294,12 @@ func TestOldBindingFailureAndPendingAssignment(t *testing.T) {
 		t.Fatal(e)
 	}
 	oldBinding := binding{w.ID, w.AssignedAtRevision, w.Assignee, w.Owner}
-	w, e = store.Reassign(root.AgentID, work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Assignee: next.AgentID})
+	// The work is cancelled and assigned again to another agent before the
+	// dispatcher runs: only the new assignment may be delivered.
+	if _, e = store.Cancel(root.AgentID, work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "replaced"}); e != nil {
+		t.Fatal(e)
+	}
+	w, e = store.AssignWork(root.AgentID, work.AssignRequest{Assignee: next.AgentID, Task: "work"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -307,7 +320,7 @@ func TestOldBindingFailureAndPendingAssignment(t *testing.T) {
 			t.Fatal(err)
 		}
 		if m, ok := event.(conversation.MessageEvent); ok && m.Message.Work != nil {
-			if m.Message.To != next.AgentID || m.Message.Work.AssignedAtRevision != w.AssignedAtRevision {
+			if m.Message.To != next.AgentID || m.Message.Work.ID != w.ID || m.Message.Work.AssignedAtRevision != w.AssignedAtRevision {
 				t.Fatal("stale assignment delivered")
 			}
 			break
@@ -315,16 +328,23 @@ func TestOldBindingFailureAndPendingAssignment(t *testing.T) {
 	}
 }
 
+// recoverySession boots a session the way the harness does: the session's one
+// manager, which the user talks to and which coordinates all work. coord
+// returns it.
 func recoverySession(t *testing.T) (context.Context, *Session) {
+	t.Helper()
+	return recoverySessionWith(t, agent.Spec{Provider: idleProvider{}})
+}
+
+func recoverySessionWith(t *testing.T, manager agent.Spec) (context.Context, *Session) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	t.Cleanup(cancel)
 	c := conversation.New(ctx)
 	s := New(ctx, c, agent.Spec{Provider: idleProvider{}}, agent.Spec{Provider: idleProvider{}})
-	if _, e := c.CreateAgent(message.User, agent.Spec{Provider: idleProvider{}, Tools: s.RootTools()}); e != nil {
-		t.Fatal(e)
-	}
-	if err := s.RegisterRoot(); err != nil {
+	manager.Tools = append(manager.Tools, s.CoordinationTools()...)
+	s.UseManager(manager)
+	if _, err := s.CreateManager(ctx); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -336,15 +356,19 @@ func recoverySession(t *testing.T) (context.Context, *Session) {
 	})
 	return ctx, s
 }
-func invokeRoot(t *testing.T, s *Session, name string, args any) tool.Result {
+
+// coord returns the session's manager, the only agent that coordinates work.
+func coord(s *Session) message.ActorID { return s.graph.Find(roster.Manager) }
+
+func invokeManager(t *testing.T, s *Session, name string, args any) tool.Result {
 	t.Helper()
 	raw, e := tool.MarshalInput(args)
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, op := range s.RootTools() {
+	for _, op := range s.CoordinationTools() {
 		if op.Definition().Name == name {
-			v, e := op.Call(context.Background(), tool.Call{Actor: s.Root(), Arguments: raw})
+			v, e := op.Call(context.Background(), tool.Call{Actor: coord(s), Arguments: raw})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -356,7 +380,7 @@ func invokeRoot(t *testing.T, s *Session, name string, args any) tool.Result {
 }
 func assigned(t *testing.T, s *Session) work.Work {
 	t.Helper()
-	result := invokeRoot(t, s, "assign_implementation", tool.AssignImplementationArgs{Assignee: createWorker(t, s, roster.Implementor), Task: "task"})
+	result := invokeManager(t, s, "assign_task", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(createWorker(t, s, roster.Implementor)), Task: "task"})
 	var w work.Work
 	if e := json.Unmarshal([]byte(result.Content.Text()), &w); e != nil {
 		t.Fatal(e)
@@ -375,40 +399,7 @@ func nextEvent(t *testing.T, ctx context.Context, s *Session, predicate func(con
 		}
 	}
 }
-func TestReassignUsesExplicitReplacementAndNotifiesDisplacedActor(t *testing.T) {
-	ctx, s := recoverySession(t)
-	w := assigned(t, s)
-	nextEvent(t, ctx, s, func(e conversation.Event) bool {
-		m, ok := e.(conversation.MessageEvent)
-		return ok && m.Message.Work != nil && m.Message.Work.ID == w.ID
-	})
-	value := invokeRoot(t, s, "reassign_work", map[string]any{"assignee": createWorker(t, s, roster.Implementor), "work_id": w.ID, "expected_revision": w.Revision})
-	var replacement work.Work
-	if e := json.Unmarshal([]byte(value.Content.Text()), &replacement); e != nil {
-		t.Fatal(e)
-	}
-	if replacement.Assignee == w.Assignee {
-		t.Fatal("replacement not provisioned")
-	}
-	nextEvent(t, ctx, s, func(e conversation.Event) bool {
-		m, ok := e.(conversation.MessageEvent)
-		return ok && m.Message.To == w.Assignee && m.Message.Event != nil && m.Message.Event.Kind == work.WorkReassigned
-	})
-	if _, e := s.Controller.StopAgent(replacement.Assignee); e != nil {
-		t.Fatal(e)
-	}
-	nextEvent(t, ctx, s, func(e conversation.Event) bool {
-		exit, ok := e.(conversation.AgentExited)
-		return ok && exit.Agent == replacement.Assignee
-	})
-	value = invokeRoot(t, s, "reassign_work", map[string]any{"assignee": createWorker(t, s, roster.Implementor), "work_id": replacement.ID, "expected_revision": replacement.Revision})
-	var final work.Work
-	_ = json.Unmarshal([]byte(value.Content.Text()), &final)
-	if final.Assignee == replacement.Assignee {
-		t.Fatal("dead implementor not replaced")
-	}
-}
-func TestAuditCancellationWakesRootAndSubmissionNeedsNoLiveImplementor(t *testing.T) {
+func TestAuditCancellationWakesManagerAndSubmissionNeedsNoLiveImplementor(t *testing.T) {
 	ctx, s := recoverySession(t)
 	w := assigned(t, s)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
@@ -422,22 +413,22 @@ func TestAuditCancellationWakesRootAndSubmissionNeedsNoLiveImplementor(t *testin
 	if s.current(binding{w.ID, w.AssignedAtRevision, w.Assignee, w.Owner}) {
 		t.Fatal("submitted work still requires active execution")
 	}
-	original, _ := s.Store.GetWork(s.Root(), w.ID)
-	result := invokeRoot(t, s, "assign_audit", tool.AssignAuditArgs{Assignee: createWorker(t, s, roster.Auditor), WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: original.Revision}, SubmissionID: sub.ID})
+	original, _ := s.Store.GetWork(coord(s), w.ID)
+	result := invokeManager(t, s, "assign_audit", tool.AssignAuditArgs{Assignee: createWorker(t, s, roster.Auditor), WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: original.Revision}, SubmissionID: sub.ID})
 	var audit work.Work
 	_ = json.Unmarshal([]byte(result.Content.Text()), &audit)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
 		m, ok := e.(conversation.MessageEvent)
 		return ok && m.Message.Work != nil && m.Message.Work.ID == audit.ID
 	})
-	invokeRoot(t, s, "cancel_work", work.CancelRequest{WorkTarget: work.WorkTarget{ID: audit.ID, ExpectedRevision: audit.Revision}, Reason: "replace audit"})
+	invokeManager(t, s, "cancel_work", work.CancelRequest{WorkTarget: work.WorkTarget{ID: audit.ID, ExpectedRevision: audit.Revision}, Reason: "replace audit"})
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
 		m, ok := e.(conversation.MessageEvent)
 		return ok && m.Message.To == audit.Assignee && m.Message.Event != nil && m.Message.Event.Kind == work.WorkCancelled
 	})
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
 		m, ok := e.(conversation.MessageEvent)
-		return ok && m.Message.To == s.Root() && m.Message.Event != nil && m.Message.Event.Kind == work.ReviewRequested && m.Message.Event.Actor == s.Root()
+		return ok && m.Message.To == coord(s) && m.Message.Event != nil && m.Message.Event.Kind == work.ReviewRequested && m.Message.Event.Actor == coord(s)
 	})
 }
 func TestUndeliveredOwnerNotificationRemainsPending(t *testing.T) {
@@ -447,12 +438,12 @@ func TestUndeliveredOwnerNotificationRemainsPending(t *testing.T) {
 		m, ok := e.(conversation.MessageEvent)
 		return ok && m.Message.Work != nil && m.Message.Work.ID == w.ID
 	})
-	if _, e := s.Controller.PauseAgent(s.Root()); e != nil {
+	if _, e := s.Controller.PauseAgent(coord(s)); e != nil {
 		t.Fatal(e)
 	}
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
 		state, ok := e.(conversation.AgentStateChanged)
-		return ok && state.Agent == s.Root() && state.State == agent.Paused
+		return ok && state.Agent == coord(s) && state.State == agent.Paused
 	})
 	if _, e := s.Store.SubmitWork(w.Assignee, work.SubmitRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Summary: "done"}); e != nil {
 		t.Fatal(e)
@@ -460,13 +451,13 @@ func TestUndeliveredOwnerNotificationRemainsPending(t *testing.T) {
 	var id work.EventID
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
 		m, ok := e.(conversation.MessageEvent)
-		if ok && m.Message.To == s.Root() && m.Message.Event != nil && m.Message.Event.Kind == work.ReviewRequested {
+		if ok && m.Message.To == coord(s) && m.Message.Event != nil && m.Message.Event.Kind == work.ReviewRequested {
 			id = m.Message.Event.ID
 			return true
 		}
 		return false
 	})
-	if _, e := s.Controller.StopAgent(s.Root()); e != nil {
+	if _, e := s.Controller.StopAgent(coord(s)); e != nil {
 		t.Fatal(e)
 	}
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
@@ -485,7 +476,7 @@ func TestUndeliveredOwnerNotificationRemainsPending(t *testing.T) {
 }
 func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 	ctx, s := recoverySession(t)
-	reg, e := s.CreateAgent(ctx, s.Root(), roster.CreateRequest{Role: roster.Implementor})
+	reg, e := s.CreateAgent(ctx, coord(s), roster.CreateRequest{Role: roster.Implementor})
 	id := reg.AgentID
 	if e != nil {
 		t.Fatal(e)
@@ -497,7 +488,7 @@ func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 		state, ok := e.(conversation.AgentStateChanged)
 		return ok && state.Agent == id && state.State == agent.Paused
 	})
-	value := invokeRoot(t, s, "assign_implementation", tool.AssignImplementationArgs{Assignee: id, Task: "paused work"})
+	value := invokeManager(t, s, "assign_task", tool.AssignTaskArgs{Kind: work.Implementation, Assignee: ptr(id), Task: "paused work"})
 	var w work.Work
 	_ = json.Unmarshal([]byte(value.Content.Text()), &w)
 	nextEvent(t, ctx, s, func(e conversation.Event) bool {
@@ -516,7 +507,7 @@ func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 		if m, ok := event.(conversation.MessageEvent); ok && m.Message.Kind == message.Notification && strings.Contains(m.Message.Content, "delivery/execution needs attention") {
 			count++
 		}
-		if m, ok := event.(conversation.MessageEvent); ok && m.Message.From == s.Root() && m.Message.Kind == message.Reply && count > 0 {
+		if m, ok := event.(conversation.MessageEvent); ok && m.Message.From == coord(s) && m.Message.Kind == message.Reply && count > 0 {
 			break
 		}
 	}
@@ -527,7 +518,7 @@ func TestPausedImplementorExitHasOneRecoveryNotification(t *testing.T) {
 
 func createWorker(t *testing.T, s *Session, role roster.Role) message.ActorID {
 	t.Helper()
-	v := invokeRoot(t, s, "create_agent", roster.CreateRequest{Role: role})
+	v := invokeManager(t, s, "create_agent", roster.CreateRequest{Role: role})
 	var r roster.Registration
 	if e := json.Unmarshal([]byte(v.Content.Text()), &r); e != nil {
 		t.Fatal(e)

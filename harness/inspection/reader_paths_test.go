@@ -145,12 +145,12 @@ func TestWorkCursorValidation(t *testing.T) {
 		}
 	}
 	// A cursor issued by the reader itself continues the listing.
-	page := decode[work.ListPage](t, f.get(t, fmt.Sprintf("/work?actor=%s&limit=1", f.root)))
+	page := decode[work.ListPage](t, f.get(t, fmt.Sprintf("/work?actor=%s&limit=1", f.manager)))
 	if len(page.Items) != 1 {
 		t.Fatal("limit did not bound the page", page)
 	}
 	if page.NextCursor != "" {
-		if w := f.get(t, "/work?actor="+string(f.root)+"&cursor="+page.NextCursor); w.Code != 200 {
+		if w := f.get(t, "/work?actor="+string(f.manager)+"&cursor="+page.NextCursor); w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
 	}
@@ -168,7 +168,7 @@ func TestViewInspectWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := view.ListWork(f.ctx, f.root, work.ListQuery{})
+	listed, err := view.ListWork(f.ctx, f.manager, work.ListQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,14 +176,14 @@ func TestViewInspectWork(t *testing.T) {
 		t.Fatal("the trace recorded no work")
 	}
 	id := listed.Items[0].ID
-	got, err := view.InspectWork(f.ctx, f.root, id)
+	got, err := view.InspectWork(f.ctx, f.manager, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Work.ID != id {
 		t.Fatal("inspection returned a different item", got.Work.ID, id)
 	}
-	if _, err := view.InspectWork(f.ctx, f.root, "w-missing"); err == nil {
+	if _, err := view.InspectWork(f.ctx, f.manager, "w-missing"); err == nil {
 		t.Fatal("inspected work that does not exist")
 	}
 	if _, err := view.InspectWork(f.ctx, "ghost", id); err == nil {

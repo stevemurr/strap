@@ -2,6 +2,7 @@ package message_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/stevemurr/strap/message"
@@ -18,7 +19,7 @@ func TestWorkRoundTrip(t *testing.T) {
 		if err := json.Unmarshal(encoded, &got); err != nil {
 			t.Fatal(err)
 		}
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %+v, want %+v", got, want)
 		}
 	}

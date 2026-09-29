@@ -73,6 +73,6 @@ func (s *Session) researchReadTool() tool.Tool {
 		if err != nil {
 			return tool.Result{}, err
 		}
-		return tool.JSON(p)
+		return modelJSON(p)
 	})
 }

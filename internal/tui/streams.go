@@ -26,7 +26,7 @@ type streamUI struct {
 	stackOffset       int
 	frozenStacks      []string
 	frozenPeek        *stackPreview
-	order             []message.ActorID // Stable discovery order, root first.
+	order             []message.ActorID // Stable discovery order, manager first.
 	views             map[message.ActorID]*agentStream
 	works             map[work.ID]work.Work
 	workOrder         []work.ID
@@ -60,13 +60,13 @@ type streamPosition struct {
 
 func (m *model) initStreams() {
 	m.streamUI = streamUI{
-		selected:          m.session.Root(),
+		selected:          m.session.Manager(),
 		completedExpanded: true,
 		views:             make(map[message.ActorID]*agentStream),
 		works:             make(map[work.ID]work.Work),
 	}
 	m.ensureStream("")
-	m.ensureStream(m.session.Root())
+	m.ensureStream(m.session.Manager())
 	for _, info := range m.session.Agents() {
 		m.ensureStream(info.ID).parent = info.Parent
 		m.states[info.ID] = info.State
@@ -115,7 +115,7 @@ func (m *model) markStreamRead() {
 	if len(read) == 0 {
 		return
 	}
-	// A routed message seen in the root stream is also read in its sender's
+	// A routed message seen in the manager stream is also read in its sender's
 	// stream. Unrelated child activity remains unread until actually visited.
 	for id, v := range m.streamUI.views {
 		if id == m.streamUI.selected {
@@ -284,13 +284,13 @@ func (m *model) streamKey(key tea.KeyMsg) bool {
 
 func (m *model) focusCommand(fields []string) {
 	if len(fields) > 2 {
-		m.add("Error", "Usage: /focus [agent-id|root|all]", true)
+		m.add("Error", "Usage: /focus [agent-id|manager|all]", true)
 		return
 	}
-	id := m.session.Root()
+	id := m.session.Manager()
 	if len(fields) == 2 {
 		switch fields[1] {
-		case "root":
+		case "manager", "root": // "root" from before the manager was the entry agent.
 		case "all":
 			id = ""
 		default:
@@ -371,8 +371,14 @@ func workStatus(w work.Work) string {
 		}
 		return "repair in progress"
 	}
-	if w.Kind == work.Research {
+	if w.Kind == work.Review {
+		return "reviewing"
+	}
+	if w.Kind.Investigation() {
 		return "researching"
+	}
+	if w.Kind == work.Experiment {
+		return "experimenting"
 	}
 	if w.Kind == work.AuditWork {
 		return "auditing"
@@ -468,8 +474,8 @@ func (m *model) streamActivity(id message.ActorID) string {
 }
 
 func (m *model) streamRole(id message.ActorID) string {
-	if id == m.session.Root() {
-		return "root"
+	if id == m.session.Manager() {
+		return m.entry
 	}
 	if w, ok := m.streamWork(id); ok {
 		if w.Kind == work.AuditWork {

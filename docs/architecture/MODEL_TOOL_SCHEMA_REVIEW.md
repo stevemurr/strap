@@ -221,6 +221,21 @@ need separate scenarios. The adversarial malformed-output regression injects a
 provider error and does not validate actual server serialization or wire parsing.
 Short live workflows and the practical ladder remain the composition checks.
 
+## Update 2026-09-27: one command for new work
+
+`assign_implementation`, `assign_research` and `assign_experiment` became one
+`assign_task` whose required `kind` enum (`implementation`, `review`,
+`web_research`, `deep_research`, `experiment`) names the work and the role that
+does it. This does not reintroduce the defect above: those three commands took
+identical fields (assignee, task, context, expected_output, scope), so the
+schema still states every requirement without conditions on `kind`. Audits and
+repairs, whose fields differ, keep their own commands. `assignee` is an idle
+agent of the kind's role or null to create one; a role or agent that does other
+work is rejected with the role that does this kind. The motivation was the
+taxonomy: a reviewer was assigned "research" and the ledger recorded its work
+as research. Routing before and after was measured live with the same
+requests (`eval/results/_routing`).
+
 ## Code entry points
 
 - [Exact discriminator schema export](../../tool/compose.go)

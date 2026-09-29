@@ -84,17 +84,17 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 		return provider.Response{Content: "fresh answer"}, nil
 	})
 	s := interruptSession(t, harness.Dependencies{Provider: p})
-	root := s.Root()
+	root := s.Manager()
 	worker := createWorker(t, s, roster.Implementor)
-	researcher := createWorker(t, s, roster.Researcher)
+	researcher := createWorker(t, s, roster.WebResearcher)
 	if _, err := s.Send(root, "original task"); err != nil {
 		t.Fatal(err)
 	}
-	implementation, err := s.AssignWork(context.Background(), root, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "implement"})
+	implementation, err := s.AssignWork(context.Background(), s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "implement"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	research, err := s.AssignWork(context.Background(), root, work.AssignmentRequest{Kind: work.Research, Assignee: researcher, Task: "investigate"})
+	research, err := s.AssignWork(context.Background(), s.Manager(), work.AssignmentRequest{Kind: work.WebResearch, Assignee: researcher, Task: "investigate"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,12 +107,15 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 		t.Fatal(err)
 	}
 	interruptNow(t, s)
-	if s.State() != harness.Open || s.Root() != root {
+	if s.State() != harness.Open || s.Manager() != root {
 		t.Fatal("interruption replaced or closed the session")
 	}
 	for _, a := range s.Agents() {
 		if a.State != agent.Interrupted {
 			t.Fatalf("agent not held: %+v", a)
+		}
+		if a.ID == s.Manager() {
+			continue // The session's manager was idle: nothing of its to cancel.
 		}
 		output, err := s.InspectOutput(context.Background(), identity.OutputID{Agent: a.ID, Call: 1})
 		if err != nil || output.Output.Status != agent.OutputCanceled || output.Output.TextBytes != uint64(len("unfinished text")) {
@@ -120,7 +123,7 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 		}
 	}
 	for _, id := range []work.ID{implementation.ID, research.ID} {
-		w, err := s.GetWork(context.Background(), root, id)
+		w, err := s.GetWork(context.Background(), s.Manager(), id)
 		if err != nil || w.State != work.Cancelled {
 			t.Fatalf("work survived interruption: %+v %v", w, err)
 		}
@@ -131,7 +134,7 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 	if _, err := s.ResumeAgent(root); err == nil {
 		t.Fatal("resume continued interrupted execution")
 	}
-	if _, err := s.CreateAgent(context.Background(), root, roster.CreateRequest{Role: roster.Implementor}); !errors.Is(err, harness.ErrInterrupted) {
+	if _, err := s.CreateAgent(context.Background(), s.Manager(), roster.CreateRequest{Role: roster.Implementor}); !errors.Is(err, harness.ErrInterrupted) {
 		t.Fatal("created agent while held", err)
 	}
 	before, err := s.InspectAgent(root, conversation.InspectOptions{})
@@ -162,13 +165,17 @@ func TestInterruptCancelsDelegationAndQueuedMessagesThenContinues(t *testing.T) 
 		t.Fatal("conversation history not retained")
 	}
 	awaitAgentState(t, s, root, agent.Idle)
+	// The manager's text answer may be held back once by its reply check, so
+	// its own retry may follow; a worker's request would be old work restarting.
 	select {
-	case <-requests:
-		t.Fatal("old delegated work restarted")
+	case r := <-requests:
+		if r.Agent != root {
+			t.Fatal("old delegated work restarted", r.Agent)
+		}
 	case <-time.After(25 * time.Millisecond):
 	}
 	// Reuse the same worker with a fresh assignment after new input.
-	if _, err := s.AssignWork(context.Background(), root, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "fresh implementation"}); err != nil {
+	if _, err := s.AssignWork(context.Background(), s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "fresh implementation"}); err != nil {
 		t.Fatal(err)
 	}
 	await(t, requests, "interruption test")
@@ -199,7 +206,7 @@ func TestInterruptConcurrentWaitersRetainHistoryAndCanContinueAfterTimeout(t *te
 		return provider.Response{Content: "ready"}, nil
 	})
 	s := interruptSession(t, harness.Dependencies{Provider: p})
-	if _, err := s.Send(s.Root(), "start"); err != nil {
+	if _, err := s.Send(s.Manager(), "start"); err != nil {
 		t.Fatal(err)
 	}
 	await(t, started, "interruption test")
@@ -223,7 +230,7 @@ func TestInterruptConcurrentWaitersRetainHistoryAndCanContinueAfterTimeout(t *te
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Send(s.Root(), "continue differently"); err != nil {
+	if _, err := s.Send(s.Manager(), "continue differently"); err != nil {
 		t.Fatal(err)
 	}
 	r := await(t, requests, "interruption test")
@@ -266,7 +273,7 @@ func TestInterruptCaptureFailureDoesNotReopenAdmission(t *testing.T) {
 	if err := s.Interrupt(ctx); err == nil || errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("capture failure was hidden or hung", err)
 	}
-	if _, err := s.Send(s.Root(), "unsafe continuation"); err == nil {
+	if _, err := s.Send(s.Manager(), "unsafe continuation"); err == nil {
 		t.Fatal("failed interruption reopened admission")
 	}
 	if s.Capture().CaptureError == "" {
@@ -311,7 +318,7 @@ func TestInterruptRacingNewInputCannotReleaseNewerFence(t *testing.T) {
 		err     error
 	}
 	sent := make(chan result, 1)
-	go func() { r, err := s.Send(s.Root(), "racing new input"); sent <- result{r, err} }()
+	go func() { r, err := s.Send(s.Manager(), "racing new input"); sent <- result{r, err} }()
 	await(t, store.started, "interruption test")
 	stopping := make(chan error, 1)
 	go func() {
@@ -337,7 +344,7 @@ func TestInterruptRacingNewInputCannotReleaseNewerFence(t *testing.T) {
 		t.Fatal("canceled input reached the model")
 	default:
 	}
-	if _, err := s.Send(s.Root(), "actual next instruction"); err != nil {
+	if _, err := s.Send(s.Manager(), "actual next instruction"); err != nil {
 		t.Fatal(err)
 	}
 	request := await(t, requests, "interruption test")
@@ -375,7 +382,7 @@ func TestInterruptSettlesToolBatchWithoutRetryingEffects(t *testing.T) {
 		requests <- r
 		return provider.Response{Content: "continued"}, nil
 	})
-	s := interruptSession(t, harness.Dependencies{Provider: p, Root: harness.AgentDependencies{Tools: []tool.Tool{
+	s := interruptSession(t, harness.Dependencies{Provider: p, Manager: harness.AgentDependencies{Tools: []tool.Tool{
 		interruptTool{"save", func(context.Context) (tool.Result, error) { writes.Add(1); return tool.Text("saved effect"), nil }},
 		interruptTool{"slow", func(ctx context.Context) (tool.Result, error) {
 			close(started)
@@ -384,7 +391,7 @@ func TestInterruptSettlesToolBatchWithoutRetryingEffects(t *testing.T) {
 		}},
 		interruptTool{"later", func(context.Context) (tool.Result, error) { skipped.Add(1); return tool.Text("should not run"), nil }},
 	}}})
-	if _, err := s.Send(s.Root(), "do things"); err != nil {
+	if _, err := s.Send(s.Manager(), "do things"); err != nil {
 		t.Fatal(err)
 	}
 	await(t, started, "interruption test")
@@ -392,7 +399,7 @@ func TestInterruptSettlesToolBatchWithoutRetryingEffects(t *testing.T) {
 	if writes.Load() != 1 || skipped.Load() != 0 {
 		t.Fatal("effects were replayed or pending tool ran")
 	}
-	if _, err := s.Send(s.Root(), "different task"); err != nil {
+	if _, err := s.Send(s.Manager(), "different task"); err != nil {
 		t.Fatal(err)
 	}
 	r := await(t, requests, "interruption test")
@@ -424,7 +431,7 @@ func TestInterruptTimeoutRetainsFenceAndCloseJoinsCleanup(t *testing.T) {
 			close(p.release)
 		}
 	}()
-	if _, err := s.Send(s.Root(), "start"); err != nil {
+	if _, err := s.Send(s.Manager(), "start"); err != nil {
 		t.Fatal(err)
 	}
 	await(t, p.started, "interruption test")
@@ -434,7 +441,7 @@ func TestInterruptTimeoutRetainsFenceAndCloseJoinsCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	await(t, p.cancelled, "interruption test")
-	if _, err := s.Send(s.Root(), "too soon"); !errors.Is(err, harness.ErrInterrupted) {
+	if _, err := s.Send(s.Manager(), "too soon"); !errors.Is(err, harness.ErrInterrupted) {
 		t.Fatal("input bypassed unsettled execution", err)
 	}
 	if owned.calls.Load() != 0 || s.State() != harness.Open {
@@ -459,11 +466,11 @@ func TestInterruptTimeoutRetainsFenceAndCloseJoinsCleanup(t *testing.T) {
 func TestInterruptPausedIdleSessionCanStartNewExchange(t *testing.T) {
 	p := &observeProvider{requests: make(chan provider.Request, 2)}
 	s := interruptSession(t, harness.Dependencies{Provider: p})
-	if _, err := s.PauseAgent(s.Root()); err != nil {
+	if _, err := s.PauseAgent(s.Manager()); err != nil {
 		t.Fatal(err)
 	}
-	awaitAgentState(t, s, s.Root(), agent.Paused)
-	queued, err := s.Send(s.Root(), "discard while paused")
+	awaitAgentState(t, s, s.Manager(), agent.Paused)
+	queued, err := s.Send(s.Manager(), "discard while paused")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,14 +478,14 @@ func TestInterruptPausedIdleSessionCanStartNewExchange(t *testing.T) {
 	if r, _ := s.Receipt(queued.MessageID); r.Status != message.Undelivered {
 		t.Fatal(r)
 	}
-	if _, err := s.Send(s.Root(), "fresh"); err != nil {
+	if _, err := s.Send(s.Manager(), "fresh"); err != nil {
 		t.Fatal(err)
 	}
 	await(t, p.requests, "interruption test")
-	if _, err := s.StopAgent(s.Root()); err != nil {
+	if _, err := s.StopAgent(s.Manager()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Send(s.Root(), "cannot revive terminated root"); !errors.Is(err, conversation.ErrAgentStopped) {
+	if _, err := s.Send(s.Manager(), "cannot revive terminated root"); !errors.Is(err, conversation.ErrAgentStopped) {
 		t.Fatal(err)
 	}
 }

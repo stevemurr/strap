@@ -132,7 +132,7 @@ func TestHTTPReceiptRoute(t *testing.T) {
 	_, s := recoverySession(t, true)
 	base := "/sessions/" + s.ID()
 
-	w := request(t, s.http, "POST", base+"/messages", httpapi.SendRequest{To: s.Root(), Content: "hello"})
+	w := request(t, s.http, "POST", base+"/messages", httpapi.SendRequest{To: s.Manager(), Content: "hello"})
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -148,7 +148,7 @@ func TestHTTPReceiptRoute(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.MessageID != sent.MessageID || got.Recipient != s.Root() {
+	if got.MessageID != sent.MessageID || got.Recipient != s.Manager() {
 		t.Fatal("receipt does not describe the sent message", got)
 	}
 	if w := request(t, s.http, "GET", base+"/receipts/never-sent", nil); w.Code != 404 {

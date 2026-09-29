@@ -52,6 +52,9 @@ type HTTPError struct {
 	Body       string
 }
 
+// HTTPStatus lets provider.Retryable tell server errors from rejected requests.
+func (e *HTTPError) HTTPStatus() int { return e.StatusCode }
+
 func (e *HTTPError) Error() string {
 	if e.Adapter == "" {
 		return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
@@ -75,6 +78,9 @@ func (c *Client) do(ctx context.Context, endpoint string, wire any, accept strin
 	data, err := json.Marshal(wire)
 	if err != nil {
 		return nil, fmt.Errorf("encode request: %w", err)
+	}
+	if tap := provider.RawTapFrom(ctx).Request; tap != nil {
+		tap(append([]byte(nil), data...))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
@@ -111,7 +117,7 @@ func (c *Client) submit(ctx context.Context, wire any, observer provider.Observe
 	}
 	defer resp.Body.Close()
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		return readStream(resp.Body, observer)
+		return readTappedStream(resp.Body, observer, provider.RawTapFrom(ctx).Frame)
 	}
 	// Some compatible servers return a complete JSON response to streaming requests.
 	var result completion

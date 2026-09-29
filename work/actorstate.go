@@ -30,20 +30,20 @@ type StepState struct {
 	ReservedBy ID         `json:"reserved_by,omitempty"`
 }
 type WorkState struct {
-	WorkID                ID               `json:"work_id"`
-	Kind                  Kind             `json:"kind"`
-	State                 State            `json:"state"`
-	Revision              Revision         `json:"revision"`
-	AssignedAtRevision    Revision         `json:"assigned_at_revision,omitempty"`
-	Assignee              identity.ActorID `json:"assignee,omitempty"`
-	Blocker               string           `json:"blocker,omitempty"`
-	Steps                 []StepState      `json:"steps,omitempty"`
-	SubjectSubmissionID   SubmissionID     `json:"subject_submission_id,omitempty"`
-	RequestedByAuditID    AuditID          `json:"requested_by_audit_id,omitempty"`
-	LatestSubmissionID    SubmissionID     `json:"latest_submission_id,omitempty"`
-	LatestAuditID         AuditID          `json:"latest_audit_id,omitempty"`
-	ActiveRepairID        ID               `json:"active_repair_id,omitempty"`
-	LatestResearchBriefID ResearchBriefID  `json:"latest_research_brief_id,omitempty"`
+	WorkID              ID               `json:"work_id"`
+	Kind                Kind             `json:"kind"`
+	State               State            `json:"state"`
+	Revision            Revision         `json:"revision"`
+	AssignedAtRevision  Revision         `json:"assigned_at_revision,omitempty"`
+	Assignee            identity.ActorID `json:"assignee,omitempty"`
+	Blocker             string           `json:"blocker,omitempty"`
+	Steps               []StepState      `json:"steps,omitempty"`
+	SubjectSubmissionID SubmissionID     `json:"subject_submission_id,omitempty"`
+	RequestedByAuditID  AuditID          `json:"requested_by_audit_id,omitempty"`
+	LatestSubmissionID  SubmissionID     `json:"latest_submission_id,omitempty"`
+	LatestAuditID       AuditID          `json:"latest_audit_id,omitempty"`
+	ActiveRepairID      ID               `json:"active_repair_id,omitempty"`
+	LatestBriefID       BriefID          `json:"latest_brief_id,omitempty"`
 }
 
 const stateTitleLimit = 80
@@ -58,16 +58,33 @@ func (s *Store) ActorState(actor identity.ActorID) ActorState {
 }
 func (v *ReadModel) ActorState(actor identity.ActorID) ActorState { return v.store.ActorState(actor) }
 
+// reservationRank orders the kinds that can cover one step: the work that
+// completes it, then the work that repairs or audits it.
+var reservationRank = map[Kind]int{Implementation: 0, Repair: 1, AuditWork: 2, Review: 3, WebResearch: 3, DeepResearch: 3, Experiment: 4}
+
+func reservesBefore(a, b Work) bool {
+	if ra, rb := reservationRank[a.Kind], reservationRank[b.Kind]; ra != rb {
+		return ra < rb
+	}
+	return a.ID < b.ID
+}
+
 func (s *Store) actorState(actor identity.ActorID) ActorState {
 	var out ActorState
 	if actor == "" {
 		return out
 	}
+	// An audit or repair carries its implementation's scope, so a step can be
+	// covered by several live items. It is reserved by the one that completes
+	// it; choosing by map order made the state block differ between wakes.
 	reserved := map[StepID]ID{}
+	holder := map[StepID]Work{}
 	for _, w := range s.works {
 		if live(w) && w.Scope != nil {
 			for _, id := range w.Scope.StepIDs {
-				reserved[id] = w.ID
+				if prior, ok := holder[id]; !ok || reservesBefore(w, prior) {
+					holder[id], reserved[id] = w, w.ID
+				}
 			}
 		}
 	}
@@ -105,7 +122,7 @@ func (s *Store) workState(w Work, owned bool) WorkState {
 		WorkID: w.ID, Kind: w.Kind, State: w.State, Revision: w.Revision, Blocker: shorten(w.Blocker),
 		SubjectSubmissionID: w.SubjectSubmissionID, RequestedByAuditID: w.RequestedByAuditID,
 		LatestSubmissionID: w.LatestSubmissionID, LatestAuditID: w.LatestAuditID,
-		ActiveRepairID: w.ActiveRepairID, LatestResearchBriefID: w.LatestResearchBriefID,
+		ActiveRepairID: w.ActiveRepairID, LatestBriefID: w.LatestBriefID,
 	}
 	if owned {
 		state.Assignee = w.Assignee

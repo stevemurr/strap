@@ -42,7 +42,7 @@ func schemaScenarios() []Scenario {
 func schemaRole(id string) roster.Role {
 	switch id {
 	case "schema-audit-repair-field", "schema-audit-kind", "schema-audit-required", "schema-audit-null-extra", "schema-removed-assignment-tool":
-		return roster.Root
+		return roster.Manager
 	case "schema-audit-fail-findings", "schema-audit-pass-findings":
 		return roster.Auditor
 	case "schema-progress-objective":
@@ -54,19 +54,23 @@ func schemaRole(id string) roster.Role {
 
 func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, error) {
 	role := schemaRole(id)
-	if role == roster.Root {
+	if role == roster.Manager {
 		f, err := seedAudit(ctx, s)
 		if err != nil {
 			return f, err
 		}
-		f.Schema = &schemaFixture{Actor: f.Root, Role: role, Operation: "assign_audit", Target: f.Original.Clone()}
+		f.Schema = &schemaFixture{Actor: f.Coordinator, Role: role, Operation: "assign_audit", Target: f.Original.Clone()}
 		return f, nil
 	}
 	if role != roster.Implementor && role != roster.Auditor {
 		return fixture{}, fmt.Errorf("unknown schema scenario %q", id)
 	}
-	f := fixture{Root: s.Root()}
-	implementor, err := s.CreateAgent(ctx, f.Root, roster.CreateRequest{Role: roster.Implementor})
+	manager, err := seedManager(ctx, s)
+	if err != nil {
+		return fixture{}, err
+	}
+	f := fixture{Coordinator: manager}
+	implementor, err := s.CreateAgent(ctx, f.Coordinator, roster.CreateRequest{Role: roster.Implementor})
 	if err != nil {
 		return f, fmt.Errorf("create schema implementor: %w", err)
 	}
@@ -78,13 +82,13 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 	}
 	title, stepTitle := "Explain a simple addition", "Show why two plus two is four"
 	criteria := []string{"The answer is 4 and the explanation combines two pairs of objects."}
-	f.Plan, err = s.UpdatePlan(ctx, f.Root, work.PlanUpdate{
+	f.Plan, err = s.UpdatePlan(ctx, f.Coordinator, work.PlanUpdate{
 		Title: &title, Steps: []work.StepEdit{{Title: &stepTitle, AcceptanceCriteria: &criteria}},
 	})
 	if err != nil {
 		return f, fmt.Errorf("create schema plan: %w", err)
 	}
-	f.Original, err = s.AssignWork(ctx, f.Root, work.AssignmentRequest{
+	f.Original, err = s.AssignWork(ctx, f.Coordinator, work.AssignmentRequest{
 		Kind: work.Implementation, Assignee: f.Implementor,
 		Task:           "Explain why 2 + 2 equals 4 by combining two pairs of objects.",
 		ExpectedOutput: "A correct answer and an explanation showing the addition.",
@@ -94,7 +98,7 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 		return f, fmt.Errorf("assign schema implementation: %w", err)
 	}
 	if role == roster.Implementor {
-		f.Plan, err = s.GetPlan(ctx, f.Root, f.Plan.ID)
+		f.Plan, err = s.GetPlan(ctx, f.Coordinator, f.Plan.ID)
 		if err != nil {
 			return f, fmt.Errorf("read schema progress plan: %w", err)
 		}
@@ -103,7 +107,7 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 		}
 		return f, nil
 	}
-	auditor, err := s.CreateAgent(ctx, f.Root, roster.CreateRequest{Role: roster.Auditor})
+	auditor, err := s.CreateAgent(ctx, f.Coordinator, roster.CreateRequest{Role: roster.Auditor})
 	if err != nil {
 		return f, fmt.Errorf("create schema auditor: %w", err)
 	}
@@ -133,7 +137,7 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 		return f, fmt.Errorf("submit schema artifact: %w", err)
 	}
 	f.Submission = submitted.Submission
-	audit, err := s.AssignWork(ctx, f.Root, work.AssignmentRequest{
+	audit, err := s.AssignWork(ctx, f.Coordinator, work.AssignmentRequest{
 		Kind: work.AuditWork, Assignee: f.Auditor, WorkID: f.Original.ID,
 		ExpectedRevision: submitted.WorkRevision, SubmissionID: f.Submission.ID,
 	})
@@ -159,11 +163,11 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 	if err != nil {
 		return f, fmt.Errorf("read schema audit after verification: %w", err)
 	}
-	f.Original, err = s.GetWork(ctx, f.Root, f.Original.ID)
+	f.Original, err = s.GetWork(ctx, f.Coordinator, f.Original.ID)
 	if err != nil {
 		return f, fmt.Errorf("read schema original: %w", err)
 	}
-	f.Plan, err = s.GetPlan(ctx, f.Root, f.Plan.ID)
+	f.Plan, err = s.GetPlan(ctx, f.Coordinator, f.Plan.ID)
 	if err != nil {
 		return f, fmt.Errorf("read schema audit plan: %w", err)
 	}
@@ -173,7 +177,7 @@ func seedSchema(ctx context.Context, s *harness.Session, id string) (fixture, er
 
 func (f fixture) schemaStimulus(id string) string {
 	switch f.Schema.Role {
-	case roster.Root:
+	case roster.Manager:
 		baseFixture := f
 		baseFixture.Schema = nil
 		base := baseFixture.stimulus("audit-independent")
@@ -202,7 +206,7 @@ func (f fixture) schemaScript(id string) provider.Provider {
 	operation := f.Schema.Operation
 	var correct any
 	switch f.Schema.Role {
-	case roster.Root:
+	case roster.Manager:
 		correct = tool.AssignAuditArgs{Assignee: f.Auditor,
 			WorkTarget: work.WorkTarget{ID: f.Original.ID, ExpectedRevision: f.Original.Revision}, SubmissionID: f.Submission.ID}
 	case roster.Auditor:

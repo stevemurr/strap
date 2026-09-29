@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stevemurr/strap/agent"
 	"github.com/stevemurr/strap/provider"
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
@@ -27,6 +28,7 @@ func guardSession(t *testing.T, dir string) *Session {
 		cfg.Dir = t.TempDir()
 	}
 	cfg.DeepResearch.Enabled = false
+	cfg.ManualAudits = true // The checks name the audit the manager must assign.
 	s, err := New(context.Background(), cfg, Dependencies{Provider: quietProvider{}})
 	if err != nil {
 		t.Fatal(err)
@@ -37,28 +39,28 @@ func guardSession(t *testing.T, dir string) *Session {
 
 // The shapes from the ladder traces: an implementation step that was assigned,
 // a separate "verify" step that never was, and work still live at reply time.
-func TestRootReplyCheckFlagsLiveWorkAndStepsNoWorkCovers(t *testing.T) {
+func TestManagerReplyCheckFlagsLiveWorkAndStepsNoWorkCovers(t *testing.T) {
 	s := guardSession(t, "")
 	ctx := context.Background()
-	root := s.Root()
+	manager := s.Manager()
 	title, impl, verify := "Implement Longest", "Implement Longest in uptime.go", "Verify go build and go vet pass"
-	plan, err := s.UpdatePlan(ctx, root, work.PlanUpdate{Title: &title, Steps: []work.StepEdit{{Title: &impl}, {Title: &verify}}})
+	plan, err := s.UpdatePlan(ctx, manager, work.PlanUpdate{Title: &title, Steps: []work.StepEdit{{Title: &impl}, {Title: &verify}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.rootReplyCheck(ctx, root); got != "" {
+	if got := s.managerReplyCheck(ctx, manager); got != "" {
 		t.Fatalf("no work yet (as in a research-only task) must not be held back: %q", got)
 	}
-	worker, err := s.CreateAgent(ctx, root, roster.CreateRequest{Role: roster.Implementor})
+	worker, err := s.CreateAgent(ctx, manager, roster.CreateRequest{Role: roster.Implementor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker.AgentID, Task: "implement",
+	w, err := s.AssignWork(ctx, manager, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker.AgentID, Task: "implement",
 		Scope: &work.Scope{PlanID: plan.ID, StepIDs: []work.StepID{plan.Steps[0].ID}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	notice := s.rootReplyCheck(ctx, root)
+	notice := s.managerReplyCheck(ctx, manager)
 	for _, want := range []string{string(w.ID) + " (implementation, active): " + string(worker.AgentID) + " is working on it; wait with wait_for_input", string(plan.Steps[1].ID), verify, "cancel_steps"} {
 		if !strings.Contains(notice, want) {
 			t.Fatalf("notice lacks %q: %q", want, notice)
@@ -67,60 +69,60 @@ func TestRootReplyCheckFlagsLiveWorkAndStepsNoWorkCovers(t *testing.T) {
 	if strings.Contains(notice, string(plan.Steps[0].ID)) {
 		t.Fatalf("the assigned step is covered: %q", notice)
 	}
-	plan, err = s.GetPlan(ctx, root, plan.ID)
+	plan, err = s.GetPlan(ctx, manager, plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdatePlan(ctx, root, work.PlanUpdate{PlanID: &plan.ID, ExpectedRevision: &plan.Revision, Cancel: []work.StepID{plan.Steps[1].ID}}); err != nil {
+	if _, err := s.UpdatePlan(ctx, manager, work.PlanUpdate{PlanID: &plan.ID, ExpectedRevision: &plan.Revision, Cancel: []work.StepID{plan.Steps[1].ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if notice := s.rootReplyCheck(ctx, root); !strings.Contains(notice, string(w.ID)) || strings.Contains(notice, verify) {
+	if notice := s.managerReplyCheck(ctx, manager); !strings.Contains(notice, string(w.ID)) || strings.Contains(notice, verify) {
 		t.Fatalf("after cancelling the step only the live work remains: %q", notice)
 	}
-	if w, err = s.GetWork(ctx, root, w.ID); err != nil {
+	if w, err = s.GetWork(ctx, manager, w.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CancelWork(ctx, root, work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "done elsewhere"}); err != nil {
+	if _, err := s.CancelWork(ctx, manager, work.CancelRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Reason: "done elsewhere"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.rootReplyCheck(ctx, root); !strings.Contains(got, string(plan.Steps[0].ID)) {
+	if got := s.managerReplyCheck(ctx, manager); !strings.Contains(got, string(plan.Steps[0].ID)) {
 		t.Fatalf("cancelled work no longer covers its step: %q", got)
 	}
 }
 
 // Waiting only helps while someone is working. Submitted work waits on the
-// root's audit and a stopped assignee never reports: advising a wait there
-// would stall the root.
-func TestRootReplyCheckNamesTheNextActionNotAWait(t *testing.T) {
+// manager's audit and a stopped assignee never reports: advising a wait there
+// would stall the manager.
+func TestManagerReplyCheckNamesTheNextActionNotAWait(t *testing.T) {
 	s := guardSession(t, "")
 	ctx := context.Background()
-	root := s.Root()
-	worker, err := s.CreateAgent(ctx, root, roster.CreateRequest{Role: roster.Implementor})
+	manager := s.Manager()
+	worker, err := s.CreateAgent(ctx, manager, roster.CreateRequest{Role: roster.Implementor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	submitted, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker.AgentID, Task: "implement"})
+	submitted, err := s.AssignWork(ctx, manager, work.AssignmentRequest{Kind: work.Implementation, Assignee: worker.AgentID, Task: "implement"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SubmitWork(ctx, worker.AgentID, work.SubmitRequest{WorkTarget: work.WorkTarget{ID: submitted.ID, ExpectedRevision: submitted.Revision}, Summary: "done"}); err != nil {
 		t.Fatal(err)
 	}
-	other, err := s.CreateAgent(ctx, root, roster.CreateRequest{Role: roster.Implementor})
+	other, err := s.CreateAgent(ctx, manager, roster.CreateRequest{Role: roster.Implementor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	orphaned, err := s.AssignWork(ctx, root, work.AssignmentRequest{Kind: work.Implementation, Assignee: other.AgentID, Task: "implement more"})
+	orphaned, err := s.AssignWork(ctx, manager, work.AssignmentRequest{Kind: work.Implementation, Assignee: other.AgentID, Task: "implement more"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.StopAgent(other.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	notice := s.rootReplyCheck(ctx, root)
+	notice := s.managerReplyCheck(ctx, manager)
 	for _, want := range []string{
 		string(submitted.ID) + " (implementation, needs_check): it is submitted and needs an independent audit; assign one with assign_audit",
-		string(orphaned.ID) + " (implementation, active): its assignee " + string(other.AgentID) + " has stopped; reassign it with reassign_work",
+		string(orphaned.ID) + " (implementation, active): its assignee " + string(other.AgentID) + " has stopped; cancel it with cancel_work and assign it again",
 	} {
 		if !strings.Contains(notice, want) {
 			t.Fatalf("notice lacks %q: %q", want, notice)
@@ -151,7 +153,16 @@ func TestWorkspaceListingIsShallowFirstAndShownOnFirstWakeOnly(t *testing.T) {
 		t.Fatalf("listing %+v, want %v", ws, want)
 	}
 	s := guardSession(t, dir)
-	wake := s.wakeContext(s.Root())
+	// An agent without file tools is never shown the files.
+	if m, err := s.wakeContext("agent-9", agent.Spec{})(context.Background(), nil); err != nil || m != nil {
+		t.Fatalf("an agent without file tools was shown the workspace: %+v, %v", m, err)
+	}
+	// The manager reads no files, so it is not shown them either.
+	if m, err := s.wakeContext(s.Manager(), s.workflow.ManagerSpec())(context.Background(), nil); err != nil || m != nil {
+		t.Fatalf("the manager was shown the workspace: %+v, %v", m, err)
+	}
+	implementor, _ := s.workflow.Specs()
+	wake := s.wakeContext("agent-8", implementor)
 	m, err := wake(context.Background(), nil)
 	if err != nil || m == nil || m.Workspace == nil || !slices.Contains(m.Workspace.Entries, "stock.go") || m.State != nil {
 		t.Fatalf("first wake: %+v, %v", m, err)

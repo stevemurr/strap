@@ -260,7 +260,7 @@ func TestEvalPlanSharesDockAndKeepsProblemsIndependent(t *testing.T) {
 	}
 	other := task
 	other.ID = "another-problem"
-	e.Update(eval.Progress{Task: other, Root: "other-root", Phase: eval.Running})
+	e.Update(eval.Progress{Task: other, Manager: "other-root", Phase: eval.Running})
 	e.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if e.current().activity.currentPlan() != nil {
 		t.Fatal("plan leaked between eval problems")
@@ -403,5 +403,33 @@ func TestPlanProgressPersistsCollapsedAndCountsOnlyAcceptedSteps(t *testing.T) {
 	}
 	if planProgress(work.Plan{}, 20) != "" {
 		t.Fatal("empty plan has misleading progress")
+	}
+}
+
+// An agent's todo list shows in the dock as a plan it owns; each list
+// replaces the last, and finishing it says so without claiming an audit.
+func TestPlanDockShowsTheAgentsTodoList(t *testing.T) {
+	m, _ := focusedSetup(t)
+	todos := func(statuses ...string) conversation.TodosEvent {
+		e := conversation.TodosEvent{Agent: "root"}
+		for i, s := range statuses {
+			e.Todos = append(e.Todos, conversation.Todo{Content: fmt.Sprintf("Step %d", i+1), Status: s})
+		}
+		return e
+	}
+	m.Update(received{event: todos("in_progress", "pending", "pending")})
+	if p := m.currentPlan(); p == nil || p.plan.Title != "Todo" || len(p.plan.Steps) != 3 || p.plan.Steps[0].Status != work.InProgress {
+		t.Fatal(p)
+	}
+	if !strings.Contains(dockText(m), "Step 1") || !strings.Contains(dockText(m), "0/3 complete") {
+		t.Fatal(dockText(m))
+	}
+	m.Update(received{event: todos("completed", "completed", "completed")})
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	if text := dockText(m); !strings.Contains(text, "3/3 complete") || !strings.Contains(text, "all done") || strings.Contains(text, "accepted") {
+		t.Fatal(text)
+	}
+	if len(m.plans.order) != 1 {
+		t.Fatal("a new list added a second plan", m.plans.order)
 	}
 }

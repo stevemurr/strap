@@ -30,7 +30,7 @@ func ParseConfig(b []byte) (Config, error) {
 	if c.Version != Version {
 		return c, fmt.Errorf("unsupported eval configuration version %d", c.Version)
 	}
-	for _, model := range []*harness.ModelConfig{&c.Harness.Model, c.Harness.Root.Model, c.Harness.Implementor.Model, c.Harness.Auditor.Model, c.Harness.Researcher.Model} {
+	for _, model := range []*harness.ModelConfig{&c.Harness.Model, c.Harness.Agent.Model, c.Harness.Manager.Model, c.Harness.Implementor.Model, c.Harness.Auditor.Model, c.Harness.WebResearcher.Model, c.Harness.DeepResearcher.Model, c.Harness.Experimenter.Model, c.Harness.Reviewer.Model} {
 		if model == nil {
 			continue
 		}

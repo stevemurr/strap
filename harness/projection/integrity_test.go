@@ -16,7 +16,7 @@ import (
 	"github.com/stevemurr/strap/roster"
 )
 
-// seeded is a projector holding a valid prefix: a started session, a root agent
+// seeded is a projector holding a valid prefix: a started session, the manager
 // with one history entry, and an open output.
 type seeded struct {
 	t *testing.T
@@ -25,7 +25,7 @@ type seeded struct {
 
 const (
 	seedSession = "session"
-	seedAgent   = identity.ActorID("root")
+	seedAgent   = identity.ActorID("manager")
 )
 
 var seedOutput = identity.OutputID{Agent: seedAgent, Call: 1}
@@ -68,7 +68,7 @@ func newSeeded(t *testing.T) *seeded {
 	s := &seeded{t: t, p: projection.New(seedSession)}
 	s.apply(eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"` + seedSession + `"}`)})
 	s.apply(s.event(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: seedAgent, Parent: message.User, State: agent.Idle, StateRevision: 1}}))
-	s.apply(s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: seedAgent, Parent: message.User, Role: roster.Root}}))
+	s.apply(s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: seedAgent, Parent: message.User, Role: roster.Manager}}))
 	s.apply(s.event(conversation.AgentEvent{Agent: seedAgent, Event: agent.HistoryAppended{Position: 1, Message: provider.Message{Role: "user"}}}))
 	s.apply(s.event(conversation.AgentEvent{Agent: seedAgent, Event: agent.OutputStarted{Output: seedOutput, ContextRevision: 1, StartedAt: time.Now()}}))
 	return s
@@ -132,12 +132,12 @@ func TestProjectorRejectsInconsistentAgentRecords(t *testing.T) {
 	s.reject("state change for an unknown agent", s.event(conversation.AgentStateChanged{Agent: "ghost", State: agent.Running, Revision: 2}))
 	s.reject("state revision gap", s.event(conversation.AgentStateChanged{Agent: seedAgent, State: agent.Running, Revision: 9}))
 	s.reject("unknown agent state", s.event(conversation.AgentStateChanged{Agent: seedAgent, State: "teleporting", Revision: 2}))
-	s.reject("duplicate registration", s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: seedAgent, Parent: message.User, Role: roster.Root}}))
+	s.reject("duplicate registration", s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: seedAgent, Parent: message.User, Role: roster.Manager}}))
 	s.reject("registration without a runtime agent", s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: "ghost", Parent: seedAgent, Role: roster.Implementor}}))
 
-	// A child may hold any creatable role, but not the root role.
+	// A child may hold any creatable role, but not the manager role.
 	s.apply(s.event(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "child", Parent: seedAgent, State: agent.Idle, StateRevision: 1}}))
-	s.reject("root role on a child agent", s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: "child", Parent: seedAgent, Role: roster.Root}}))
+	s.reject("manager role on a child agent", s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: "child", Parent: seedAgent, Role: roster.Manager}}))
 	s.apply(s.event(conversation.AgentRegistered{Registration: roster.Registration{AgentID: "child", Parent: seedAgent, Role: roster.Implementor}}))
 
 	// A valid state change is accepted and visible through the read model.

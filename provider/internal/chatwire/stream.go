@@ -14,6 +14,11 @@ import (
 // readStream assembles protocol fragments before validating the final response.
 // No tool call escapes this adapter until all arguments and termination validate.
 func readStream(r io.Reader, observer provider.Observer) (provider.Response, error) {
+	return readTappedStream(r, observer, nil)
+}
+
+// readTappedStream is readStream reporting each raw frame to tap first.
+func readTappedStream(r io.Reader, observer provider.Observer, tap func(string)) (provider.Response, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	var text, reasoning strings.Builder
@@ -23,6 +28,9 @@ func readStream(r io.Reader, observer provider.Observer) (provider.Response, err
 	var frame strings.Builder
 	failure := func(err error) (provider.Response, error) { return provider.Response{Usage: decodeUsage(usage)}, err }
 	consume := func(data string) (bool, error) {
+		if tap != nil {
+			tap(data)
+		}
 		if data == "[DONE]" {
 			return true, nil
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -109,7 +110,7 @@ func TestDelegatedPromptAndAssignmentReachHTTPServer(t *testing.T) {
 			if err := json.Unmarshal([]byte(request.Messages[1].Content), &envelope); err != nil {
 				t.Error(err)
 			}
-			if envelope.From == message.User || envelope.From == "" || envelope.To == envelope.From || envelope.ID == "" || envelope.Kind != message.Instruction || envelope.Content != "" || envelope.Work == nil || *envelope.Work != assignment {
+			if envelope.From == message.User || envelope.From == "" || envelope.To == envelope.From || envelope.ID == "" || envelope.Kind != message.Instruction || envelope.Content != "" || envelope.Work == nil || !reflect.DeepEqual(*envelope.Work, assignment) {
 				t.Errorf("assignment lost on wire: %+v", envelope)
 			}
 			fmt.Fprint(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"result"}}]}`)
@@ -126,7 +127,7 @@ func TestDelegatedPromptAndAssignmentReachHTTPServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	c := conversation.New(ctx)
-	executionSpec := agent.Spec{Provider: p, Prompt: executionPrompt, Tools: []tool.Tool{tool.SendMessage(), tool.MessageStatus(c.Receipt)}}
+	executionSpec := agent.Spec{Provider: p, Prompt: executionPrompt, Tools: []tool.Tool{tool.SendMessage(nil), tool.MessageStatus(c.Receipt)}}
 	rootTools := append(append([]tool.Tool(nil), executionSpec.Tools...), creationTool(c, executionSpec))
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), time.Second)

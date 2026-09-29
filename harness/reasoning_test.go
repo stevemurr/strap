@@ -59,6 +59,7 @@ func testReasoningHistoryRecovery(t *testing.T, backend string) {
 	cfg.Model.BaseURL = server.URL
 	cfg.Model.Backend = backend
 	cfg.Events.JSONLPath = filepath.Join(t.TempDir(), "reasoning.jsonl")
+	// The manager answers over HTTP, and the user talks to it directly.
 	s, err := harness.New(ctx, cfg, harness.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func testReasoningHistoryRecovery(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	if _, err = s.Send(s.Root(), "first"); err != nil {
+	if _, err = s.Send(s.Manager(), "first"); err != nil {
 		t.Fatal(err)
 	}
 	view := projection.New(identity.SessionID(s.ID()))
@@ -87,7 +88,7 @@ func testReasoningHistoryRecovery(t *testing.T, backend string) {
 			break
 		}
 	}
-	id := identity.OutputID{Agent: s.Root(), Call: 1}
+	id := identity.OutputID{Agent: s.Manager(), Call: 1}
 	active, err := s.InspectOutput(ctx, id)
 	if err != nil || active.Output.Status != agent.OutputActive || active.Output.ReasoningBytes != uint64(len("PRIVATE_REASON_🌎")) || active.Output.TextBytes != 0 {
 		t.Fatal(active, err)
@@ -125,7 +126,7 @@ func testReasoningHistoryRecovery(t *testing.T, backend string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m, ok := v.(conversation.MessageEvent); ok && m.Message.Kind == message.Reply && m.Message.To == message.User {
+			if m, ok := v.(conversation.MessageEvent); ok && m.Message.Kind == message.Reply && m.Message.From == s.Manager() {
 				if m.Message.Content != "answer done" {
 					t.Fatal(m)
 				}
@@ -134,7 +135,7 @@ func testReasoningHistoryRecovery(t *testing.T, backend string) {
 		}
 	}
 	waitReply()
-	if _, err = s.Send(s.Root(), "second"); err != nil {
+	if _, err = s.Send(s.Manager(), "second"); err != nil {
 		t.Fatal(err)
 	}
 	waitReply()
@@ -213,7 +214,7 @@ func testReasoningHistoryRecovery(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := recovered.InspectAgentContext(ctx, s.Root(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
+	info, err := recovered.InspectAgentContext(ctx, s.Manager(), conversation.InspectOptions{Transcript: &agent.TranscriptQuery{Limit: 100}})
 	if err != nil {
 		t.Fatal(err)
 	}

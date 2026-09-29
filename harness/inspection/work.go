@@ -10,7 +10,7 @@ import (
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness/projection"
 	"github.com/stevemurr/strap/identity"
-	"github.com/stevemurr/strap/message"
+	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/work"
 	"io"
 	"sort"
@@ -129,7 +129,7 @@ func decodeWorkQuery(q work.ListQuery) (workCursor, error) {
 		}
 	}
 	switch c.Filters.Kind {
-	case "", work.Implementation, work.AuditWork, work.Repair, work.Research:
+	case "", work.Implementation, work.AuditWork, work.Repair, work.Review, work.WebResearch, work.DeepResearch, work.Experiment:
 	default:
 		return c, fmt.Errorf("%w: invalid kind", work.ErrInvalid)
 	}
@@ -162,8 +162,9 @@ func (v *View) ListWork(ctx context.Context, actor identity.ActorID, q work.List
 	if err != nil {
 		return work.ListPage{}, err
 	}
-	a, err := v.projection.AgentInspection(actor)
-	if err != nil || actor == "" || a.Parent != message.User {
+	// Listing is the manager's: it owns all the session's work.
+	registration, ok := v.projection.Registration(actor)
+	if actor == "" || !ok || registration.Role != roster.Manager {
 		return work.ListPage{}, work.ErrForbidden
 	}
 	if q.Cursor != "" && (c.Session != v.id || c.Prefix != v.through.Sequence) {
@@ -245,10 +246,10 @@ func (v *View) Agents(ctx context.Context) ([]projection.AgentInfo, error) {
 	return out, nil
 }
 
-func (v *View) GetResearchBrief(ctx context.Context, actor identity.ActorID, id work.ResearchBriefID) (work.ResearchBrief, error) {
+func (v *View) GetBrief(ctx context.Context, actor identity.ActorID, id work.BriefID) (work.Brief, error) {
 	m, _, err := v.workModel(ctx)
 	if err != nil {
-		return work.ResearchBrief{}, err
+		return work.Brief{}, err
 	}
-	return m.GetResearchBrief(actor, id)
+	return m.GetBrief(actor, id)
 }

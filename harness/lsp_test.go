@@ -26,15 +26,15 @@ func TestLanguageAssembly(t *testing.T) {
 		}
 	})
 	effective := s.Configuration()
-	for _, role := range []harness.RoleConfiguration{effective.Root, effective.Implementor, effective.Auditor, effective.Researcher} {
+	for i, role := range []harness.RoleConfiguration{effective.Implementor, effective.Auditor, *effective.Reviewer, *effective.Experimenter} {
 		count := 0
 		for _, tool := range role.Tools {
 			if strings.HasPrefix(tool.Name, "lsp_") {
 				count++
 			}
 		}
-		if count != 7 {
-			t.Fatalf("role has %d language tools", count)
+		if want := 7; count != want {
+			t.Fatalf("role %d has %d language tools, want %d", i, count, want)
 		}
 	}
 	raw, _ := json.Marshal(effective)
@@ -65,23 +65,18 @@ func TestDefaultLanguageToolsAndOptOut(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = s.Close(context.Background()) })
 		assembled := s.Config()
-		for i, role := range []harness.AgentConfig{assembled.Root, assembled.Implementor, assembled.Auditor, assembled.Researcher} {
+		for i, role := range []harness.AgentConfig{assembled.Implementor, assembled.Auditor, assembled.Reviewer, assembled.Experimenter} {
 			instructions := strings.Join(role.Prompt.Instructions, "\n")
-			// The root never creates files or changes code, so it gets neither guidance.
-			root := i == 0
 			if strings.Count(instructions, "For existing files, copy paths exactly from the user or tool results.") != 1 ||
-				strings.Contains(instructions, "New files may use new paths.") == root {
+				!strings.Contains(instructions, "New files may use new paths.") {
 				t.Fatalf("enabled=%v role %d: wrong shared file rule", enabled, i)
 			}
-			if strings.Contains(instructions, "You never write, edit or create workspace files") != root {
-				t.Fatalf("enabled=%v role %d: only the root is told it never changes files", enabled, i)
-			}
-			if enabled && strings.Contains(instructions, "After changing code") == root {
+			if enabled && !strings.Contains(instructions, "After changing code") {
 				t.Fatalf("enabled=%v role %d: wrong language guidance", enabled, i)
 			}
 		}
 		effective := s.Configuration()
-		for _, role := range []harness.RoleConfiguration{effective.Root, effective.Implementor, effective.Auditor, effective.Researcher} {
+		for _, role := range []harness.RoleConfiguration{effective.Implementor, effective.Auditor, *effective.Reviewer, *effective.Experimenter} {
 			count := 0
 			for _, tool := range role.Tools {
 				if strings.HasPrefix(tool.Name, "lsp_") {

@@ -45,7 +45,7 @@ func TestWorkEventsAndAssignmentsDisplayContext(t *testing.T) {
 		t.Fatal(m.status())
 	}
 	m.Update(received{event: conversation.AgentStateChanged{Agent: "root", State: agent.Paused}})
-	if !strings.Contains(m.status(), "Root paused") {
+	if !strings.Contains(m.status(), "Manager paused") {
 		t.Fatal(m.status())
 	}
 }

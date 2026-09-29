@@ -43,9 +43,9 @@ func (s *Session) deepResearchTool() tool.Tool {
 		}
 		defer done()
 		s.mu.Lock()
-		reg, ok := s.roles[c.Actor]
+		reg, ok := s.graph.Registration(c.Actor)
 		s.mu.Unlock()
-		if !ok || reg.Role != roster.Researcher {
+		if !ok || reg.Role != roster.DeepResearcher {
 			return tool.Result{}, work.ErrForbidden
 		}
 		s.researchMu.Lock()
@@ -53,7 +53,7 @@ func (s *Session) deepResearchTool() tool.Tool {
 			s.researchMu.Unlock()
 			return tool.Result{}, research.ErrBusy
 		}
-		w, err := s.Store.AdmitResearchDiagnostic(c.Actor, work.ID(req.WorkID))
+		w, err := s.Store.AdmitResearchRun(c.Actor, work.ID(req.WorkID))
 		if err != nil {
 			s.researchMu.Unlock()
 			return tool.Result{}, err

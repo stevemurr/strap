@@ -40,7 +40,7 @@ func TestAgentStacksKeepTranscriptAndComposerFullWidth(t *testing.T) {
 		t.Fatal(view)
 	}
 	rows := strings.Split(view, "\n")
-	if !strings.Contains(rows[0], "root") || strings.TrimSpace(rows[1]) != strings.Repeat("─", m.width-2) {
+	if !strings.Contains(rows[0], "manager") || strings.TrimSpace(rows[1]) != strings.Repeat("─", m.width-2) {
 		t.Fatal("agent chips and separator must be the entire header", view)
 	}
 	for _, removed := range []string{"Conversation & coordination", "local-model", "localhost", "parent user"} {
@@ -56,18 +56,18 @@ func TestAgentStacksKeepTranscriptAndComposerFullWidth(t *testing.T) {
 func TestAgentStacksRootHasLiveChipAndPreview(t *testing.T) {
 	m, _ := focusedSetup(t)
 	m.selectStream("agent-2")
-	progress(m, m.session.Root(), "Coordinating the team")
-	m.working[m.session.Root()] = true
+	progress(m, m.session.Manager(), "Coordinating the team")
+	m.working[m.session.Manager()] = true
 	var root stackTarget
 	for _, target := range m.stackLayout().targets {
-		if target.choice.id == m.session.Root() {
+		if target.choice.id == m.session.Manager() {
 			root = target
 		}
 	}
-	if root.height != 1 || !strings.Contains(ansi.Strip(m.stackTargetView(root, false)), agentGlyph(m.session.Root())+" root ●") {
-		t.Fatal("root is missing its live agent chip")
+	if root.height != 1 || !strings.Contains(ansi.Strip(m.stackTargetView(root, false)), agentGlyph(m.session.Manager())+" manager ●") {
+		t.Fatal("the manager is missing its live agent chip")
 	}
-	x, y := stackLocation(t, m, rosterChoice{id: m.session.Root()})
+	x, y := stackLocation(t, m, rosterChoice{id: m.session.Manager()})
 	m.Update(mouseAt(tea.MouseActionMotion, tea.MouseButtonNone, x, y))
 	p := m.stackPeek()
 	if p == nil || !strings.Contains(ansi.Strip(p.text), "Coordinating the team") {
@@ -77,7 +77,7 @@ func TestAgentStacksRootHasLiveChipAndPreview(t *testing.T) {
 		t.Fatal("root preview lost connection details")
 	}
 	m.Update(mouseAt(tea.MouseActionPress, tea.MouseButtonLeft, x, y))
-	if m.streamUI.selected != m.session.Root() || !m.input.Focused() {
+	if m.streamUI.selected != m.session.Manager() || !m.input.Focused() {
 		t.Fatal("root chip did not open the root conversation")
 	}
 }

@@ -161,9 +161,6 @@ func TestSubmissionProgressAndReadValidation(t *testing.T) {
 	if _, err := s.reportSnapshot("impl", ReportWorkProgressRequest{WorkID: w.ID, Steps: []StepProgress{{ID: p.Steps[0].ID}, {ID: p.Steps[0].ID}}}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
-	if _, err := s.SubmitWork("impl", SubmitRequest{WorkTarget: target(w), Summary: "premature"}); !errors.Is(err, ErrInvalid) {
-		t.Fatal(err)
-	}
 	var err error
 	w, err = s.reportSnapshot("impl", ReportWorkProgressRequest{WorkID: w.ID, Steps: []StepProgress{{ID: p.Steps[0].ID, Status: ptr(Blocked), Note: ptr("dependency")}}, Position: &WorkPosition{Objective: "fixture progress", Note: *ptr("working"), Blocker: *ptr("waiting")}})
 	if err != nil || w.Note != "working" {
@@ -187,9 +184,6 @@ func TestSubmissionProgressAndReadValidation(t *testing.T) {
 	}
 	current, _ := s.GetWork("root", w.ID)
 	if _, err := s.SubmitWork("impl", SubmitRequest{WorkTarget: target(current), Summary: "again"}); !errors.Is(err, ErrState) {
-		t.Fatal(err)
-	}
-	if _, err := s.Reassign("root", ReassignRequest{WorkTarget: target(current), Assignee: "new"}); !errors.Is(err, ErrState) {
 		t.Fatal(err)
 	}
 	a := review(t, s, w.ID, sub.ID)
@@ -256,20 +250,10 @@ func TestAuditValidationAndAccess(t *testing.T) {
 		}
 	}
 	repair, _ := assignRepairForTest(t, s, audit)
-	repair, err = s.Reassign("root", ReassignRequest{WorkTarget: target(repair), Assignee: "repairer"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.GetAudit("repairer", audit.ID); err != nil || got.ID != audit.ID {
+	if got, err := s.GetAudit(repair.Assignee, audit.ID); err != nil || got.ID != audit.ID {
 		t.Fatal(got, err)
 	}
 	if _, err := s.GetAudit("", audit.ID); !errors.Is(err, ErrForbidden) {
-		t.Fatal(err)
-	}
-	if _, err := s.Reassign("root", ReassignRequest{WorkTarget: target(repair)}); !errors.Is(err, ErrInvalid) {
-		t.Fatal(err)
-	}
-	if _, err := s.Reassign("other", ReassignRequest{WorkTarget: target(repair)}); !errors.Is(err, ErrForbidden) {
 		t.Fatal(err)
 	}
 	if _, err := s.Cancel("other", CancelRequest{WorkTarget: target(repair), Reason: "stop"}); !errors.Is(err, ErrForbidden) {

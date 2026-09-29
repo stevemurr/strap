@@ -17,7 +17,7 @@ func progressFixture(t *testing.T) (*work.Store, *inspection.ProgressReader, wor
 	ctx := context.Background()
 	log, _ := sessionLog(t, "progress")
 	store := reportingStore(log, nil)
-	w, err := store.AssignResearch("root", work.ResearchAssignRequest{Assignee: "worker", Task: "inspect"})
+	w, err := store.AssignInvestigation("root", work.InvestigationRequest{Kind: work.WebResearch, Assignee: "worker", Task: "inspect"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,13 +141,8 @@ func TestLiveProgressRevokesCollectionsAndFragmentsWhileArchiveStaysPassive(t *t
 	if err != nil || record.Oversized == nil {
 		t.Fatal(record, err)
 	}
-	if _, err = s.Reassign("root", work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Assignee: "replacement"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, cursor := range []string{collection.NextCursor, record.NextCursor} {
-		if _, err = r.Read(ctx, "worker", inspection.ProgressQuery{Mode: "continue", Cursor: cursor}); !errors.Is(err, work.ErrForbidden) {
-			t.Fatal("live cursor retained authority", err)
-		}
+	if _, err = r.Read(ctx, "worker", inspection.ProgressQuery{Mode: "continue", Cursor: collection.NextCursor}); err != nil {
+		t.Fatal("live cursor", err)
 	}
 	archive, err := inspection.NewProgressReader(r.Reader)
 	if err != nil {

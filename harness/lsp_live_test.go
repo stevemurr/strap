@@ -159,7 +159,7 @@ func TestLiveLanguageTraversal(t *testing.T) {
 			seenCallers := map[string]bool{}
 			diagnosticObserved := false
 			request := "Investigate this Go project directly without delegating or modifying files. Follow the pricing.RateFor call inside invoice.Total to its definition, inspect its implementation, and identify every caller of that exact function. Exclude unrelated functions with the same name. Explain the vip and regular unit prices, citing the declaration and caller files/functions. Also check language diagnostics for broken/broken.go and report its error."
-			if _, err = s.Send(s.Root(), request); err != nil {
+			if _, err = s.Send(s.Manager(), request); err != nil {
 				t.Fatal(err)
 			}
 			for metrics.Answer == "" {
@@ -234,7 +234,7 @@ func TestLiveLanguageTraversal(t *testing.T) {
 						}
 					}
 				case conversation.MessageEvent:
-					if e.Message.From == s.Root() && e.Message.To == message.User && e.Message.Kind == message.Reply {
+					if e.Message.From == s.Manager() && e.Message.To == message.User && e.Message.Kind == message.Reply {
 						metrics.Answer = e.Message.Content
 					}
 				}

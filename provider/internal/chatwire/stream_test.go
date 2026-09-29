@@ -35,3 +35,16 @@ func TestStreamRejectsIncompleteAndPropagatesObserverError(t *testing.T) {
 		t.Fatal("accepted truncated stream")
 	}
 }
+
+// A raw stream tap sees every frame the server sent, including ones the
+// parsed response drops, without changing the response.
+func TestRawStreamTapSeesEveryFrame(t *testing.T) {
+	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning\":\"think\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	var frames []string
+	got, err := readTappedStream(strings.NewReader(input), nil, func(f string) { frames = append(frames, f) })
+	if err != nil || got.Content != "hi" || len(frames) != 3 || frames[2] != "[DONE]" {
+		t.Fatal(got, err, frames)
+	}
+}

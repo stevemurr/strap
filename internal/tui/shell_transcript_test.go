@@ -18,8 +18,8 @@ import (
 )
 
 func shellTranscriptFixture(m *model) identity.OutputID {
-	m.observe(conversation.MessageEvent{Message: message.Message{ID: "prompt", From: message.User, To: m.session.Root(), Kind: message.Instruction, Content: "Check the tests"}})
-	id := identity.OutputID{Agent: m.session.Root(), Call: 1}
+	m.observe(conversation.MessageEvent{Message: message.Message{ID: "prompt", From: message.User, To: m.session.Manager(), Kind: message.Instruction, Content: "Check the tests"}})
+	id := identity.OutputID{Agent: m.session.Manager(), Call: 1}
 	m.observe(conversation.AgentEvent{Agent: id.Agent, Event: agent.OutputStarted{Output: id}})
 	m.observe(conversation.AgentEvent{Agent: id.Agent, Event: agent.OutputDelta{Output: id, Channel: provider.ChannelReasoning, Text: "private thought"}})
 	progress(m, id.Agent, "Checking cancellation now.")
@@ -49,7 +49,7 @@ func checkShellTranscript(t *testing.T, m *model, open bool) {
 			t.Fatalf("unexpected %q:\n%s", part, view)
 		}
 	}
-	for _, part := range []string{agentGlyph(m.session.Root()), "exit 1", "Output truncated by shell"} {
+	for _, part := range []string{agentGlyph(m.session.Manager()), "exit 1", "Output truncated by shell"} {
 		if !strings.Contains(view, part) {
 			t.Fatalf("missing %q:\n%s", part, view)
 		}

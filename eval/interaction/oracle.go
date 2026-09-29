@@ -74,7 +74,7 @@ func firstBoundary(facts []fact, after eventlog.Cursor, f fixture) (boundary, bo
 		r, err := tool.DecodeAssignment(a.Call.Name, a.Call.Arguments)
 		return err == nil && r.Kind == work.AuditWork && r.WorkID == f.Original.ID
 	}
-	return boundaryAfter(facts, after, f.Root, assigned, func(m message.Message) bool { return m.To == message.User && m.Kind == message.Reply })
+	return boundaryAfter(facts, after, f.Coordinator, assigned, func(m message.Message) bool { return m.Kind == message.Reply }) // A manager reports to the user.
 }
 
 func boundaryReason(kind string) string {
@@ -169,10 +169,10 @@ type domain struct {
 }
 
 func domainAt(model *work.ReadModel, f fixture) domain {
-	p, _ := model.GetPlan(f.Root, f.Plan.ID)
-	s, _ := model.GetSubmission(f.Root, f.Submission.ID)
-	previous, _ := model.GetSubmission(f.Root, f.PreviousSubmission)
-	a, _ := model.GetAudit(f.Root, f.Original.LatestAuditID)
+	p, _ := model.GetPlan(f.Coordinator, f.Plan.ID)
+	s, _ := model.GetSubmission(f.Coordinator, f.Submission.ID)
+	previous, _ := model.GetSubmission(f.Coordinator, f.PreviousSubmission)
+	a, _ := model.GetAudit(f.Coordinator, f.Original.LatestAuditID)
 	return domain{model.Works(), p, s, previous, a}
 }
 
@@ -207,7 +207,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 		}
 		switch e := x.event.(type) {
 		case conversation.AgentEvent:
-			if output, ok := e.Event.(agent.OutputFinished); ok && observed && e.Agent == f.Root && output.Status == agent.OutputFailed {
+			if output, ok := e.Event.(agent.OutputFinished); ok && observed && e.Agent == f.Coordinator && output.Status == agent.OutputFailed {
 				failedOutputs++
 			}
 		case conversation.AgentRegistered:
@@ -220,8 +220,8 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 				model.Apply(*e.Event.Change)
 			}
 			if observed {
-				state, _ := model.GetWork(f.Root, f.Original.ID)
-				p, _ := model.GetPlan(f.Root, f.Plan.ID)
+				state, _ := model.GetWork(f.Coordinator, f.Original.ID)
+				p, _ := model.GetPlan(f.Coordinator, f.Plan.ID)
 				completed := false
 				for _, step := range p.Steps {
 					if step.Status == work.Completed {
@@ -231,7 +231,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 				check(result, "audit.no_acceptance_without_verdict", "harness", state.State != work.Accepted && !completed, "unaccepted work and incomplete plan steps", map[string]any{"work_state": state.State, "plan_steps": p.Steps}, x.record.Cursor(), "")
 			}
 		case conversation.ToolEvent:
-			if !observed || e.Agent != f.Root {
+			if !observed || e.Agent != f.Coordinator {
 				continue
 			}
 			a := e.Activity
@@ -284,7 +284,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 					raceRecovered = true
 				}
 				accepted++
-				current, _ := model.GetWork(f.Root, f.Original.ID)
+				current, _ := model.GetWork(f.Coordinator, f.Original.ID)
 				prior := findWork(before.before.Works, f.Original.ID)
 				check(result, "audit.transition", "harness", current.State == work.Checking && current.Revision == prior.Revision+1, "checking at previous revision + 1", current, x.record.Cursor(), a.InvocationID)
 				request, _ := tool.DecodeAssignment(a.Call.Name, a.Call.Arguments)
@@ -298,7 +298,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 				bound := len(created) == 1
 				if bound {
 					w := created[0]
-					bound = w.Kind == work.AuditWork && w.State == work.Active && w.Assignee == request.Assignee && w.Owner == f.Root && w.RequestedBy == f.Root && w.ParentID == request.WorkID && w.SubjectSubmissionID == request.SubmissionID && w.Revision == 1 && w.AssignedAtRevision == 1 && reflect.DeepEqual(w.Scope, prior.Scope)
+					bound = w.Kind == work.AuditWork && w.State == work.Active && w.Assignee == request.Assignee && w.Owner == f.Coordinator && w.RequestedBy == f.Coordinator && w.ParentID == request.WorkID && w.SubjectSubmissionID == request.SubmissionID && w.Revision == 1 && w.AssignedAtRevision == 1 && reflect.DeepEqual(w.Scope, prior.Scope)
 				}
 				check(result, "audit.binding", "harness", bound, request, created, x.record.Cursor(), a.InvocationID)
 				wantOriginal := prior.Clone()
@@ -313,7 +313,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 				check(result, "audit.only_expected_effects", "harness", collateral, "original enters checking; existing records otherwise unchanged", domainDiff(before.before, after), x.record.Cursor(), a.InvocationID)
 			}
 		case conversation.UsageEvent:
-			if observed && e.Agent == f.Root {
+			if observed && e.Agent == f.Coordinator {
 				usage.add(e.Observation.Usage)
 			}
 		}
@@ -344,7 +344,7 @@ func grade(result *Result, scenario Scenario, f fixture, facts []fact) {
 	bound := len(audits) == 1
 	if bound {
 		a := audits[0]
-		bound = a.Kind == work.AuditWork && a.State == work.Active && a.ParentID == f.Original.ID && a.SubjectSubmissionID == f.Submission.ID && a.Assignee != f.Implementor && roles[a.Assignee] == roster.Auditor && a.Owner == f.Root && reflect.DeepEqual(a.Scope, f.Original.Scope)
+		bound = a.Kind == work.AuditWork && a.State == work.Active && a.ParentID == f.Original.ID && a.SubjectSubmissionID == f.Submission.ID && a.Assignee != f.Implementor && roles[a.Assignee] == roster.Auditor && a.Owner == f.Coordinator && reflect.DeepEqual(a.Scope, f.Original.Scope)
 	}
 	check(result, "outcome.audit_binding", "behavior", bound, "one active independent audit bound to latest submission and original scope", audits, result.Through, "")
 	check(result, "outcome.one_assignment", "behavior", accepted == 1, 1, accepted, result.Through, "")
@@ -429,9 +429,9 @@ func gradeRevisionRace(result *Result, scenario Scenario, f fixture, facts []fac
 	afterOriginal.Revision += 2
 	active := work.Work{
 		ID: r.CancelledAudit.ID, Kind: work.AuditWork, State: work.Active,
-		Revision: 1, AssignedAtRevision: 1, Owner: f.Root, RequestedBy: f.Root,
-		Assignee: f.Auditor, ParentID: f.Original.ID, SubjectSubmissionID: f.Submission.ID,
-		Task:           "Audit the submitted outcome: " + original.Task,
+		Revision: 1, AssignedAtRevision: 1, Owner: f.Coordinator, RequestedBy: f.Coordinator,
+		Assignee: f.RaceAuditor, ParentID: f.Original.ID, SubjectSubmissionID: f.Submission.ID,
+		Task:           work.AuditTask(original, f.Submission.ID),
 		ExpectedOutput: "Submit a pass or fail verdict with evidence. If unable to verify, report a blocker.",
 		Scope:          original.Clone().Scope,
 	}
@@ -447,7 +447,7 @@ func gradeRevisionRace(result *Result, scenario Scenario, f fixture, facts []fac
 		if x.record.Sequence <= r.Before.Sequence {
 			continue
 		}
-		if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == f.Root && x.record.Sequence > r.Through.Sequence {
+		if e, ok := x.event.(conversation.ToolEvent); ok && e.Agent == f.Coordinator && x.record.Sequence > r.Through.Sequence {
 			// Provider call IDs may be reused in later responses. Resolve the
 			// first dispatch to its unique host invocation, then follow that.
 			if triggerInvocation == "" && e.Activity.Call.ID == r.TriggerCallID {
@@ -468,7 +468,7 @@ func gradeRevisionRace(result *Result, scenario Scenario, f fixture, facts []fac
 				wantWorks = []work.Work{afterOriginal, cancelled}
 			}
 			c := e.Event.Change
-			exactDelta = exactDelta && changes <= 2 && len(c.Works) == 2 && len(c.Plans) == 0 && len(c.Submissions) == 0 && len(c.Audits) == 0 && len(c.ResearchBriefs) == 0 && len(c.ProgressReports) == 0
+			exactDelta = exactDelta && changes <= 2 && len(c.Works) == 2 && len(c.Plans) == 0 && len(c.Submissions) == 0 && len(c.Audits) == 0 && len(c.Briefs) == 0 && len(c.ProgressReports) == 0
 			for _, w := range wantWorks {
 				exactDelta = exactDelta && reflect.DeepEqual(findWork(c.Works, w.ID), w)
 			}
@@ -505,7 +505,7 @@ func validateAuditRequest(r work.AssignmentRequest, model *work.ReadModel, roles
 	if r.Kind != work.AuditWork || r.WorkID != f.Original.ID {
 		return "", false
 	}
-	w, err := model.GetWork(f.Root, r.WorkID)
+	w, err := model.GetWork(f.Coordinator, r.WorkID)
 	if err != nil {
 		return "work_id", true
 	}
@@ -526,7 +526,7 @@ func validateAuditRequest(r work.AssignmentRequest, model *work.ReadModel, roles
 
 func readOnly(name string) bool {
 	switch name {
-	case "get_work", "get_plan", "get_audit", "get_work_progress", "get_work_progress_report", "get_progress_finding", "get_research_brief", "list_work", "list_agents", "inspect_agent", "message_status":
+	case "get_work", "get_plan", "get_audit", "get_work_progress", "get_work_progress_report", "get_progress_finding", "get_brief", "list_work", "list_agents", "inspect_agent", "message_status":
 		return true
 	}
 	return false

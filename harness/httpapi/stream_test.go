@@ -48,7 +48,7 @@ func TestHTTPStreamDisconnectAndReconnectPreserveExecution(t *testing.T) {
 	if s.State() != harness.Open {
 		t.Fatal("disconnect closed execution")
 	}
-	if _, err := s.Send(s.Root(), "still running"); err != nil {
+	if _, err := s.Send(s.Manager(), "still running"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(context.Background()); err != nil {

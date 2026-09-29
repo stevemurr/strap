@@ -7,7 +7,7 @@ import (
 )
 
 func ProgressQueryFromValues(v url.Values, brief bool) (ProgressQuery, error) {
-	q := ProgressQuery{Mode: v.Get("mode"), WorkID: work.ID(v.Get("work_id")), ReportID: work.ProgressReportID(v.Get("report_id")), FindingID: work.ProgressFindingID(v.Get("finding_id")), BriefID: work.ResearchBriefID(v.Get("brief_id")), EvidenceRef: v.Get("evidence_ref"), Cursor: v.Get("cursor")}
+	q := ProgressQuery{Mode: v.Get("mode"), WorkID: work.ID(v.Get("work_id")), ReportID: work.ProgressReportID(v.Get("report_id")), FindingID: work.ProgressFindingID(v.Get("finding_id")), BriefID: work.BriefID(v.Get("brief_id")), EvidenceRef: v.Get("evidence_ref"), Cursor: v.Get("cursor")}
 	for k, values := range v {
 		if len(values) != 1 || values[0] == "" {
 			return q, work.ErrInvalid

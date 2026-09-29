@@ -102,7 +102,7 @@ func TestInterfaceThemeRendering(t *testing.T) {
 				m.add("Strap", "## Progress\n\n**Readable text**, `inline code`, and [documentation](https://example.com).\n\n```go\nreturn true\n```", false)
 				m.input.SetValue("Keep this draft\nwhile browsing agents")
 				m.syncCompletion()
-				m.working[m.session.Root()] = true
+				m.working[m.session.Manager()] = true
 				states := map[string]string{"chat": m.View()}
 				x, y := screenLocation(t, states["chat"], "Check the tests")
 				selection := &mouseSelection{lines: strings.Split(states["chat"], "\n"), start: screenPoint{x, y}, end: screenPoint{x + 14, y}}

@@ -68,7 +68,7 @@ type evalProblem struct {
 	task          eval.Task
 	phase         eval.Phase
 	started, last time.Time
-	root          message.ActorID
+	manager       message.ActorID
 	result        *eval.Result
 	activity      *model
 	tools         map[string]bool // invocation -> finished; counts each invocation once
@@ -138,9 +138,9 @@ func (m *evalModel) observe(e eval.Progress) {
 		p.started = e.At
 		p.status = "Starting session"
 	}
-	if e.Root != "" && p.activity == nil {
-		p.root = e.Root
-		p.activity = newEvalActivity(m.ctx, e.Root)
+	if e.Manager != "" && p.activity == nil {
+		p.manager = e.Manager
+		p.activity = newEvalActivity(m.ctx, e.Manager)
 		m.resizeActivity(p)
 	}
 	if e.Phase == eval.Running {
@@ -171,7 +171,7 @@ func (m *evalModel) observe(e eval.Progress) {
 			p.activity.add("Eval", "Session budget exhausted; see submission status for grading readiness.", false)
 		}
 		if copy.NoReply {
-			p.activity.add("Eval", "Session ended without a root reply; see submission status for grading readiness.", false)
+			p.activity.add("Eval", "Session ended without a manager reply; see submission status for grading readiness.", false)
 		}
 	}
 	if e.Event == nil {
@@ -206,7 +206,7 @@ func (m *evalModel) observe(e eval.Progress) {
 			}
 		}
 	case conversation.MessageEvent:
-		if v.Message.From == p.root && v.Message.To == message.User {
+		if v.Message.From == p.manager && v.Message.To == message.User {
 			p.status = "Waiting for session to settle"
 		}
 	case conversation.UsageEvent:
@@ -584,7 +584,7 @@ func (m *evalModel) metrics(p *evalProblem) []string {
 	if p.activity != nil {
 		id := p.activity.streamUI.selected
 		if id == "" {
-			id = p.root
+			id = p.manager
 		}
 		if c := p.activity.ensureStream(id).context; c != nil {
 			contextLabel = c.label()

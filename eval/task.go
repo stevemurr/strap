@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// Task is one ladder entry. Prompt is the exact user message sent to the root
+// Task is one ladder entry. Prompt is the exact user message sent to the manager
 // agent; the workspace README carries the full contract so the agent must read
 // the repository the way a person would.
 type Task struct {

@@ -52,7 +52,7 @@ const (
 	noteHint         = "step notes come from worker progress reports, not plan tools"
 )
 
-// PlanTools returns the root's plan tools. Creation keeps nested steps because
+// PlanTools returns the manager's plan tools. Creation keeps nested steps because
 // models create plans reliably. Every edit is one flat operation on one plan or
 // one step: there is no whole-plan snapshot to copy back, no create-or-edit
 // form to choose, and no field where a step status could go. All operations
@@ -187,9 +187,6 @@ func GetAudit(handle func(context.Context, Call, work.AuditID) (Result, error)) 
 func CancelWork(handle Handler[work.CancelRequest]) Tool {
 	return Func[work.CancelRequest]{Spec: cancelWorkDefinition, Invoke: handle}
 }
-func ReassignWork(handle Handler[work.ReassignRequest]) Tool {
-	return Func[work.ReassignRequest]{Spec: Definition[work.ReassignRequest]{Bookkeeping: []string{"expected_revision"}, Name: "reassign_work", Description: "Replace the worker on an existing active work item. Supply only work_id, expected_revision, and the required existing assignee. Create a replacement explicitly with create_agent if needed. Uses this work item's revision. Does not create, resume, or stop agents. Old assignment updates are rejected.", Parameters: reassignmentParameters}, Invoke: handle}
-}
 
 func ListWork(handle Handler[work.ListQuery]) Tool {
 	type first struct {
@@ -202,15 +199,15 @@ func ListWork(handle Handler[work.ListQuery]) Tool {
 		Cursor string `json:"cursor"`
 		Limit  *int   `json:"limit"`
 	}
-	return compose(provider.ToolDefinition{Name: "list_work", Description: "Discover tracked work, including closed and cancelled work. Root only. Start with nullable assignee, kind and state filters; continue with cursor and nullable limit only. Results describe a fixed recorded snapshot. Use get_work for current details before mutations. Discovery does not guarantee exactly-once retries."},
+	return compose(provider.ToolDefinition{Name: "list_work", Description: "Discover tracked work, including closed and cancelled work you own. Start with nullable assignee, kind and state filters; continue with cursor and nullable limit only. Results describe a fixed recorded snapshot. Use get_work for current details before mutations. Discovery does not guarantee exactly-once retries."},
 		builtin("first_work_page", "", func(ctx context.Context, c Call, q first) (Result, error) {
 			return handle(ctx, c, work.ListQuery{Assignee: valueOrZero(q.Assignee), Kind: valueOrZero(q.Kind), State: valueOrZero(q.State), Limit: valueOrZero(q.Limit)})
-		}, Nullable("assignee", "all assignees"), Nullable("kind", "all work kinds"), Nullable("state", "all work states"), Nullable("limit", "use the default page size"), Enum("kind", "implementation", "audit", "repair", "research"), Enum("state", "active", "needs_check", "checking", "changes_requested", "accepted", "closed", "cancelled", "delivered"), Minimum("limit", 1), Maximum("limit", 100)),
+		}, Nullable("assignee", "all assignees"), Nullable("kind", "all work kinds"), Nullable("state", "all work states"), Nullable("limit", "use the default page size"), Enum("kind", "implementation", "review", "web_research", "deep_research", "experiment", "audit", "repair"), Enum("state", "active", "needs_check", "checking", "changes_requested", "accepted", "closed", "cancelled", "delivered"), Minimum("limit", 1), Maximum("limit", 100)),
 		builtin("next_work_page", "", func(ctx context.Context, c Call, q next) (Result, error) {
 			return handle(ctx, c, work.ListQuery{Cursor: q.Cursor, Limit: valueOrZero(q.Limit)})
 		}, Nullable("limit", "use the default page size"), MinLength("cursor", 1), Minimum("limit", 1), Maximum("limit", 100)))
 }
 
-func SubmitResearch(h Handler[work.SubmitResearchRequest]) Tool {
-	return Func[SubmitResearchInput]{Spec: submitResearchDefinition, Invoke: func(ctx context.Context, c Call, a SubmitResearchInput) (Result, error) { return h(ctx, c, a.domain()) }}
+func SubmitBrief(h Handler[work.SubmitBriefRequest]) Tool {
+	return Func[SubmitBriefInput]{Spec: submitBriefDefinition, Invoke: func(ctx context.Context, c Call, a SubmitBriefInput) (Result, error) { return h(ctx, c, a.domain()) }}
 }

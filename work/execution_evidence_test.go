@@ -8,7 +8,7 @@ import (
 	"github.com/stevemurr/strap/identity"
 )
 
-func TestReportChecksRecordedEvidenceAndPreservesInheritedBinding(t *testing.T) {
+func TestReportChecksRecordedEvidence(t *testing.T) {
 	var evidence ExecutionEvidence
 	s := New(WithEvidenceLookup(func(ref string) (ExecutionEvidence, error) {
 		if ref != "execution:known" {
@@ -16,7 +16,7 @@ func TestReportChecksRecordedEvidenceAndPreservesInheritedBinding(t *testing.T) 
 		}
 		return evidence, nil
 	}))
-	w, _ := s.AssignResearch("root", ResearchAssignRequest{Assignee: "r", Task: "inspect"})
+	w, _ := s.AssignInvestigation("root", InvestigationRequest{Kind: WebResearch, Assignee: "r", Task: "inspect"})
 	request := func(ref string) ReportWorkProgressRequest {
 		return ReportWorkProgressRequest{WorkID: w.ID, Findings: []ProgressFindingDraft{{Claim: "observed", Basis: Observed, Evidence: []EvidenceRef{{URI: ref}}}}}
 	}
@@ -27,8 +27,7 @@ func TestReportChecksRecordedEvidenceAndPreservesInheritedBinding(t *testing.T) 
 		}
 	}
 	evidence.WorkID = w.ID
-	w, _ = s.Reassign("root", ReassignRequest{WorkTarget: WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}, Assignee: "next"})
-	r, err := s.ReportWorkProgress("next", request("execution:known"))
+	r, err := s.ReportWorkProgress("r", request("execution:known"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +45,7 @@ func TestFabricatedEvidenceRejectionNamesTheURI(t *testing.T) {
 	s := New(WithEvidenceLookup(func(string) (ExecutionEvidence, error) {
 		return ExecutionEvidence{}, ErrNotFound
 	}))
-	w, _ := s.AssignResearch("root", ResearchAssignRequest{Assignee: "r", Task: "inspect"})
+	w, _ := s.AssignInvestigation("root", InvestigationRequest{Kind: WebResearch, Assignee: "r", Task: "inspect"})
 	const forged = "execution:evidence:build-success"
 	_, err := s.ReportWorkProgress("r", ReportWorkProgressRequest{
 		WorkID:   w.ID,
@@ -69,7 +68,7 @@ func TestFabricatedEvidenceRejectionNamesTheURI(t *testing.T) {
 // to fail with the same unattributable sentinel.
 func TestUnknownReferencesNameTheirSubject(t *testing.T) {
 	s := New()
-	w, _ := s.AssignResearch("root", ResearchAssignRequest{Assignee: "r", Task: "inspect"})
+	w, _ := s.AssignInvestigation("root", InvestigationRequest{Kind: WebResearch, Assignee: "r", Task: "inspect"})
 	target := WorkTarget{ID: w.ID, ExpectedRevision: w.Revision}
 	_, err := s.ReportWorkProgress("r", ReportWorkProgressRequest{WorkID: target.ID,
 		Position: &WorkPosition{Objective: "o", Dependencies: []ProgressDependency{{Need: "waiting", WorkID: "work-absent"}}}})

@@ -145,6 +145,14 @@ func Encode(model string, input provider.Request) (Request, error) {
 	return result, nil
 }
 
+// LooseTools sends the tool schemas without strict, leaving tool-call
+// generation unconstrained by them.
+func (r *Request) LooseTools() {
+	for i := range r.Tools {
+		r.Tools[i].Function.Strict = nil
+	}
+}
+
 func decode(input completion) (provider.Response, error) {
 	// Preserve accounting even if the generated output cannot be accepted.
 	usage := decodeUsage(input.Usage)
@@ -185,10 +193,10 @@ func decode(input completion) (provider.Response, error) {
 		})
 	}
 	if choice.FinishReason == "tool_calls" && len(result.ToolCalls) == 0 {
-		return provider.Response{Usage: usage}, fmt.Errorf("tool_calls finish without tool calls")
+		return provider.Response{Usage: usage}, fmt.Errorf("tool_calls finish without tool calls: %w", provider.ErrEmptyResponse)
 	}
 	if strings.TrimSpace(result.Content) == "" && len(result.ToolCalls) == 0 {
-		return provider.Response{Usage: usage}, fmt.Errorf("response contains no text or tool calls")
+		return provider.Response{Usage: usage}, provider.ErrEmptyResponse
 	}
 	return result, nil
 }
@@ -197,8 +205,14 @@ func decode(input completion) (provider.Response, error) {
 // Malformed or negative counts are unavailable, independently for each field.
 func decodeUsage(raw json.RawMessage) *provider.Usage {
 	var wire struct {
-		Input  json.RawMessage `json:"prompt_tokens"`
-		Output json.RawMessage `json:"completion_tokens"`
+		Input        json.RawMessage `json:"prompt_tokens"`
+		Output       json.RawMessage `json:"completion_tokens"`
+		InputDetails *struct {
+			Cached json.RawMessage `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+		OutputDetails *struct {
+			Reasoning json.RawMessage `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	}
 	if json.Unmarshal(raw, &wire) != nil {
 		return nil
@@ -213,6 +227,12 @@ func decodeUsage(raw json.RawMessage) *provider.Usage {
 	u := &provider.Usage{InputTokens: count(wire.Input), OutputTokens: count(wire.Output)}
 	if u.InputTokens == nil && u.OutputTokens == nil {
 		return nil
+	}
+	if d := wire.InputDetails; d != nil {
+		u.CachedTokens = count(d.Cached)
+	}
+	if d := wire.OutputDetails; d != nil {
+		u.ReasoningTokens = count(d.Reasoning)
 	}
 	return u
 }

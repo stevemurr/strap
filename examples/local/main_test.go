@@ -65,10 +65,10 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 						name = "assign_audit"
 						args = map[string]any{"assignee": auditor, "work_id": item.ID, "expected_revision": item.Revision, "submission_id": item.LatestSubmissionID}
 					}
-				case "assign_implementation":
+				case "assign_task":
 					if env.Kind == message.Instruction {
-						name = "assign_implementation"
-						args = map[string]any{"assignee": impl, "task": "calculate two plus two", "context": nil, "expected_output": nil, "scope": nil}
+						name = "assign_task"
+						args = map[string]any{"kind": "implementation", "assignee": impl, "task": "calculate two plus two", "context": nil, "expected_output": nil, "scope": nil}
 					}
 				case "submit_work":
 					if env.Work != nil {
@@ -83,7 +83,7 @@ func arithmeticServer(t *testing.T) *httptest.Server {
 				}
 			}
 		}
-		if name == "assign_audit" || name == "assign_implementation" {
+		if name == "assign_audit" || name == "assign_task" {
 			if env.Event != nil && env.Event.Kind == work.ReviewRequested {
 				if auditor == "" {
 					name = "create_agent"

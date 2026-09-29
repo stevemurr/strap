@@ -29,7 +29,7 @@ func evalSetup(t *testing.T) (*evalModel, eval.Task) {
 	task := eval.Task{ID: "medium-01-cache", Tier: "medium", Title: "Session cache"}
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
 	m.observe(eval.Progress{Task: task, Phase: eval.Starting, At: time.Now()})
-	m.observe(eval.Progress{Task: task, Phase: eval.Running, Root: "root", At: time.Now()})
+	m.observe(eval.Progress{Task: task, Phase: eval.Running, Manager: "root", At: time.Now()})
 	return m, task
 }
 
@@ -183,7 +183,7 @@ func TestEvalFollowsActiveUntilManuallySelected(t *testing.T) {
 		t.Fatal("did not follow next active problem")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m.observe(eval.Progress{Task: second, Phase: eval.Running, Root: "other"})
+	m.observe(eval.Progress{Task: second, Phase: eval.Running, Manager: "other"})
 	if m.current().task.ID != first.ID {
 		t.Fatal("manual selection was overridden")
 	}
@@ -229,7 +229,7 @@ func TestEvalBoundsLongActivityWithoutBreakingUnicode(t *testing.T) {
 }
 
 func TestEvalSessionHasNoControlCapabilities(t *testing.T) {
-	s := evalSession{root: "root"}
+	s := evalSession{manager: "root"}
 	if _, err := s.Send("root", "hello"); err != errEvalReadOnly {
 		t.Fatal(err)
 	}

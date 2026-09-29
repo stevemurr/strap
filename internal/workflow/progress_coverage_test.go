@@ -1,17 +1,18 @@
 package workflow
 
 import (
+	"testing"
+	"time"
+
 	"github.com/stevemurr/strap/identity"
 	"github.com/stevemurr/strap/message"
 	"github.com/stevemurr/strap/work"
-	"testing"
-	"time"
 )
 
 func TestCoverageIncludesSecondaryWorkAndOldBinding(t *testing.T) {
 	prior := map[work.ID]work.Work{}
 	var before, after []work.Work
-	for i, kind := range []work.Kind{work.Implementation, work.Repair, work.AuditWork, work.AuditWork, work.Research, work.Research, work.Research} {
+	for i, kind := range []work.Kind{work.Implementation, work.Repair, work.AuditWork, work.AuditWork, work.Review, work.WebResearch, work.DeepResearch} {
 		w := work.Work{ID: work.ID(string(rune('a' + i))), Kind: kind, State: work.Active, Revision: 2, AssignedAtRevision: 1}
 		before = append(before, w)
 		w.Revision = 3
@@ -96,7 +97,7 @@ func TestOnlyAttentionBearingNoticesWakeTheOwner(t *testing.T) {
 	}{
 		{"routine findings", notice(message.WorkProgressNotice{Reports: refs}), false},
 		{"blocker or decision need", notice(message.WorkProgressNotice{Reports: refs, Attention: true}), true},
-		{"research delivered", notice(message.WorkProgressNotice{Briefs: []message.ResearchBriefRef{{WorkID: "w"}}}), true},
+		{"research delivered", notice(message.WorkProgressNotice{Briefs: []message.BriefRef{{WorkID: "w"}}}), true},
 		{"assignment ended", notice(message.WorkProgressNotice{Covered: []message.ProgressCoverage{{WorkID: "w"}}}), true},
 		{"work event attached", message.Message{To: "root", Kind: message.Notification, Progress: &message.WorkProgressNotice{Reports: refs}, Event: &work.Event{Kind: work.ReviewRequested}}, true},
 		{"observation", message.Message{To: "root", Kind: message.Observation, Progress: &message.WorkProgressNotice{Reports: refs, Attention: true}}, false},

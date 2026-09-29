@@ -22,7 +22,7 @@ func TestConfigPreservesResolvedPolicy(t *testing.T) {
 	worker.Model = "worker-model"
 	cfg.Implementor.Model = &worker
 	cfg.LSP = nil
-	cfg.Root.Prompt.Instructions = append(cfg.Root.Prompt.Instructions, "Keep this user policy.")
+	cfg.Manager.Prompt.Instructions = append(cfg.Manager.Prompt.Instructions, "Keep this user policy.")
 	want := Config{Version: Version, Harness: cfg, Profile: "selected-profile"}
 	b, err := json.Marshal(want)
 	if err != nil {

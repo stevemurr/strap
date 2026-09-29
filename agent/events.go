@@ -109,7 +109,13 @@ func (a *Agent) reportError() error {
 }
 func (a *Agent) appendHistory(m provider.Message, output *identity.OutputID) (uint64, error) {
 	position := a.thread.append(m)
-	return position, a.report(HistoryAppended{Position: position, Message: provider.CopyMessages([]provider.Message{m})[0], Output: output})
+	if err := a.report(HistoryAppended{Position: position, Message: provider.CopyMessages([]provider.Message{m})[0], Output: output}); err != nil {
+		return position, err
+	}
+	if a.config.Sequence != nil {
+		a.config.Sequence.Appended(position)
+	}
+	return position, nil
 }
 
 // Definitions describes this agent's bound tool schema without exposing tools.

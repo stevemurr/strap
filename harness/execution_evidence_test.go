@@ -4,6 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/stevemurr/strap/eventlog"
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/inspection"
@@ -11,12 +18,6 @@ import (
 	"github.com/stevemurr/strap/roster"
 	"github.com/stevemurr/strap/tool"
 	"github.com/stevemurr/strap/work"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 type evidenceScript struct {
@@ -27,21 +28,21 @@ type evidenceScript struct {
 
 func (p *evidenceScript) Submit(_ context.Context, r provider.Request, _ provider.Observer) (provider.Response, error) {
 	if p.calls.Add(1) == 1 {
-		var assigned *work.Work
-		for _, m := range r.Messages {
-			if m.Envelope != nil && m.Envelope.Work != nil {
-				assigned = m.Envelope.Work
-			}
-		}
 		command := p.command
 		if command == "" {
 			command = "printf '%05000ddecisive-error\\n' 0"
 		}
-		args, _ := tool.MarshalInput(tool.ResearchDiagnosticArgs{WorkID: assigned.ID, Command: command})
+		args, _ := tool.MarshalInput(struct {
+			Command   string `json:"command"`
+			TimeoutMS *int64 `json:"timeout_ms"`
+		}{Command: command})
 		return provider.Response{ToolCalls: []provider.ToolCall{{ID: "diagnostic", Name: "shell", Arguments: args}}}, nil
 	}
-	p.receipt <- r.Messages[len(r.Messages)-1].Content.Text()
-	return provider.Response{ToolCalls: []provider.ToolCall{{ID: "wait", Name: "wait_for_input", Arguments: json.RawMessage(`{"input":{}}`)}}}, nil
+	if p.calls.Load() == 2 {
+		p.receipt <- r.Messages[len(r.Messages)-1].Content.Text()
+	}
+	// Implementors have no wait_for_input; a text reply ends the turn.
+	return provider.Response{Content: "Ran the diagnostic."}, nil
 }
 func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -49,13 +50,13 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	p := &evidenceScript{receipt: make(chan string, 2)}
 	cfg := testConfig(t, true)
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Researcher: harness.AgentDependencies{Provider: p}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Implementor: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	worker := createWorker(t, s, roster.Researcher)
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Research, Assignee: worker, Task: "Run diagnostic"})
+	worker := createWorker(t, s, roster.Implementor)
+	w, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "Run diagnostic"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,14 +67,14 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	if err = json.Unmarshal([]byte(raw), &receipt); err != nil || receipt.EvidenceRef == "" {
 		t.Fatal(raw, err)
 	}
-	r, err := s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkID: w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic contains decisive error", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}})
+	_, err = s.ReportWorkProgress(ctx, worker, work.ReportWorkProgressRequest{WorkID: w.ID, Findings: []work.ProgressFindingDraft{{Claim: "Diagnostic contains decisive error", Basis: work.Observed, Evidence: []work.EvidenceRef{{URI: receipt.EvidenceRef}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	q := inspection.ProgressQuery{Mode: "evidence", EvidenceRef: receipt.EvidenceRef, MaxBytes: 2048}
 	var body strings.Builder
 	for {
-		page, err := s.ReadWorkProgress(ctx, s.Root(), q)
+		page, err := s.ReadWorkProgress(ctx, s.Manager(), q)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,13 +113,8 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	if p.calls.Load() != 2 {
 		t.Fatal("live reader invoked model", p.calls.Load())
 	}
-	replacement := createWorker(t, s, roster.Researcher)
-	_, err = s.ReassignWork(ctx, s.Root(), work.ReassignRequest{WorkTarget: work.WorkTarget{ID: w.ID, ExpectedRevision: r.WorkRevision}, Assignee: replacement})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ReadWorkProgress(ctx, worker, inspection.ProgressQuery{Mode: "continue", Cursor: first.NextCursor}); !errors.Is(err, work.ErrForbidden) {
-		t.Fatal("cursor retained access", err)
+	if _, err = s.ReadWorkProgress(ctx, worker, inspection.ProgressQuery{Mode: "continue", Cursor: first.NextCursor}); err != nil {
+		t.Fatal("cursor", err)
 	}
 	if err = s.Close(ctx); err != nil {
 		t.Fatal(err)
@@ -133,7 +129,7 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := reader.Read(ctx, s.Root(), inspection.ProgressQuery{Mode: "evidence", EvidenceRef: receipt.EvidenceRef})
+	page, err := reader.Read(ctx, s.Manager(), inspection.ProgressQuery{Mode: "evidence", EvidenceRef: receipt.EvidenceRef})
 	if err != nil || len(page.Items) != 1 {
 		t.Fatal(page, err)
 	}
@@ -142,19 +138,19 @@ func TestExecutionEvidencePagesAndPassiveArchive(t *testing.T) {
 	}
 }
 
-func TestStoppedResearcherRetainsExecutionEvidenceWithoutReport(t *testing.T) {
+func TestStoppedWorkerRetainsExecutionEvidenceWithoutReport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cfg := testConfig(t, true)
 	cfg.Events.JSONLPath = filepath.Join(cfg.Dir, "trace.jsonl")
 	p := &evidenceScript{command: "printf partial-evidence; printf ready >ready; sleep 30", receipt: make(chan string, 2)}
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Researcher: harness.AgentDependencies{Provider: p}})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Implementor: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	worker := createWorker(t, s, roster.Researcher)
-	_, err = s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Research, Assignee: worker, Task: "Inspect"})
+	worker := createWorker(t, s, roster.Implementor)
+	_, err = s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "Inspect"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +185,7 @@ func TestStoppedResearcherRetainsExecutionEvidenceWithoutReport(t *testing.T) {
 	if err != nil || len(page.Items) != 1 || page.Items[0].Execution == nil {
 		t.Fatal(page, err)
 	}
-	evidence, err := v.GetExecutionEvidence(ctx, s.Root(), page.Items[0].Execution.EvidenceRef)
+	evidence, err := v.GetExecutionEvidence(ctx, s.Manager(), page.Items[0].Execution.EvidenceRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +225,7 @@ func TestImplementorShellIssuesCitableExecutionEvidence(t *testing.T) {
 	}
 	defer s.Dispose(context.Background())
 	worker := createWorker(t, s, roster.Implementor)
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "Build it"})
+	w, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: worker, Task: "Build it"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,13 +253,15 @@ func TestAuditReadersCanReadTheRunsTheAuditCites(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	p := &workerShellScript{receipt: make(chan string, 2)}
-	s, err := harness.New(ctx, testConfig(t, true), harness.Dependencies{Provider: textResponse("ready"), Implementor: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: p}})
+	cfg := testConfig(t, true)
+	cfg.ManualAudits = true // The test assigns the audit itself.
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Provider: textResponse("ready"), Implementor: harness.AgentDependencies{Provider: textResponse("ready")}, Auditor: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
 	implementor := createWorker(t, s, roster.Implementor)
-	w, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor, Task: "Build it"})
+	w, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: implementor, Task: "Build it"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,10 +269,10 @@ func TestAuditReadersCanReadTheRunsTheAuditCites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, err = s.GetWork(ctx, s.Root(), w.ID); err != nil {
+	if w, err = s.GetWork(ctx, s.Manager(), w.ID); err != nil {
 		t.Fatal(err)
 	}
-	audit, err := s.AssignWork(ctx, s.Root(), work.AssignmentRequest{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
+	audit, err := s.AssignWork(ctx, s.Manager(), work.AssignmentRequest{Kind: work.AuditWork, Assignee: createWorker(t, s, roster.Auditor), WorkID: w.ID, ExpectedRevision: w.Revision, SubmissionID: sub.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

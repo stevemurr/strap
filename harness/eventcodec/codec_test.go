@@ -53,7 +53,7 @@ func TestEventsSurviveEncodeAndDecode(t *testing.T) {
 		conversation.MessageEvent{Message: message.Message{ID: "m-1", From: message.User, To: "agent", Kind: message.Instruction, Content: "hi"}},
 		conversation.CommentaryEvent{Agent: "agent", Content: "thinking"},
 		conversation.AckEvent{Receipt: message.Receipt{MessageID: "m-1", Recipient: "agent", Status: message.Queued}},
-		conversation.AgentRegistered{Registration: roster.Registration{AgentID: "agent", Parent: message.User, Role: roster.Root}},
+		conversation.AgentRegistered{Registration: roster.Registration{AgentID: "agent", Parent: message.User, Role: roster.Manager}},
 		conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "agent", Parent: message.User, State: agent.Idle, StateRevision: 1}},
 		conversation.AgentStateChanged{Agent: "agent", State: agent.Running, Revision: 2},
 		conversation.ToolEvent{Agent: "agent", Activity: agent.ToolActivity{InvocationID: "agent/tool-1", Call: provider.ToolCall{ID: "c", Name: "shell", Arguments: json.RawMessage(`{"input":{}}`)}, StartedAt: now}},

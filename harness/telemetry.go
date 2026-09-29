@@ -17,6 +17,12 @@ type TelemetryConfig struct {
 	Concurrency   int           `json:"concurrency"`
 	Queue         int           `json:"queue"`
 	Timeout       time.Duration `json:"timeout_ns"`
+	// ServerMetrics samples a vLLM server's /metrics at session start and
+	// end, and every ServerMetricsInterval for its queue and KV-cache gauges.
+	// Off by default: the strap CLI and eval runs turn it on, while embedders
+	// and tests talking to a stand-in server get no extra requests.
+	ServerMetrics         bool          `json:"server_metrics,omitempty"`
+	ServerMetricsInterval time.Duration `json:"server_metrics_interval_ns,omitempty"`
 }
 
 func (c *TelemetryConfig) defaults() error {
@@ -29,7 +35,10 @@ func (c *TelemetryConfig) defaults() error {
 	if c.Timeout == 0 {
 		c.Timeout = 10 * time.Second
 	}
-	if c.Concurrency < 1 || c.Concurrency > 64 || c.Queue < 1 || c.Timeout <= 0 {
+	if c.ServerMetricsInterval == 0 {
+		c.ServerMetricsInterval = 5 * time.Second
+	}
+	if c.Concurrency < 1 || c.Concurrency > 64 || c.Queue < 1 || c.Timeout <= 0 || c.ServerMetricsInterval < 100*time.Millisecond {
 		return errors.New("invalid telemetry concurrency, queue, or timeout")
 	}
 	return nil

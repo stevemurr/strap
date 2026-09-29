@@ -1,6 +1,9 @@
 package lsp
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Positions exposed by Strap are one-based Unicode code point offsets, not tabs'
 // display width or the server's negotiated code units. Range ends are exclusive.
@@ -51,6 +54,14 @@ type ReferenceQuery struct {
 type DiagnosticQuery struct {
 	Paths []string
 	PageQuery
+	// Wait, when positive, replaces the configured diagnostic timeout for this
+	// query: how long to wait for the servers' analysis of the paths.
+	Wait time.Duration `json:"-"`
+	// Resync sends every requested open file to its server as a new version,
+	// even when its text is unchanged, so the server publishes diagnostics
+	// for it again. After a change elsewhere, a server that republishes only
+	// what changed would otherwise leave the file's diagnostics unconfirmed.
+	Resync bool `json:"-"`
 }
 
 type Source struct {

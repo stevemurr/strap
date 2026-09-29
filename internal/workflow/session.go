@@ -31,33 +31,41 @@ type binding struct {
 // Session follows delivery/exit facts to dispatch ledger work. Harness hosts read
 // those facts from the accepted log; standalone hosts retain a legacy event relay.
 type Session struct {
-	researchMu         sync.Mutex
-	researchRun        *activeResearch
-	deepResearch       *research.Engine
-	researchWeb        func(research.Binding) research.Retrieval
-	researchRecord     research.Recorder
-	researchRead       tool.Tool
-	interrupted        atomic.Bool
-	interruptDrain     chan chan error
-	evidenceLookup     work.EvidenceLookup
-	researchShell      tool.Tool
-	researchMaxTimeout time.Duration
-	publish            func(conversation.Event) error
-	progressReads      []tool.Tool
-	progressConfig     WorkProgressReportingConfig
-	progressCurrent    func(identity.ActorID, work.ID) (work.Work, error)
-	closing            atomic.Bool
-	admission          *admission.Gate
-	stopOwner          func() bool
+	researchMu      sync.Mutex
+	researchRun     *activeResearch
+	deepResearch    *research.Engine
+	researchWeb     func(research.Binding) research.Retrieval
+	researchRecord  research.Recorder
+	researchRead    tool.Tool
+	interrupted     atomic.Bool
+	interruptDrain  chan chan error
+	evidenceLookup  work.EvidenceLookup
+	publish         func(conversation.Event) error
+	progressReads   []tool.Tool
+	progressConfig  WorkProgressReportingConfig
+	progressCurrent func(identity.ActorID, work.ID) (work.Work, error)
+	closing         atomic.Bool
+	admission       *admission.Gate
+	stopOwner       func() bool
 	*conversation.Controller
 	Store                *work.Store
 	implementor, auditor agent.Spec
-	researcher           agent.Spec
+	webResearcher        agent.Spec
+	deepResearcher       agent.Spec
+	experimenter         agent.Spec
+	autoAudit            bool
+	auditBrief           AuditBrief
+	reviewer             agent.Spec
+	methodFiles          MethodFiles
+	manager              agent.Spec
 	mu                   sync.Mutex
-	roles                map[identity.ActorID]roster.Registration
+	graph                *roster.Graph                 // The agent topology; see roster.Graph.
+	assignments          map[message.MessageID]binding // Delivered assignment messages; guarded by mu.
 	ctx                  context.Context
 	cancel               context.CancelFunc
 	events               *inbox.Inbox[conversation.Event]
+	ids                  func(prefix string) string
+	clock                Clock
 	done                 chan struct{}
 }
 
@@ -74,8 +82,43 @@ func WithProgressTools(ops []tool.Tool) Option {
 	return func(s *Session) { s.progressReads = append([]tool.Tool(nil), ops...) }
 }
 
-func WithResearcher(spec agent.Spec) Option   { return func(s *Session) { s.researcher = spec.Clone() } }
-func (s *Session) ResearcherSpec() agent.Spec { return s.researcher.Clone() }
+// WithWebResearcher configures the web researcher. The deep researcher runs
+// the same model with the deep research engine in place of nothing else; it is
+// available only when WithDeepResearch configures an engine.
+func WithWebResearcher(spec agent.Spec) Option {
+	return func(s *Session) { s.webResearcher = spec.Clone() }
+}
+func WithDeepResearcher(spec agent.Spec) Option {
+	return func(s *Session) { s.deepResearcher = spec.Clone() }
+}
+
+// WithAutoAudit makes the session assign every submitted implementation to a
+// fresh auditor itself, instead of notifying the owner to do it: the step
+// has nothing to decide, and each cycle cost the manager several model calls.
+func WithAutoAudit() Option { return func(s *Session) { s.autoAudit = true } }
+
+// AuditBrief builds what an auditor is handed with its audit of original's
+// submission, such as the requirements and the files the implementation
+// changed, so it need not gather them again.
+type AuditBrief func(original work.Work, submission work.SubmissionID) string
+
+func WithAuditBrief(f AuditBrief) Option { return func(s *Session) { s.auditBrief = f } }
+
+// WithExperimenter configures the experimenter; methods captures the files an
+// experiment's method names from the experimenter's copy of the workspace.
+func WithExperimenter(spec agent.Spec, methods MethodFiles) Option {
+	return func(s *Session) { s.experimenter, s.methodFiles = spec.Clone(), methods }
+}
+
+// MethodFiles reads the named files from actor's copy of the workspace.
+type MethodFiles func(actor identity.ActorID, paths []string) ([]work.MethodFile, error)
+
+// WithReviewer configures the reviewer, which reads the workspace.
+func WithReviewer(spec agent.Spec) Option         { return func(s *Session) { s.reviewer = spec.Clone() } }
+func (s *Session) ReviewerSpec() agent.Spec       { return s.reviewer.Clone() }
+func (s *Session) ExperimenterSpec() agent.Spec   { return s.experimenter.Clone() }
+func (s *Session) WebResearcherSpec() agent.Spec  { return s.webResearcher.Clone() }
+func (s *Session) DeepResearcherSpec() agent.Spec { return s.deepResearcher.Clone() }
 
 // WithPublisher replaces the legacy host relay. It acknowledges required work records independently of the dispatcher.
 func WithPublisher(p func(conversation.Event) error) Option {
@@ -84,55 +127,140 @@ func WithPublisher(p func(conversation.Event) error) Option {
 
 func WithAdmission(g *admission.Gate) Option { return func(s *Session) { s.admission = g } }
 
+// WithIDs makes the work store issue ids from next; see work.WithIDs.
+func WithIDs(next func(prefix string) string) Option { return func(s *Session) { s.ids = next } }
+
+// Clock is the time the workflow schedules progress notices by. Timer fires
+// once the clock reaches at; stop releases it. The default is the wall clock;
+// a replay runs a virtual clock that reaches each recorded moment in order.
+type Clock interface {
+	Now() time.Time
+	Timer(at time.Time) (fired <-chan time.Time, stop func())
+}
+
+type wallClock struct{}
+
+func (wallClock) Now() time.Time { return time.Now() }
+func (wallClock) Timer(at time.Time) (<-chan time.Time, func()) {
+	t := time.NewTimer(max(time.Until(at), time.Nanosecond))
+	return t.C, func() { t.Stop() }
+}
+
+// WithClock schedules progress notices by clock instead of the wall clock.
+func WithClock(clock Clock) Option {
+	return func(s *Session) {
+		if clock != nil {
+			s.clock = clock
+		}
+	}
+}
+
 func New(ctx context.Context, c *conversation.Controller, implementor, auditor agent.Spec, options ...Option) *Session {
 	owner := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	s := &Session{Controller: c, Store: work.New(), implementor: implementor.Clone(), auditor: auditor.Clone(), roles: map[identity.ActorID]roster.Registration{}, progressConfig: DefaultWorkProgressReporting(), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	s := &Session{Controller: c, clock: wallClock{}, implementor: implementor.Clone(), auditor: auditor.Clone(), graph: roster.NewGraph(), progressConfig: DefaultWorkProgressReporting(), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	s.interruptDrain = make(chan chan error)
 	for _, option := range options {
 		option(s)
 	}
+	storeOptions := []work.Option{work.WithIDs(s.ids)}
 	if s.publish != nil {
-		s.Store = work.New(work.WithEvidenceLookup(s.evidenceLookup), work.WithReporter(work.ReporterFunc(func(_ context.Context, e work.Event) error { return s.publish(conversation.WorkEvent{Event: e}) })))
+		storeOptions = append(storeOptions, work.WithEvidenceLookup(s.evidenceLookup), work.WithReporter(work.ReporterFunc(func(_ context.Context, e work.Event) error { return s.publish(conversation.WorkEvent{Event: e}) })))
 	}
+	s.Store = work.New(storeOptions...)
 	if s.publish == nil {
 		s.events = inbox.New[conversation.Event]()
 	}
-	s.implementor.Tools = append(s.withWorkExecution(s.implementor.Tools), s.commonTools()...)
+	s.implementor.Tools = append(s.withHeldWrites(s.withWorkExecution(s.implementor.Tools)), s.commonTools()...)
 	s.implementor.Tools = append(s.implementor.Tools, s.progressTool())
-	s.implementor.Tools = append(s.implementor.Tools, tool.SubmitWork(func(ctx context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
-		v, e := s.SubmitWork(ctx, c.Actor, r)
-		return result(v, e)
-	}))
+	s.implementor.Tools = append(s.implementor.Tools, s.submitWorkTool())
 	s.auditor.Tools = append(s.withWorkExecution(s.auditor.Tools), s.commonTools()...)
 	s.auditor.Tools = append(s.auditor.Tools, s.progressTool())
-	s.auditor.Tools = append(s.auditor.Tools, tool.SubmitAudit(func(ctx context.Context, c tool.Call, r work.AuditRequest) (tool.Result, error) {
+	s.auditor.Tools = append(s.auditor.Tools, tool.Finishing(tool.SubmitAudit(func(ctx context.Context, c tool.Call, r work.AuditRequest) (tool.Result, error) {
 		v, e := s.SubmitAudit(ctx, c.Actor, r)
 		return result(v, e)
-	}))
-	if s.researcher.Provider != nil {
-		if s.deepResearch != nil {
-			s.researcher.Tools = append(s.researcher.Tools, s.deepResearchTool())
-		}
-		// Runs are the researcher's working evidence; everyone else reads the
-		// delivered brief and its ledger findings.
+	})))
+	if s.webResearcher.Provider != nil {
+		s.webResearcher.Tools = append(s.webResearcher.Tools, s.researchTools()...)
+	}
+	// Only the deep researcher runs the engine, and only it reads the runs:
+	// they are its working evidence; everyone else reads the delivered brief
+	// and its ledger findings.
+	if s.deepResearch == nil {
+		s.deepResearcher = agent.Spec{}
+	}
+	if s.deepResearcher.Provider != nil {
+		s.deepResearcher.Tools = append(s.deepResearcher.Tools, s.deepResearchTool())
 		if s.researchRead != nil {
-			s.researcher.Tools = append(s.researcher.Tools, s.researchRead)
+			s.deepResearcher.Tools = append(s.deepResearcher.Tools, s.researchRead)
 		}
-		if s.researchShell != nil {
-			s.researcher.Tools = append(s.researcher.Tools, s.researchDiagnosticTool())
-		}
-		s.researcher.Tools = append(s.researcher.Tools, s.commonTools()...)
-		s.researcher.Tools = append(s.researcher.Tools, s.progressTool(), tool.WaitForInput())
-		s.researcher.Tools = append(s.researcher.Tools, tool.SubmitResearch(func(ctx context.Context, c tool.Call, r work.SubmitResearchRequest) (tool.Result, error) {
-			v, e := s.SubmitResearch(ctx, c.Actor, r)
-			return result(v, e)
-		}))
+		s.deepResearcher.Tools = append(s.deepResearcher.Tools, s.researchTools()...)
+	}
+	if s.reviewer.Provider != nil {
+		s.reviewer.Tools = append(s.reviewer.Tools, s.researchTools()...)
+	}
+	if s.experimenter.Provider != nil {
+		s.experimenter.Tools = append(s.withWorkExecution(s.experimenter.Tools), s.experimentTools()...)
 	}
 	s.stopOwner = context.AfterFunc(owner, func() { _ = s.Close(context.Background()) })
 	go s.run()
 	return s
 }
+
+// experimentTools are what the experimenter uses to coordinate, record its
+// hypotheses and results, and deliver its conclusion.
+func (s *Session) experimentTools() []tool.Tool {
+	tools := append(s.commonTools(), s.progressTool(), tool.WaitForInput())
+	return append(tools,
+		tool.RecordHypothesis(func(ctx context.Context, c tool.Call, r work.RecordHypothesisRequest) (tool.Result, error) {
+			v, e := admitted(s, ctx, func(context.Context) (work.HypothesisReceipt, error) { return s.Store.RecordHypothesis(c.Actor, r) })
+			return result(v, e)
+		}),
+		tool.RecordResult(func(ctx context.Context, c tool.Call, r work.RecordResultRequest) (tool.Result, error) {
+			v, e := admitted(s, ctx, func(context.Context) (work.HypothesisReceipt, error) { return s.Store.RecordResult(c.Actor, r) })
+			return result(v, e)
+		}),
+		tool.Finishing(tool.SubmitExperiment(func(ctx context.Context, c tool.Call, a tool.SubmitExperimentInput) (tool.Result, error) {
+			v, e := s.SubmitExperiment(ctx, c.Actor, a)
+			return result(v, e)
+		})))
+}
+
+// researchTools are what every researcher uses to coordinate, record and
+// deliver its research.
+func (s *Session) researchTools() []tool.Tool {
+	tools := append(s.commonTools(), s.progressTool(), tool.WaitForInput())
+	return append(tools, tool.Finishing(tool.SubmitBrief(func(ctx context.Context, c tool.Call, r work.SubmitBriefRequest) (tool.Result, error) {
+		v, e := s.SubmitBrief(ctx, c.Actor, r)
+		return result(v, e)
+	})))
+}
+
+// A worker's successful submission ends its exchange: the submission is its
+// handoff, and a closing reply only repeated the work record.
+func (s *Session) submitWorkTool() tool.Tool {
+	return tool.Finishing(tool.SubmitWork(func(ctx context.Context, c tool.Call, r work.SubmitRequest) (tool.Result, error) {
+		v, e := s.SubmitWork(ctx, c.Actor, r)
+		return result(v, e)
+	}))
+}
+
+// ResolvedAssignmentReply reports whether m is an agent's reply to an
+// assignment that is no longer active for it: submitted, delivered, cancelled
+// or reassigned. The ledger already told the owner about that outcome, so the
+// reply is a handoff for the record rather than news. Both used to wake the
+// owner, and whichever came second cost an exchange that could only end in a
+// second "already done" reply.
+func (s *Session) ResolvedAssignmentReply(m message.Message) bool {
+	if m.Kind != message.Reply || m.ReplyTo == "" {
+		return false
+	}
+	s.mu.Lock()
+	b, ok := s.assignments[m.ReplyTo]
+	s.mu.Unlock()
+	return ok && b.recipient == m.From && !s.current(b)
+}
+
 func result(v any, err error) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
@@ -156,13 +284,14 @@ func (s *Session) commonTools() []tool.Tool {
 	}, s.progressReads...)
 }
 
-func (s *Session) RootTools() []tool.Tool {
+// CoordinationTools are the manager's planning, staffing and assignment tools.
+func (s *Session) CoordinationTools() []tool.Tool {
 	tools := append(s.commonTools(),
 		tool.WaitForInput(),
 		tool.CreateAgent(func(ctx context.Context, c tool.Call, r roster.CreateRequest) (tool.Result, error) {
 			v, e := s.CreateAgent(ctx, c.Actor, r)
 			return result(v, e)
-		}))
+		}, !s.autoAudit))
 	tools = append(tools, tool.PlanTools(func(ctx context.Context, c tool.Call, u work.PlanUpdate) (tool.Result, error) {
 		v, e := s.UpdatePlan(ctx, c.Actor, u)
 		return result(v, e)
@@ -175,10 +304,6 @@ func (s *Session) RootTools() []tool.Tool {
 		tool.CancelWork(func(ctx context.Context, c tool.Call, r work.CancelRequest) (tool.Result, error) {
 			v, e := s.CancelWork(ctx, c.Actor, r)
 			return result(v, e)
-		}),
-		tool.ReassignWork(func(ctx context.Context, c tool.Call, r work.ReassignRequest) (tool.Result, error) {
-			v, err := s.ReassignWork(ctx, c.Actor, r)
-			return result(v, err)
 		}),
 	)
 }
@@ -221,7 +346,7 @@ func (s *Session) failure(b binding, detail string) {
 	if s.interrupted.Load() || !s.current(b) {
 		return
 	}
-	_, err := s.Controller.Deliver(b.owner, message.Draft{To: b.owner, Kind: message.Notification, Content: fmt.Sprintf("Work %s delivery/execution needs attention for assignee %s: %s. Inspect work and reassign or cancel it; this is not an audit verdict.", b.work, b.recipient, detail)})
+	_, err := s.Controller.Deliver(b.owner, message.Draft{To: b.owner, Kind: message.Notification, Content: fmt.Sprintf("Work %s delivery/execution needs attention for assignee %s: %s. Inspect the work, then cancel it and assign it again; this is not an audit verdict.", b.work, b.recipient, detail)})
 	if err != nil {
 		s.emit(conversation.MessageEvent{Message: message.Message{From: b.owner, To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Work %s requires recovery: %s (owner notification failed: %v)", b.work, detail, err)}})
 	}
@@ -259,6 +384,7 @@ func (s *Session) run() {
 	delivered := map[message.MessageID]binding{}
 	failed := map[binding]bool{}
 	attempted := map[work.EventID]bool{}
+	audited := map[work.EventID]bool{}
 	published := map[work.EventID]bool{}
 	revoked := map[work.EventID]bool{}
 	forget := func(id work.EventID) {
@@ -279,23 +405,14 @@ func (s *Session) run() {
 			s.emit(conversation.DiagnosticEvent{Level: "error", Message: err.Error()})
 		}
 	}
-	timer := time.NewTimer(time.Hour)
-	if !timer.Stop() {
-		<-timer.C
-	}
-	defer timer.Stop()
 	var timerC <-chan time.Time
+	stopTimer := func() {}
+	defer func() { stopTimer() }()
 	resetTimer := func() {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		timerC = nil
+		stopTimer()
+		timerC, stopTimer = nil, func() {}
 		if due := queue.next(); !due.IsZero() {
-			timer.Reset(max(time.Until(due), time.Nanosecond))
-			timerC = timer.C
+			timerC, stopTimer = s.clock.Timer(due)
 		}
 	}
 
@@ -346,17 +463,24 @@ func (s *Session) run() {
 				seenChange[e.ID] = true
 				retire()
 			}
-			if e.Kind == work.WorkProgressReported || e.Kind == work.ResearchDelivered {
+			// Hypotheses and their results are the experimenter's working
+			// record; the owner hears about the experiment when it delivers.
+			if e.Kind == work.HypothesisRecorded || e.Kind == work.HypothesisResolved {
+				_ = s.Store.AcknowledgeEvent(e.ID)
+				forget(e.ID)
+				continue
+			}
+			if e.Kind == work.WorkProgressReported || e.Kind == work.BriefDelivered {
 				if attempted[e.ID] {
 					continue
 				}
 				attempted[e.ID] = true
-				if e.Kind == work.ResearchDelivered {
-					sendNotice(w.Owner, message.WorkProgressNotice{Covered: coverages[e.ID], Briefs: []message.ResearchBriefRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, BriefID: w.LatestResearchBriefID}}, Attention: true}, []work.EventID{e.ID})
+				if e.Kind == work.BriefDelivered {
+					sendNotice(w.Owner, message.WorkProgressNotice{Covered: coverages[e.ID], Briefs: []message.BriefRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, BriefID: w.LatestBriefID}}, Attention: true}, []work.EventID{e.ID})
 				} else if e.Actionable {
 					sendNotice(w.Owner, message.WorkProgressNotice{Reports: []message.ProgressReportRef{{WorkID: w.ID, AssignedAtRevision: w.AssignedAtRevision, WorkRevision: w.Revision, ReportID: w.LatestProgressReportID}}, Attention: true}, []work.EventID{e.ID})
 				} else if e.Change != nil && len(e.Change.ProgressReports) > 0 && len(e.Change.ProgressReports[0].Findings) > 0 {
-					queue.add(e, time.Now())
+					queue.add(e, s.clock.Now())
 				} else {
 					_ = s.Store.AcknowledgeEvent(e.ID)
 				}
@@ -383,6 +507,18 @@ func (s *Session) run() {
 					}
 				}
 			}
+			if e.Kind == work.ReviewRequested && s.autoAudit && !audited[e.ID] {
+				audited[e.ID] = true
+				if err := s.assignAudit(e.Work); err == nil {
+					_ = s.Store.AcknowledgeEvent(e.ID)
+					forget(e.ID)
+					continue
+				} else if !errors.Is(err, conversation.ErrInterrupted) {
+					// The owner hears of the submission as before and the
+					// user sees why no audit started.
+					s.emit(conversation.MessageEvent{Message: message.Message{To: message.User, Kind: message.Failure, Content: fmt.Sprintf("Could not assign an audit for %s: %v", w.ID, err)}})
+				}
+			}
 			assignment := e.Kind == work.WorkAssigned || e.Kind == work.WorkReassigned
 			if assignment {
 				b := binding{w.ID, w.AssignedAtRevision, w.Assignee, w.Owner}
@@ -404,6 +540,12 @@ func (s *Session) run() {
 					continue
 				}
 				delivered[receipt.MessageID] = b
+				s.mu.Lock()
+				if s.assignments == nil {
+					s.assignments = map[message.MessageID]binding{}
+				}
+				s.assignments[receipt.MessageID] = b
+				s.mu.Unlock()
 			} else if e.Kind != work.PlanChanged && (w.Owner != e.Actor || e.Kind == work.ReviewRequested) {
 				kind := message.Observation
 				if e.Actionable {

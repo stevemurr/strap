@@ -102,6 +102,7 @@ func (s *Session) finalize(a *closeAttempt) {
 	if s.telemetry != nil {
 		s.telemetry.wg.Wait()
 	}
+	s.serverMetrics.finish()
 	if err == nil {
 		s.mu.Lock()
 		s.outcome.CleanupAttempts++

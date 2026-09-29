@@ -55,7 +55,7 @@ func (f wakeRoot) Submit(_ context.Context, r provider.Request, _ provider.Obser
 				break
 			}
 		}
-		return operation("assign_implementation", map[string]any{"assignee": created.AgentID, "task": "do first", "scope": map[string]any{"plan_id": p.plan.ID, "step_ids": []work.StepID{p.plan.Steps[0].ID}}, "context": nil, "expected_output": nil})
+		return operation("assign_task", map[string]any{"kind": "implementation", "assignee": created.AgentID, "task": "do first", "scope": map[string]any{"plan_id": p.plan.ID, "step_ids": []work.StepID{p.plan.Steps[0].ID}}, "context": nil, "expected_output": nil})
 	case 4:
 		if err := json.Unmarshal([]byte(lastResult(r)), &p.w); err != nil {
 			return provider.Response{}, err
@@ -68,7 +68,7 @@ func (f wakeRoot) Submit(_ context.Context, r provider.Request, _ provider.Obser
 		var err error
 		switch {
 		case state == nil:
-			err = fmt.Errorf("root woke without a state block")
+			err = fmt.Errorf("manager woke without a state block")
 		case len(state.Plans) != 1 || state.Plans[0].PlanID != p.plan.ID || len(state.Plans[0].Steps) != 2:
 			err = fmt.Errorf("plan state: %+v", state.Plans)
 		case state.Plans[0].Steps[0].ReservedBy != p.w.ID || state.Plans[0].Steps[1].ReservedBy != "":
@@ -76,7 +76,7 @@ func (f wakeRoot) Submit(_ context.Context, r provider.Request, _ provider.Obser
 		case len(state.Owned) != 1 || state.Owned[0].WorkID != p.w.ID || state.Owned[0].Assignee != p.w.Assignee || state.Owned[0].Revision != p.w.Revision:
 			err = fmt.Errorf("owned state: %+v", state.Owned)
 		case len(state.Assigned) != 0:
-			err = fmt.Errorf("root listed as assignee: %+v", state.Assigned)
+			err = fmt.Errorf("manager listed as assignee: %+v", state.Assigned)
 		}
 		p.done <- err
 		return provider.Response{Content: "noted"}, nil
@@ -117,14 +117,12 @@ func TestAgentsWakeWithTheirCurrentStateBlock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cfg := testConfig(t, false)
-	s, err := harness.New(ctx, cfg, harness.Dependencies{Root: harness.AgentDependencies{Provider: wakeRoot{p}}, Implementor: harness.AgentDependencies{Provider: wakeWorker{p}}, Provider: textResponse("idle")})
+	s, err := harness.New(ctx, cfg, harness.Dependencies{Manager: harness.AgentDependencies{Provider: wakeRoot{p}}, Implementor: harness.AgentDependencies{Provider: wakeWorker{p}}, Provider: textResponse("idle")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err = s.Send(s.Root(), "Plan and assign one step"); err != nil {
-		t.Fatal(err)
-	}
+	startManager(t, s, "Plan and assign one step")
 	if err := await(t, p.done, "wake"); err != nil {
 		t.Fatal(err)
 	}

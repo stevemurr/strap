@@ -18,16 +18,16 @@ func TestRegistrationBoundaryAndLegacyUnknownRoles(t *testing.T) {
 			if e := p.Apply(eventlog.Record{Session: "session", Sequence: 1, Schema: schema, Data: eventlog.Data{Kind: "session_started", Payload: json.RawMessage(`{"id":"session"}`)}}); e != nil {
 				t.Fatal(e)
 			}
-			start, _ := eventcodec.EncodeEvent(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "root", Parent: "user", State: agent.Idle, StateRevision: 1}})
+			start, _ := eventcodec.EncodeEvent(conversation.AgentStarted{Agent: conversation.AgentInfo{ID: "manager", Parent: "user", State: agent.Idle, StateRevision: 1}})
 			if e := p.Apply(eventlog.Record{Session: "session", Sequence: 2, Schema: schema, Data: start}); e != nil {
 				t.Fatal(e)
 			}
-			base, _ := p.AgentInspection("root")
+			base, _ := p.AgentInspection("manager")
 			before := p.Enrich(base, nil)
 			if before.Role != roster.Unknown || before.Registered || len(before.EligibleWorkKinds) != 0 {
 				t.Fatal("inferred legacy role", before)
 			}
-			fact := conversation.AgentRegistered{Registration: roster.Registration{AgentID: "root", Parent: "user", Role: roster.Root}}
+			fact := conversation.AgentRegistered{Registration: roster.Registration{AgentID: "manager", Parent: "user", Role: roster.Manager}}
 			data, _ := eventcodec.EncodeEvent(fact)
 			record := eventlog.Record{Session: "session", Sequence: 3, Schema: 4, Data: data}
 			decoded, e := eventcodec.DecodeEvent(record)
@@ -38,7 +38,7 @@ func TestRegistrationBoundaryAndLegacyUnknownRoles(t *testing.T) {
 				t.Fatal(e)
 			}
 			after := p.Enrich(base, nil)
-			if after.Role != roster.Root || !after.Registered {
+			if after.Role != roster.Manager || !after.Registered {
 				t.Fatal(after)
 			}
 			record.Sequence++

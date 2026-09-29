@@ -56,7 +56,7 @@ func (p *Projector) applyResearch(rec eventlog.Record, framed bool) (func(), err
 		return nil, errors.New("research record binding mismatch")
 	}
 	key := fmt.Sprintf("%s/%d", e.Binding.WorkID, e.Binding.Assignment)
-	if p.bindings[key] != identity.ActorID(e.Binding.Actor) || p.workViews[work.ID(e.Binding.WorkID)].Kind != work.Research || p.registrations[identity.ActorID(e.Binding.Actor)].Role != roster.Researcher {
+	if p.bindings[key] != identity.ActorID(e.Binding.Actor) || p.workViews[work.ID(e.Binding.WorkID)].Kind != work.DeepResearch || p.registrations[identity.ActorID(e.Binding.Actor)].Role != roster.DeepResearcher {
 		return nil, errors.New("research without accepted assignment")
 	}
 	v, exists := p.researchRuns[e.RunID]

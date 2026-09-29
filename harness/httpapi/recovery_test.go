@@ -39,7 +39,7 @@ func TestHTTPReconnectRecoversActiveOutputAndMatchesSDK(t *testing.T) {
 	server := httptest.NewServer(service)
 	defer server.Close()
 	base := "/sessions/" + session.ID()
-	_, err := session.Send(session.Root(), "go")
+	_, err := session.Send(session.Manager(), "go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,12 +71,12 @@ func TestHTTPReconnectRecoversActiveOutputAndMatchesSDK(t *testing.T) {
 		}
 	}
 	response.Body.Close()
-	id := identity.OutputID{Agent: session.Root(), Call: 1}
+	id := identity.OutputID{Agent: session.Manager(), Call: 1}
 	direct, err := session.InspectOutput(context.Background(), id)
 	if err != nil || direct.Output.Status != agent.OutputActive {
 		t.Fatal(direct, err)
 	}
-	endpoint := fmt.Sprintf("%s/outputs/%s/1", base, session.Root())
+	endpoint := fmt.Sprintf("%s/outputs/%s/1", base, session.Manager())
 	w := request(t, service, "GET", endpoint, nil)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())

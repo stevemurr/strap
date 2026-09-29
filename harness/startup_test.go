@@ -125,7 +125,7 @@ func TestSessionWritesItsConfiguredTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Send(s.Root(), "hello"); err != nil {
+	if _, err := s.Send(s.Manager(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.FlushEvents(ctx); err != nil {

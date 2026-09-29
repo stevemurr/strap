@@ -3,10 +3,8 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/stevemurr/strap/tool"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +14,8 @@ import (
 	"github.com/stevemurr/strap/harness"
 	"github.com/stevemurr/strap/harness/eventcodec"
 	"github.com/stevemurr/strap/provider"
+	"github.com/stevemurr/strap/roster"
+	"github.com/stevemurr/strap/work"
 )
 
 type editScript struct {
@@ -45,18 +45,15 @@ func TestDurableToolDiagnosticsCorrelateRepeatedProviderIDs(t *testing.T) {
 	cfg.Dir = dir
 	cfg.Web = nil
 	cfg.Events.JSONLPath = path
-	// The root has no write tools; lend it the file editors this script drives.
-	files, err := tool.NewFiles(tool.FilesConfig{Dir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	writers := slices.DeleteFunc(files.Tools(), func(t tool.Tool) bool { n := t.Definition().Name; return n != "write_file" && n != "edit_file" })
-	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: p, Root: harness.AgentDependencies{Tools: writers}})
+	// File edits belong to implementors; the script drives one through a
+	// real assignment.
+	s, err := harness.New(context.Background(), cfg, harness.Dependencies{Provider: textResponse("ok"), Implementor: harness.AgentDependencies{Provider: p}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Dispose(context.Background())
-	if _, err = s.Send(s.Root(), "run"); err != nil {
+	impl := createWorker(t, s, roster.Implementor)
+	if _, err = s.AssignWork(context.Background(), s.Manager(), work.AssignmentRequest{Kind: work.Implementation, Assignee: impl, Task: "edit"}); err != nil {
 		t.Fatal(err)
 	}
 	if result := await(t, p.modelError, "script did not reach error response"); !strings.Contains(result, "old text was not found") || strings.Contains(result, "sha256") || strings.Contains(result, "original") {
@@ -84,7 +81,11 @@ func TestDurableToolDiagnosticsCorrelateRepeatedProviderIDs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a := v.(conversation.ToolEvent).Activity
+		tev := v.(conversation.ToolEvent)
+		if tev.Agent != impl {
+			continue
+		}
+		a := tev.Activity
 		if a.InvocationID == "" {
 			t.Fatal("missing invocation identity")
 		}

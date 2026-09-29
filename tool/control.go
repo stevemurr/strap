@@ -4,7 +4,13 @@ import "context"
 
 type ControlKind string
 
-const YieldToInbox ControlKind = "yield_to_inbox"
+const (
+	YieldToInbox ControlKind = "yield_to_inbox"
+	// FinishOnSuccess ends the exchange once the call succeeds, after the rest
+	// of its batch: a worker's submission is its handoff, and the closing
+	// reply it used to write repeated what the work record already says.
+	FinishOnSuccess ControlKind = "finish_on_success"
+)
 
 type ControlTool interface {
 	Tool
@@ -14,6 +20,26 @@ type inboxWait struct{ Func[struct{}] }
 
 func (inboxWait) Control() ControlKind     { return YieldToInbox }
 func (t inboxWait) snapshot() preparedTool { return t }
+
+// Finishing marks t as ending its agent's exchange when it succeeds.
+func Finishing(t Tool) Tool { return finishing{t} }
+
+type finishing struct{ Tool }
+
+func (finishing) Control() ControlKind { return FinishOnSuccess }
+func (f finishing) InputContract() Contract {
+	if typed, ok := f.Tool.(interface{ InputContract() Contract }); ok {
+		return typed.InputContract()
+	}
+	return Contract{}
+}
+func (f finishing) Validate() error { return ValidateTool(f.Tool) }
+func (f finishing) BookkeepingParameters() []string {
+	if b, ok := f.Tool.(interface{ BookkeepingParameters() []string }); ok {
+		return b.BookkeepingParameters()
+	}
+	return nil
+}
 
 // WaitForInput grants explicit runtime control; model text and ordinary results
 // cannot cause a yield. The agent enforces the sole-call batch contract.

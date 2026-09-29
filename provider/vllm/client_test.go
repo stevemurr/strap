@@ -191,3 +191,32 @@ func TestServerRejectionAndCancellationArePreserved(t *testing.T) {
 		t.Fatal("cancelled request reached server")
 	}
 }
+
+// Tools are strict by default; LooseTools sends them without strict.
+func TestLooseToolsOmitStrict(t *testing.T) {
+	for _, loose := range []bool{false, true} {
+		var strict []any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Tools []struct {
+					Function map[string]any `json:"function"`
+				} `json:"tools"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			for _, tool := range body.Tools {
+				strict = append(strict, tool.Function["strict"])
+			}
+			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+		}))
+		client, err := vllm.New(vllm.Config{BaseURL: server.URL, Model: "m", LooseTools: loose})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.Submit(context.Background(), provider.Request{Agent: "a", Messages: []provider.Message{{Role: "user", Content: content.Text("hi")}},
+			Tools: []provider.ToolDefinition{{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)}}}, nil)
+		server.Close()
+		if err != nil || len(strict) != 1 || (loose && strict[0] != nil) || (!loose && strict[0] != true) {
+			t.Fatalf("loose %v: strict %v, %v", loose, strict, err)
+		}
+	}
+}

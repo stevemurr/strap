@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -152,14 +151,18 @@ func (m *Manager) Diagnostics(ctx context.Context, q DiagnosticQuery) (Page, err
 				meta.Freshness = "unknown"
 				continue
 			}
-			d, err := m.syncDocument(ctx, s, path, lang)
+			d, err := m.syncDocumentVersion(ctx, s, path, lang, q.Resync)
 			if err != nil {
 				appendIssue(&meta, err)
 				meta.Freshness = "unknown"
 				continue
 			}
 			if waitUntil.IsZero() {
-				waitUntil = time.Now().Add(milliseconds(m.config.DiagnosticTimeoutMS))
+				wait := milliseconds(m.config.DiagnosticTimeoutMS)
+				if q.Wait > 0 {
+					wait = q.Wait
+				}
+				waitUntil = time.Now().Add(wait)
 			}
 			wait, stop := context.WithDeadline(ctx, waitUntil)
 			set, known := m.documentDiagnostics(wait, s, path, d)
@@ -253,61 +256,6 @@ func (m *Manager) documentDiagnostics(ctx context.Context, s *instance, path str
 		case <-c.changed:
 		}
 	}
-}
-
-// CachedSummary never launches or queries a server. It can be appended at the
-// next tool boundary without blocking editing on language analysis.
-func (m *Manager) CachedSummary(ctx context.Context) (string, error) {
-	if err := m.acquire(ctx); err != nil {
-		return "", err
-	}
-	defer m.release()
-	epoch := m.epoch.Load()
-	lines := []string{}
-	for _, s := range m.instances {
-		c := s.client
-		if c == nil || !c.alive() {
-			continue
-		}
-		sets, _ := c.diagnosticSnapshot()
-		for uri, set := range sets {
-			if ctx.Err() != nil {
-				break
-			}
-			path, err := uriPath(uri)
-			if err != nil {
-				continue
-			}
-			d := s.documents[path]
-			if d == nil || set.Version == nil || *set.Version != d.version || set.Epoch != epoch {
-				continue
-			}
-			text, err := textFile(path, m.config.MaxFileBytes)
-			if err != nil || digest([]byte(text)) != d.hash {
-				continue
-			}
-			for _, item := range set.Items {
-				if item.Severity != 1 && item.Severity != 2 {
-					continue
-				}
-				lines = append(lines, m.display(path)+":"+strconv.Itoa(item.Range.Start.Line+1)+": "+cut(item.Message, 256))
-				if len(lines) >= 5 {
-					break
-				}
-			}
-			if len(lines) >= 5 {
-				break
-			}
-		}
-		if len(lines) >= 5 {
-			break
-		}
-	}
-	if epoch != m.epoch.Load() {
-		return "", nil
-	}
-	sort.Strings(lines)
-	return strings.Join(lines, "\n"), nil
 }
 
 // RefreshChanged drains coalesced host hints and refreshes already opened files.

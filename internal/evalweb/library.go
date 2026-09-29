@@ -70,10 +70,14 @@ func (r *Runner) configured(request newEval) (*Runner, error) {
 		}
 		copy.Config.Model = resolved
 		if request.ApplyToRoles {
-			copy.Config.Root.Model = nil
+			copy.Config.Agent.Model = nil
+			copy.Config.Manager.Model = nil
 			copy.Config.Implementor.Model = nil
 			copy.Config.Auditor.Model = nil
-			copy.Config.Researcher.Model = nil
+			copy.Config.WebResearcher.Model = nil
+			copy.Config.DeepResearcher.Model = nil
+			copy.Config.Experimenter.Model = nil
+			copy.Config.Reviewer.Model = nil
 		}
 	}
 	if request.Flags != nil {
@@ -94,7 +98,7 @@ func (r *Runner) flags() HarnessFlags {
 func (r *Runner) metadata(name string, now time.Time) RunMetadata {
 	flags := r.flags()
 	m := RunMetadata{Name: name, StartedAt: now, Commit: r.Commit, Profile: r.Profile, Model: r.Config.Model, Flags: &flags, Status: "running",
-		Roles: map[string]*harness.ModelConfig{"root": r.Config.Root.Model, "implementor": r.Config.Implementor.Model, "auditor": r.Config.Auditor.Model, "researcher": r.Config.Researcher.Model}}
+		Roles: map[string]*harness.ModelConfig{"agent": r.Config.Agent.Model, "manager": r.Config.Manager.Model, "implementor": r.Config.Implementor.Model, "auditor": r.Config.Auditor.Model, "web_researcher": r.Config.WebResearcher.Model, "deep_researcher": r.Config.DeepResearcher.Model, "experimenter": r.Config.Experimenter.Model, "reviewer": r.Config.Reviewer.Model}}
 	source := r.BuildContext
 	if source == "" {
 		source = filepath.Dir(filepath.Dir(r.Ladder))

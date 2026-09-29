@@ -19,7 +19,9 @@ func WithEvidenceLookup(f EvidenceLookup) Option { return func(s *Store) { s.evi
 func (s *Store) NewExecutionRef() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.mint("execution:")
+	ref := s.mint("execution:")
+	s.order(ref)
+	return ref
 }
 
 // CanReadExecution reports whether actor may read the runs bound to work id.

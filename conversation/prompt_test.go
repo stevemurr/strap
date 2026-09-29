@@ -43,14 +43,14 @@ func TestConfiguredPromptAndAssignmentStaySeparateAndCreationIsUnavailable(t *te
 	}
 	incoming := delegated.request.Messages[1]
 	wantAssignment := work.Work{Task: "first task", Context: `a quoted "value"`, ExpectedOutput: "one line"}
-	if incoming.Envelope == nil || incoming.Envelope.Work == nil || *incoming.Envelope.Work != wantAssignment {
+	if incoming.Envelope == nil || incoming.Envelope.Work == nil || !reflect.DeepEqual(*incoming.Envelope.Work, wantAssignment) {
 		t.Fatalf("lost assignment: %+v", incoming)
 	}
 	var wire message.Message
 	if err := json.Unmarshal([]byte(incoming.Content.Text()), &wire); err != nil {
 		t.Fatal(err)
 	}
-	if wire.Content != "" || wire.Work == nil || *wire.Work != wantAssignment {
+	if wire.Content != "" || wire.Work == nil || !reflect.DeepEqual(*wire.Work, wantAssignment) {
 		t.Fatalf("bad model payload: %+v", wire)
 	}
 
@@ -141,7 +141,7 @@ func TestAssignmentEventsAndProviderSnapshotsAreIndependent(t *testing.T) {
 func TestApplicationSnapshotsCreationSpec(t *testing.T) {
 	m := &controlledProvider{calls: make(chan call, 16)}
 	c := emptyConversation(t)
-	spec := agent.Spec{Provider: m, Prompt: prompt.Prompt{Role: "Execute", Instructions: []string{"original"}}, Tools: []tool.Tool{tool.SendMessage()}}
+	spec := agent.Spec{Provider: m, Prompt: prompt.Prompt{Role: "Execute", Instructions: []string{"original"}}, Tools: []tool.Tool{tool.SendMessage(nil)}}
 	create := creationTool(c, spec)
 	spec.Prompt.Instructions[0] = "modified"
 	spec.Tools[0] = nil

@@ -78,7 +78,7 @@ func TestSharedCreationToolUsesExecutingAgentAndConfiguredSpec(t *testing.T) {
 	callers := &controlledProvider{calls: make(chan call, 16)}
 	workers := &controlledProvider{calls: make(chan call, 16)}
 	create := creationTool(c, agent.Spec{Provider: workers, Prompt: prompt.Prompt{Role: "Configured execution prompt"}})
-	spec := agent.Spec{Provider: callers, Prompt: prompt.Prompt{Role: "Calling agent"}, Tools: []tool.Tool{create, tool.SendMessage()}}
+	spec := agent.Spec{Provider: callers, Prompt: prompt.Prompt{Role: "Calling agent"}, Tools: []tool.Tool{create, tool.SendMessage(nil)}}
 	root, err := c.CreateAgent(message.User, spec)
 	if err != nil {
 		t.Fatal(err)
@@ -156,8 +156,10 @@ func TestConcurrentRootCreationAndClose(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
-	if len(c.Agents()) != 1 {
-		t.Fatal("concurrent creation did not establish exactly one root")
+	// Every user-parented agent is admitted; the first becomes the root.
+	root, agents := c.Root(), c.Agents()
+	if len(agents) != 12 || root == "" || agents[0].ID != root || agents[0].Parent != message.User {
+		t.Fatalf("concurrent creation: root %q, agents %+v", root, agents)
 	}
 	// Exercise admission against Close for an already established conversation.
 	for range 12 {

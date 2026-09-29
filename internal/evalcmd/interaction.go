@@ -81,6 +81,9 @@ func interactionOptions(args []string, stderr io.Writer) (interaction.Options, e
 	if fs.NArg() != 0 {
 		return opts, fmt.Errorf("unexpected interaction run arguments: %s", strings.Join(fs.Args(), " "))
 	}
+	// The scenarios exercise the team's coordination protocol: a manager
+	// assigning audits to its workers.
+	opts.Config.Solo = false
 	opts.Mode = interaction.Mode(*mode)
 	if opts.Mode != interaction.Scripted && opts.Mode != interaction.Live {
 		return opts, fmt.Errorf("invalid mode %q: use scripted or live", *mode)
