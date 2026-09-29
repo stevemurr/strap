@@ -79,7 +79,7 @@ var agentPrompt = prompt.Prompt{Role: "You are a coding agent. The user talks to
 }}
 
 // agentWebInstruction joins the agent's prompt when the session has the web.
-const agentWebInstruction = "What you remember about libraries, versions, APIs and current events may be out of date: look such facts up with web_search and open_url, and cite the pages you used."
+const agentWebInstruction = "What you remember about libraries, versions, APIs and current events may be out of date: look such facts up with web_search and open_url, and cite the pages you used. Searches and page reads in one response run at the same time, so make every one you already know you need in the same response."
 
 // The debugger exists only in a debug session. It sits beside the manager:
 // the user asks it about the agent tree, and it reads any agent, plan or piece
