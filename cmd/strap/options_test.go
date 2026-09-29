@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +116,46 @@ func TestToolAndRecordingOptions(t *testing.T) {
 	o, err = parseOptions(append(args, "-web=false"), io.Discard)
 	if err != nil || o.config.Web != nil {
 		t.Fatalf("web disable: %+v, %v", o, err)
+	}
+}
+
+// The search API key comes from the environment for one run, else from this
+// host's key file, which other users must not be able to read.
+func TestTavilyKeyFile(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("TAVILY_API_KEY", "")
+	args := []string{"-config", catalogPath, "-C", t.TempDir()}
+	o, err := parseOptions(args, io.Discard)
+	if err != nil || o.config.Web.TavilyAPIKey != "" {
+		t.Fatalf("no key file: %q, %v", o.config.Web.TavilyAPIKey, err)
+	}
+	path := filepath.Join(config, "strap", "tavily_key.txt")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("tvly-host\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if o, err = parseOptions(args, io.Discard); err != nil || o.config.Web.TavilyAPIKey != "tvly-host" {
+		t.Fatalf("key file: %q, %v", o.config.Web.TavilyAPIKey, err)
+	}
+	// NewWeb reads the environment when the configuration names no key.
+	t.Setenv("TAVILY_API_KEY", "tvly-run")
+	if o, err = parseOptions(args, io.Discard); err != nil || o.config.Web.TavilyAPIKey != "" {
+		t.Fatalf("environment did not take precedence: %q, %v", o.config.Web.TavilyAPIKey, err)
+	}
+	t.Setenv("TAVILY_API_KEY", "")
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseOptions(args, io.Discard); err == nil || !strings.Contains(err.Error(), "chmod 600") || strings.Contains(err.Error(), "tvly-host") {
+		t.Fatalf("readable key file: %v", err)
+	}
+	if _, err := parseOptions(append(args, "-web=false"), io.Discard); err != nil {
+		t.Fatalf("read the key file with web off: %v", err)
 	}
 }

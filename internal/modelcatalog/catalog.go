@@ -35,6 +35,20 @@ type profile struct {
 	Generation vllm.Generation `json:"generation"`
 }
 
+// Dir is this host's strap configuration directory: $XDG_CONFIG_HOME/strap, or
+// ~/.config/strap.
+func Dir() (string, error) {
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "strap"), nil
+}
+
 // Resolve resolves a model profile and returns the selected profile's name.
 // An empty path discovers $XDG_CONFIG_HOME/strap/models.json or
 // ~/.config/strap/models.json and falls back to the bundled catalog; an
@@ -45,15 +59,11 @@ type profile struct {
 func Resolve(path, profile string, timeout time.Duration) (harness.ModelConfig, string, error) {
 	explicit := path != ""
 	if !explicit {
-		dir := os.Getenv("XDG_CONFIG_HOME")
-		if dir == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return harness.ModelConfig{}, "", err
-			}
-			dir = filepath.Join(home, ".config")
+		dir, err := Dir()
+		if err != nil {
+			return harness.ModelConfig{}, "", err
 		}
-		path = filepath.Join(dir, "strap", "models.json")
+		path = filepath.Join(dir, "models.json")
 	}
 	data, err := os.ReadFile(path)
 	if !explicit && errors.Is(err, os.ErrNotExist) {

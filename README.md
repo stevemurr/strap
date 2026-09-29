@@ -782,11 +782,14 @@ API cannot read, and one the agent asks to render because its extracted text
 looks incomplete, such as a discussion that loads with JavaScript. Both tools
 appear as ordinary tool activity and agent commentary in the console.
 
-Set the key in the environment; it is never written to a config file, logged, or
-quoted in an error:
+Keep this host's key in a file beside the model catalog, readable only by you;
+`TAVILY_API_KEY` in the environment overrides it for a run. Strap only reads the
+key: it is never written, logged, or quoted in an error, and a key file other
+users can read is refused at startup:
 
 ```sh
-export TAVILY_API_KEY=tvly-...
+mkdir -p ~/.config/strap   # or $XDG_CONFIG_HOME/strap
+(umask 077 && printf %s tvly-... > ~/.config/strap/tavily_key.txt)
 ```
 
 Search works on every platform this builds for. Scraping a public results page

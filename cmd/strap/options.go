@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/stevemurr/strap/harness"
+	"github.com/stevemurr/strap/internal/modelcatalog"
 	"github.com/stevemurr/strap/internal/modelflags"
 )
 
@@ -58,9 +62,48 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if !*webEnabled {
 		o.config.Web = nil
 		o.config.DeepResearch.Enabled = false
+	} else if os.Getenv("TAVILY_API_KEY") == "" {
+		// The environment names a key for one run; the file is this host's.
+		if o.config.Web.TavilyAPIKey, err = tavilyKey(); err != nil {
+			return options{}, err
+		}
 	}
 	if err := model.Languages(); err != nil {
 		return options{}, err
 	}
 	return o, nil
+}
+
+// tavilyKeyFile holds this host's search API key beside the model catalog, so
+// a host need not export TAVILY_API_KEY for every run. Strap only reads it.
+const tavilyKeyFile = "tavily_key.txt"
+
+// tavilyKey reads the key file; a missing file is no key. A file other users
+// can read is refused, as ssh refuses a readable private key.
+func tavilyKey() (string, error) {
+	dir, err := modelcatalog.Dir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, tavilyKeyFile)
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("search API key: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("search API key: %w", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("search API key %s is readable by other users; chmod 600 it", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 4096))
+	if err != nil {
+		return "", fmt.Errorf("search API key: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
